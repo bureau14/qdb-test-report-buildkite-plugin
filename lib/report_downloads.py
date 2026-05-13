@@ -2,25 +2,42 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-
-try:  # Support both package imports in tests and direct-script imports in Buildkite.
-    from .object_store import ObjectAuth, StoreConfig, download_file, key_join, list_objects
-except ImportError:  # pragma: no cover - direct script path
-    from object_store import ObjectAuth, StoreConfig, download_file, key_join, list_objects
+from object_store import ObjectAuth, StoreConfig, download_file, key_join, list_objects
 
 
 @dataclass(frozen=True)
-class DownloadedXml:
+class JobXmlObject:
     variant: str
     job_id: str
     key: str
     relative_path: str
     size_bytes: int
-    local_path: Path
 
     @property
     def object_relative_path(self) -> str:
         return key_join(self.variant, self.job_id, self.relative_path)
+
+
+@dataclass(frozen=True)
+class DownloadedJobXml:
+    object: JobXmlObject
+    local_path: Path
+
+    @property
+    def variant(self) -> str:
+        return self.object.variant
+
+    @property
+    def job_id(self) -> str:
+        return self.object.job_id
+
+    @property
+    def relative_path(self) -> str:
+        return self.object.relative_path
+
+    @property
+    def object_relative_path(self) -> str:
+        return self.object.object_relative_path
 
 
 def build_job_xml_prefix(
@@ -61,7 +78,7 @@ def attempted_job_xml_prefixes(
     ]
 
 
-def _xml_metadata_from_key(*, variant: str, prefix: str, key: str, size_bytes: int) -> DownloadedXml | None:
+def _xml_metadata_from_key(*, variant: str, prefix: str, key: str, size_bytes: int) -> JobXmlObject | None:
     if not key.endswith(".xml"):
         return None
     relative_to_jobs = key[len(prefix) :].lstrip("/") if key.startswith(prefix) else key
@@ -71,13 +88,12 @@ def _xml_metadata_from_key(*, variant: str, prefix: str, key: str, size_bytes: i
     job_id, marker, relative_path = parts
     if marker != "xml" or not job_id or not relative_path:
         return None
-    return DownloadedXml(
+    return JobXmlObject(
         variant=variant,
         job_id=job_id,
         key=key,
         relative_path=relative_path,
         size_bytes=size_bytes,
-        local_path=Path(),
     )
 
 
@@ -91,10 +107,10 @@ def find_job_xml_objects(
     git_ref: str,
     build_id: str,
     variants: list[str],
-) -> list[DownloadedXml]:
-    """Find raw JUnit XML objects uploaded by job-scope report steps."""
+) -> list[JobXmlObject]:
+    """Find JUnit XML objects uploaded by job-scope report steps."""
 
-    found: list[DownloadedXml] = []
+    found: list[JobXmlObject] = []
     for variant in variants:
         prefix = build_job_xml_prefix(
             destination_prefix=destination_prefix,
@@ -126,7 +142,7 @@ def collect_full_scope_xml(
     build_id: str,
     variants: list[str],
     output_dir: Path,
-) -> list[DownloadedXml]:
+) -> list[DownloadedJobXml]:
     """Download job-scope XML into a full-scope staging directory."""
 
     objects = find_job_xml_objects(
@@ -139,6 +155,7 @@ def collect_full_scope_xml(
         build_id=build_id,
         variants=variants,
     )
+    # if no files found, raise an error with the attempted prefixes for easier debugging of misconfigurations or missing uploads
     if not objects:
         prefixes = attempted_job_xml_prefixes(
             bucket=bucket,
@@ -154,9 +171,9 @@ def collect_full_scope_xml(
             "Attempted prefixes:\n" + details
         )
 
-    downloaded: list[DownloadedXml] = []
+    downloaded: list[DownloadedJobXml] = []
     for obj in objects:
         local_path = Path(output_dir) / obj.variant / obj.job_id / obj.relative_path
         download_file(cfg, auth, bucket, obj.key, local_path)
-        downloaded.append(replace(obj, local_path=local_path))
+        downloaded.append(DownloadedJobXml(object=obj, local_path=local_path))
     return downloaded

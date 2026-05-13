@@ -1,15 +1,11 @@
 from dataclasses import dataclass
-try:  # Support package imports in tests and direct-script imports in Buildkite.
-    from .object_store import key_join
-except ImportError:  # pragma: no cover
-    from object_store import key_join
+from object_store import key_join
 
 @dataclass(frozen=True)
 class ReportLocation:
     base_prefix: str
     html_key: str
     summary_key: str
-    log_key: str
     xml_prefix: str
 
 
@@ -53,6 +49,5 @@ def build_report_location(
         base_prefix=base_prefix,
         html_key=key_join(base_prefix, "index.html"),
         summary_key=key_join(base_prefix, "summary.json"),
-        log_key=key_join(base_prefix, "generation.log"),
         xml_prefix=key_join(base_prefix, "xml")
     )

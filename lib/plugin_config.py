@@ -19,14 +19,10 @@ class PluginConfig:
     build_id: str
     job_id: str | None
     build_url: str | None
-    commit: str | None
-    branch: str | None
     platforms: list[PlatformConfig]
     only_failures: bool
-    upload_xml: bool
     annotate: bool
     fail_on_status: str
-    dry_run: bool
 
 
 def _get_env(key: str, default: str | None = None) -> str | None:
@@ -38,6 +34,16 @@ def _get_bool_env(key: str, default: bool) -> bool:
     if val is None:
         return default
     return val.lower() in ("true", "on", "1")
+
+
+def resolve_buildkite_git_ref() -> str:
+    tag = _get_env("BUILDKITE_TAG")
+    if tag:
+        return f"refs/tags/{tag}"
+    branch = _get_env("BUILDKITE_BRANCH")
+    if branch:
+        return f"refs/heads/{branch}"
+    raise ValueError("missing Buildkite git ref: expected BUILDKITE_TAG or BUILDKITE_BRANCH")
 
 
 def load_plugin_config() -> PluginConfig:
@@ -80,24 +86,14 @@ def load_plugin_config() -> PluginConfig:
         
     job_id = _get_env("BUILDKITE_JOB_ID")
     build_url = _get_env("BUILDKITE_BUILD_URL")
-    commit = _get_env("BUILDKITE_COMMIT")
-    branch = _get_env("BUILDKITE_BRANCH")
-    
-    git_ref = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_GIT_REF")
-    if not git_ref:
-        if branch:
-            git_ref = f"refs/heads/{branch}"
-        else:
-            raise ValueError("missing required config: git_ref (BUILDKITE_BRANCH and custom GIT_REF not set)")
+
+    git_ref = resolve_buildkite_git_ref()
 
     only_failures = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_ONLY_FAILURES", False)
-    upload_xml = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_UPLOAD_XML", True)
     annotate = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_ANNOTATE", True)
     
     default_fail_on_status = "never" if scope == "job" else "failed"
     fail_on_status = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_FAIL_ON_STATUS", default_fail_on_status)
-    
-    dry_run = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_DRY_RUN", False)
 
     # Validation
     if scope == "job":
@@ -116,12 +112,8 @@ def load_plugin_config() -> PluginConfig:
         build_id=build_id,
         job_id=job_id,
         build_url=build_url,
-        commit=commit,
-        branch=branch,
         platforms=platforms,
         only_failures=only_failures,
-        upload_xml=upload_xml,
         annotate=annotate,
         fail_on_status=fail_on_status,
-        dry_run=dry_run,
     )

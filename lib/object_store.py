@@ -9,18 +9,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-try:  # boto3 is installed by the plugin venv in Buildkite; keep unit tests lightweight.
-    import boto3
-    from boto3.s3.transfer import TransferConfig
-    from botocore.config import Config
-    from botocore.exceptions import ClientError
-except ModuleNotFoundError:  # pragma: no cover - exercised only when optional deps are absent.
-    boto3 = None  # type: ignore[assignment]
-    Config = None  # type: ignore[assignment]
-    TransferConfig = None  # type: ignore[assignment]
-
-    class ClientError(Exception):  # type: ignore[no-redef]
-        pass
+import boto3
+from boto3.s3.transfer import TransferConfig
+from botocore.config import Config
+from botocore.exceptions import ClientError
 
 
 READ_TIMEOUT = 300
@@ -89,11 +81,6 @@ def log(msg: str) -> None:
     print(f"[test-report] {msg}", file=sys.stderr)
 
 
-def _require_boto3() -> None:
-    if boto3 is None or Config is None:
-        die("boto3/botocore are required for object-store operations; run hooks/post-checkout or install lib/requirements.txt")
-
-
 def _with_retry(fn, description: str):
     """Execute fn() with exponential backoff for transient object-store errors."""
 
@@ -115,7 +102,6 @@ def _with_retry(fn, description: str):
 def aws_clients():
     """Return (s3, ssm) clients for config resolution and listing."""
 
-    _require_boto3()
     session = boto3.session.Session()
     region_name = os.environ.get("AWS_DEFAULT_REGION", "eu-west-1")
     return (
@@ -276,7 +262,6 @@ def resolve_object_auth(ssm, cfg: StoreConfig, permission: str) -> ObjectAuth:
 def _s3_client(cfg: StoreConfig, auth: ObjectAuth):
     """Create an S3 client for one operation/thread."""
 
-    _require_boto3()
     client_cfg = Config(
         read_timeout=READ_TIMEOUT,
         connect_timeout=CONNECT_TIMEOUT,
@@ -354,7 +339,7 @@ def download_file(
     path.parent.mkdir(parents=True, exist_ok=True)
 
     def _do():
-        transfer_config = TransferConfig(max_concurrency=concurrency) if TransferConfig is not None else None
+        transfer_config = TransferConfig(max_concurrency=concurrency)
         return _s3_client(cfg, auth).download_file(bucket, key, str(path), Config=transfer_config)
 
     _with_retry(_do, key)

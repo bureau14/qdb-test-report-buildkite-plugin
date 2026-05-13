@@ -1,7 +1,5 @@
-import json
 import subprocess
 import sys
-from pathlib import Path
 
 def build_annotation_body(title: str, summary: dict, html_url: str) -> str:
     """
@@ -13,8 +11,6 @@ def build_annotation_body(title: str, summary: dict, html_url: str) -> str:
     skipped = counts.get("SKIPPED", 0)
     passed = counts.get("SUCCESSFUL", 0)
     
-    # 31770 tests per target, 2 targets, 2 failed, 254 skipped
-    # Adjust based on summary data
     logical_tests = summary.get("logical_tests", 0)
     targets = summary.get("targets", 1)
     

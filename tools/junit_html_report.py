@@ -35,8 +35,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Top-level report execution name; defaults to the report title",
     )
     parser.add_argument("--build-url", help="Buildkite build URL metadata")
-    parser.add_argument("--commit", help="Commit SHA metadata")
-    parser.add_argument("--branch", help="Branch metadata")
     parser.add_argument(
         "--only-failures",
         action="store_true",
@@ -51,51 +49,74 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def generate_html_report(
+    *,
+    title: str,
+    platform_specs: list[tuple[str, Path | str]],
+    output: Path,
+    summary_json: Path | None = None,
+    template: Path = DEFAULT_TEMPLATE,
+    execution_name: str | None = None,
+    build_url: str | None = None,
+    only_failures: bool = False,
+    fail_on_status: str = "failed",
+) -> int:
+    report = build_report(
+        title=title,
+        platform_specs=platform_specs,
+        build_url=build_url,
+    )
+    data = report_to_report_ui_data(
+        report, execution_name=execution_name, only_failures=only_failures
+    )
+    output_path = write_html_report(data, output, template)
+    print(f"INFO  Wrote HTML report output={output_path} bytes={output_path.stat().st_size}", file=sys.stderr)
+
+    if summary_json:
+        summary = {
+            "raw_testcases": report.raw_testcases,
+            "suites": len(report.suites),
+            "logical_tests": report.logical_test_count,
+            "platform_executions": report.platform_execution_count,
+            "targets": len(report.platforms),
+            "status_counts": dict(report.status_counts),
+            "root_status": report.root_status,
+        }
+        summary_json.parent.mkdir(parents=True, exist_ok=True)
+        summary_json.write_text(json.dumps(summary, indent=2))
+        print(f"INFO  Wrote summary JSON output={summary_json}", file=sys.stderr)
+
+    print(
+        f"INFO  Final summary: raw_testcases={report.raw_testcases} suites={len(report.suites)} "
+        f"logical_tests={report.logical_test_count} platform_executions={report.platform_execution_count} "
+        f"status_counts={format_counts(report.status_counts)} root_status={report.root_status}",
+        file=sys.stderr,
+    )
+
+    if fail_on_status != "never" and report.root_status == fail_on_status.upper():
+        print(f"INFO  Exiting with status {report.root_status} (code 64)", file=sys.stderr)
+        return 64
+
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        report = build_report(
+        return generate_html_report(
             title=args.title,
             platform_specs=args.platform,
+            output=args.output,
+            summary_json=args.summary_json,
+            template=args.template,
+            execution_name=args.execution_name,
             build_url=args.build_url,
-            commit=args.commit,
-            branch=args.branch,
+            only_failures=args.only_failures,
+            fail_on_status=args.fail_on_status,
         )
-        data = report_to_report_ui_data(
-            report, execution_name=args.execution_name, only_failures=args.only_failures
-        )
-        output = write_html_report(data, args.output, args.template)
-        print(f"INFO  Wrote HTML report output={output} bytes={output.stat().st_size}", file=sys.stderr)
-
-        if args.summary_json:
-            summary = {
-                "raw_testcases": report.raw_testcases,
-                "suites": len(report.suites),
-                "logical_tests": report.logical_test_count,
-                "platform_executions": report.platform_execution_count,
-                "targets": len(report.platforms),
-                "status_counts": dict(report.status_counts),
-                "root_status": report.root_status,
-            }
-            args.summary_json.parent.mkdir(parents=True, exist_ok=True)
-            args.summary_json.write_text(json.dumps(summary, indent=2))
-            print(f"INFO  Wrote summary JSON output={args.summary_json}", file=sys.stderr)
-
-        print(
-            f"INFO  Final summary: raw_testcases={report.raw_testcases} suites={len(report.suites)} "
-            f"logical_tests={report.logical_test_count} platform_executions={report.platform_execution_count} "
-            f"status_counts={format_counts(report.status_counts)} root_status={report.root_status}",
-            file=sys.stderr,
-        )
-
-        if args.fail_on_status != "never" and report.root_status == args.fail_on_status.upper():
-            print(f"INFO  Exiting with status {report.root_status} (code 64)", file=sys.stderr)
-            return 64
-
     except Exception as exc:  # pragma: no cover - CLI guard
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    return 0
 
 
 if __name__ == "__main__":

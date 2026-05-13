@@ -21,9 +21,6 @@ configuration:
     project_id:
       type: string
       description: Object-store project namespace; defaults to BUILDKITE_PIPELINE_SLUG
-    git_ref:
-      type: string
-      description: Git ref namespace; defaults to BUILDKITE_COMMIT/branch-derived ref when possible
     platforms:
       type: array
       minItems: 1
@@ -38,9 +35,6 @@ configuration:
     only_failures:
       type: boolean
       description: Generate HTML tree containing only failures/errors while keeping full summary counts
-    upload_xml:
-      type: boolean
-      description: Upload source JUnit XML files alongside HTML; default true
     annotate:
       type: boolean
       description: Create Buildkite annotation linking to HTML; default true
@@ -48,9 +42,6 @@ configuration:
       type: string
       enum: [failed, errored, never]
       description: Plugin final failure behavior; default never for job reports, failed for full reports
-    dry_run:
-      type: boolean
-      description: Generate report and print upload/annotation plan without uploading; default false
     debug:
       type: boolean
       description: Enable bash debug tracing

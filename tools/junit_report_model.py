@@ -79,8 +79,6 @@ class Report:
     platforms: list[str]
     suites: "OrderedDict[str, TestSuite]"
     build_url: str | None = None
-    commit: str | None = None
-    branch: str | None = None
     generated_at: str = ""
     total_files: int = 0
     raw_testcases: int = 0
@@ -321,8 +319,6 @@ def build_report(
     title: str,
     platform_specs: list[tuple[str, Path | str]],
     build_url: str | None = None,
-    commit: str | None = None,
-    branch: str | None = None,
 ) -> Report:
     log_info(
         f"Start JUnit report model build title={title!r} platforms={len(platform_specs)}"
@@ -403,8 +399,6 @@ def build_report(
         platforms=[platform for platform, _ in platform_specs],
         suites=suites,
         build_url=build_url,
-        commit=commit,
-        branch=branch,
         generated_at=utc_now_iso(),
         total_files=total_files,
         raw_testcases=total_raw_executions,

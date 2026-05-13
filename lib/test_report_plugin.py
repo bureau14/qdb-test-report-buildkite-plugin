@@ -6,47 +6,29 @@ from pathlib import Path
 from dataclasses import dataclass, replace
 from contextlib import redirect_stderr
 
-# Add tools to path so we can import junit_html_report
+# Add tools to path so we can import junit_html_report tool
 tools_path = str(Path(__file__).parent.parent / "tools")
 if tools_path not in sys.path:
     sys.path.append(tools_path)
 
 import junit_html_report
 
-try:  # Package imports for tests.
-    from .plugin_config import PluginConfig, PlatformConfig, load_plugin_config
-    from .report_paths import build_report_location, ReportLocation
-    from .object_store import (
-        ObjectAuth,
-        StoreConfig,
-        load_store_config,
-        resolve_object_auth,
-        upload_file,
-        parse_s3,
-        aws_clients,
-        key_join,
-        PublishedObject,
-    )
-    from .report_downloads import collect_full_scope_xml, build_job_xml_prefix
-    from .xml_inputs import collect_xml_uploads, XmlUpload
-    from .annotations import build_annotation_body, get_annotation_style, create_buildkite_annotation
-except ImportError:  # pragma: no cover - direct script path used by plugin hooks/local debugging.
-    from plugin_config import PluginConfig, PlatformConfig, load_plugin_config
-    from report_paths import build_report_location, ReportLocation
-    from object_store import (
-        ObjectAuth,
-        StoreConfig,
-        load_store_config,
-        resolve_object_auth,
-        upload_file,
-        parse_s3,
-        aws_clients,
-        key_join,
-        PublishedObject,
-    )
-    from report_downloads import collect_full_scope_xml, build_job_xml_prefix
-    from xml_inputs import collect_xml_uploads, XmlUpload
-    from annotations import build_annotation_body, get_annotation_style, create_buildkite_annotation
+from plugin_config import PluginConfig, PlatformConfig, load_plugin_config
+from report_paths import build_report_location, ReportLocation
+from object_store import (
+    ObjectAuth,
+    StoreConfig,
+    load_store_config,
+    resolve_object_auth,
+    upload_file,
+    parse_s3,
+    aws_clients,
+    key_join,
+    PublishedObject,
+)
+from report_downloads import collect_full_scope_xml, build_job_xml_prefix
+from xml_inputs import collect_xml_uploads, XmlUpload
+from annotations import build_annotation_body, get_annotation_style, create_buildkite_annotation
 
 FULL_SCOPE_XML_STAGE_ROOT = Path(".buildkite-test-report") / "downloaded-xml"
 
@@ -75,30 +57,18 @@ def run_report_generation(config: PluginConfig, output_dir: Path) -> GenerationR
     summary_path = output_dir / "summary.json"
     log_path = output_dir / "generation.log"
     
-    argv = [
-        "--title", config.title,
-        "--output", str(html_path),
-        "--summary-json", str(summary_path),
-        "--fail-on-status", "never",
-    ]
-    
-    for p in config.platforms:
-        argv.extend(["--platform", f"{p.name}={p.path}"])
-        
-    if config.execution_name:
-        argv.extend(["--execution-name", config.execution_name])
-    if config.build_url:
-        argv.extend(["--build-url", config.build_url])
-    if config.commit:
-        argv.extend(["--commit", config.commit])
-    if config.branch:
-        argv.extend(["--branch", config.branch])
-    if config.only_failures:
-        argv.append("--only-failures")
-        
     log_stream = io.StringIO()
     with redirect_stderr(log_stream):
-        exit_code = junit_html_report.main(argv)
+        exit_code = junit_html_report.generate_html_report(
+            title=config.title,
+            platform_specs=[(p.name, p.path) for p in config.platforms],
+            output=html_path,
+            summary_json=summary_path,
+            execution_name=config.execution_name,
+            build_url=config.build_url,
+            only_failures=config.only_failures,
+            fail_on_status="never",
+        )
         
     log_content = log_stream.getvalue()
     log_path.write_text(log_content)
@@ -164,23 +134,16 @@ def upload_report_artifacts(
         content_disposition="inline",
     )
     
-    # Log
-    print(f"INFO  Uploading generation log to s3://{bucket}/{location.log_key}", file=sys.stderr)
-    results["log"] = upload_file(
-        store_cfg, auth, bucket, location.log_key, generation.log_path,
-        content_type="text/plain; charset=utf-8",
-        content_disposition="inline",
-    )
-    
     # XMLs
-    for xml in xml_uploads:
-        key = key_join(location.xml_prefix, xml.object_relative_path)
-        print(f"INFO  Uploading JUnit XML {xml.object_relative_path} to s3://{bucket}/{key}", file=sys.stderr)
-        results[f"xml:{xml.object_relative_path}"] = upload_file(
-            store_cfg, auth, bucket, key, xml.local_path,
-            content_type="application/xml",
-            content_disposition="attachment",
-        )
+    if config.scope == "job":
+        for xml in xml_uploads:
+            key = key_join(location.xml_prefix, xml.object_relative_path)
+            print(f"INFO  Uploading JUnit XML {xml.object_relative_path} to s3://{bucket}/{key}", file=sys.stderr)
+            results[f"xml:{xml.object_relative_path}"] = upload_file(
+                store_cfg, auth, bucket, key, xml.local_path,
+                content_type="application/xml",
+                content_disposition="attachment",
+            )
         
     return results
 
@@ -189,7 +152,7 @@ def main():
         config = load_plugin_config()
         
         store_context: ObjectStoreContext | None = None
-        if config.scope == "full" and not config.dry_run:
+        if config.scope == "full":
             store_context = resolve_object_store_context("object-read-write")
             variants = [platform.name for platform in config.platforms]
             print(
@@ -215,11 +178,11 @@ def main():
                 ],
             )
 
-        # Collect XMLs first to ensure they exist. For full non-dry runs this reads
+        # Collect XMLs first to ensure they exist. For full runs this reads
         # the object-store staging directory populated above.
         xml_uploads = collect_xml_uploads(config.platforms)
         
-        # Create temp dir for generation
+        # Create temp dir for HTML report generation output. For job scope or full scope with variant, we can use a stable path to allow in-place updates; otherwise we use a unique temp dir.
         variant_or_full = config.variant if (config.scope == "job" or (config.scope == "full" and config.variant)) else "full"
         tmp_base = Path(".buildkite-test-report") / config.scope / variant_or_full
         
@@ -227,42 +190,10 @@ def main():
         print(f"INFO  Generating {config.scope} report", file=sys.stderr)
         generation = run_report_generation(config, tmp_base)
         
-        if config.dry_run:
-            print("INFO  Dry run mode: generation complete. Skipping upload.", file=sys.stderr)
-            
-            # Print planned location
-            # We don't need real S3/SSM for dry run location calculation if we use placeholders
-            location = build_report_location(
-                destination_prefix="prefix",
-                project_id=config.project_id,
-                git_ref=config.git_ref,
-                build_id=config.build_id,
-                scope=config.scope,
-                job_id=config.job_id,
-                variant=config.variant,
-            )
-            print(f"INFO  [dry-run] Planned HTML key: {location.html_key}", file=sys.stderr)
-            print(f"INFO  [dry-run] Planned XML prefix: {location.xml_prefix}", file=sys.stderr)
-            if config.scope == "full":
-                for platform in config.platforms:
-                    prefix = build_job_xml_prefix(
-                        destination_prefix="prefix",
-                        project_id=config.project_id,
-                        git_ref=config.git_ref,
-                        build_id=config.build_id,
-                        variant=platform.name,
-                    )
-                    print(f"INFO  [dry-run] Would list XML prefix: {prefix}", file=sys.stderr)
-            
-            summary = json.loads(generation.summary_path.read_text())
-            body = build_annotation_body(config.title, summary, "https://reports.example.com/" + location.html_key)
-            print(f"INFO  [dry-run] Annotation body:\n{body}", file=sys.stderr)
-            return 0
-            
-        # Upload
+        # Upload JUNIT reports, HTML report, summary
         uploads = upload_report_artifacts(config, generation, xml_uploads, store_context=store_context)
         
-        # Annotation
+        # Create annotation if enabled and HTML URL is available
         if config.annotate:
             html_url = uploads["html"].url
             if not html_url:
@@ -276,10 +207,10 @@ def main():
                     context = f"test-report:{config.variant}:{config.job_id}"
                     create_buildkite_annotation(body, context, style, priority=10, scope="job")
                 else:
-                    context = "test-report:full"
-                    create_buildkite_annotation(body, context, style, priority=10, scope="build")
+                    context = f"test-report:{config.variant}:full" if config.variant else "test-report:full"
+                    create_buildkite_annotation(body, context, style, priority=20, scope="build")
         
-        # Final status check (Task 10 logic)
+        # Exit with failure code if fail_on_status is set and matches the report status
         summary = json.loads(generation.summary_path.read_text())
         if config.fail_on_status != "never" and summary.get("root_status") == config.fail_on_status.upper():
             print(f"INFO  Report status {summary.get('root_status')} matches fail_on_status={config.fail_on_status}. Exiting 64.", file=sys.stderr)

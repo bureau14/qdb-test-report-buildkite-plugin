@@ -1,9 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-try:  # Support package imports in tests and direct-script imports in Buildkite.
-    from .plugin_config import PlatformConfig
-except ImportError:  # pragma: no cover
-    from plugin_config import PlatformConfig
+from plugin_config import PlatformConfig
 
 @dataclass(frozen=True)
 class XmlUpload:

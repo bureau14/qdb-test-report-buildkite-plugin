@@ -160,10 +160,6 @@ def report_to_report_ui_data(
     root_labels = ["source:junit", "view:tests-first"]
     if report.build_url:
         root_labels.append(f"buildkite-build-url:{report.build_url}")
-    if report.commit:
-        root_labels.append(f"commit:{report.commit}")
-    if report.branch:
-        root_labels.append(f"branch:{report.branch}")
 
     root_node = builder.node(
         report.title, report.duration_seconds, [labels_section(root_labels)]
