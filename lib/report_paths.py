@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from lib.object_store import key_join
+from object_store import key_join
 
 @dataclass(frozen=True)
 class ReportLocation:

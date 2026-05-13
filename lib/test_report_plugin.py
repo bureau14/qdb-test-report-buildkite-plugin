@@ -13,9 +13,9 @@ if tools_path not in sys.path:
 
 import junit_html_report
 
-from .plugin_config import PluginConfig, load_plugin_config
-from .report_paths import build_report_location, ReportLocation
-from .object_store import (
+from plugin_config import PluginConfig, load_plugin_config
+from report_paths import build_report_location, ReportLocation
+from object_store import (
     load_store_config,
     resolve_object_auth,
     upload_file,
@@ -24,8 +24,8 @@ from .object_store import (
     key_join,
     PublishedObject,
 )
-from .xml_inputs import collect_xml_uploads, XmlUpload
-from .annotations import build_annotation_body, get_annotation_style, create_buildkite_annotation
+from xml_inputs import collect_xml_uploads, XmlUpload
+from annotations import build_annotation_body, get_annotation_style, create_buildkite_annotation
 
 @dataclass(frozen=True)
 class GenerationResult:
@@ -162,8 +162,24 @@ def main():
         
         if config.dry_run:
             print("INFO  Dry run mode: generation complete. Skipping upload.", file=sys.stderr)
+            
+            # Print planned location
+            # We don't need real S3/SSM for dry run location calculation if we use placeholders
+            location = build_report_location(
+                destination_prefix="prefix",
+                project_id=config.project_id,
+                git_ref=config.git_ref,
+                report_id=config.report_id,
+                build_id=config.build_id,
+                scope=config.scope,
+                job_id=config.job_id,
+                variant=config.variant,
+            )
+            print(f"INFO  [dry-run] Planned HTML key: {location.html_key}", file=sys.stderr)
+            print(f"INFO  [dry-run] Planned XML prefix: {location.xml_prefix}", file=sys.stderr)
+            
             summary = json.loads(generation.summary_path.read_text())
-            body = build_annotation_body(config.title, summary, "http://dry-run-url")
+            body = build_annotation_body(config.title, summary, "https://reports.example.com/" + location.html_key)
             print(f"INFO  [dry-run] Annotation body:\n{body}", file=sys.stderr)
             return 0
             
