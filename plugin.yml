@@ -1,0 +1,61 @@
+name: QDB Test Report
+description: Generate JUnit HTML reports and publish them to S3/R2
+author: https://github.com/bureau14
+requirements:
+  - python3
+configuration:
+  properties:
+    report_id:
+      type: string
+      description: Stable report identifier, e.g. unit-tests
+    scope:
+      type: string
+      enum: [job, full]
+      description: Whether this is a fast per-job report or aggregate full report
+    title:
+      type: string
+      description: Report title shown in the HTML UI
+    variant:
+      type: string
+      description: Platform/configuration key. Required for scope=job; optional for per-variant full reports.
+    execution_name:
+      type: string
+      description: Optional top-level execution name
+    project_id:
+      type: string
+      description: Object-store project namespace; defaults to BUILDKITE_PIPELINE_SLUG
+    git_ref:
+      type: string
+      description: Git ref namespace; defaults to BUILDKITE_COMMIT/branch-derived ref when possible
+    platforms:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        properties:
+          name:
+            type: string
+          path:
+            type: string
+        required: [name, path]
+    only_failures:
+      type: boolean
+      description: Generate HTML tree containing only failures/errors while keeping full summary counts
+    upload_xml:
+      type: boolean
+      description: Upload source JUnit XML files alongside HTML; default true
+    annotate:
+      type: boolean
+      description: Create Buildkite annotation linking to HTML; default true
+    fail_on_status:
+      type: string
+      enum: [failed, errored, never]
+      description: Plugin final failure behavior; default never for job reports, failed for full reports
+    dry_run:
+      type: boolean
+      description: Generate report and print upload/annotation plan without uploading; default false
+    debug:
+      type: boolean
+      description: Enable bash debug tracing
+  required: [report_id, scope, title, platforms]
+  additionalProperties: false
