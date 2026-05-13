@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${DIR}/../lib/shared.bash"
+
+if [[ "$(plugin_read_config DEBUG false)" =~ ^(true|on|1)$ ]]; then
+  set -x
+fi
+
+# Pre-flight: verify Python 3 is available on the host agent.
+if [[ -z "${PYTHON3_CMD}" ]]; then
+  echo "+++ :rotating_light: qdb-test-report plugin requires python3 on the host agent"
+  echo "Install Python 3 on this agent or add it to the AMI via Packer."
+  exit 1
+fi
+
+REQUIREMENTS="${PLUGIN_DIR}/lib/requirements.txt"
+HASH_FILE="${VENV_DIR}/.requirements-hash"
+CURRENT_HASH="$(sha256sum "${REQUIREMENTS}" | cut -d' ' -f1)"
+NEEDS_REBUILD=false
+
+if [[ -d "${VENV_DIR}" ]]; then
+  if [[ ! -f "${HASH_FILE}" ]]; then
+    # Hash file absent = previous pip install failed or was interrupted.
+    NEEDS_REBUILD=true
+  elif [[ "$(cat "${HASH_FILE}")" != "${CURRENT_HASH}" ]]; then
+    echo "~~~ :python: Requirements changed, rebuilding venv"
+    NEEDS_REBUILD=true
+  fi
+else
+  NEEDS_REBUILD=true
+fi
+
+if [[ "${NEEDS_REBUILD}" == "true" ]]; then
+  rm -rf "${VENV_DIR}"
+  echo "~~~ :python: Setting up qdb-test-report plugin"
+  "${PYTHON3_CMD}" -m venv --upgrade-deps "${VENV_DIR}"
+  "${VENV_BIN}/python" -m pip install --quiet \
+    --retries 3 \
+    -r "${REQUIREMENTS}"
+  echo "${CURRENT_HASH}" > "${HASH_FILE}"
+fi
