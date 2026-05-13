@@ -277,7 +277,7 @@ def main():
                     create_buildkite_annotation(body, context, style, priority=10, scope="job")
                 else:
                     context = "test-report:full"
-                    create_buildkite_annotation(body, context, style, priority=20, scope="build")
+                    create_buildkite_annotation(body, context, style, priority=10, scope="build")
         
         # Final status check (Task 10 logic)
         summary = json.loads(generation.summary_path.read_text())
