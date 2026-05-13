@@ -208,7 +208,7 @@ def main():
                     create_buildkite_annotation(body, context, style, priority=10, scope="job")
                 else:
                     context = f"test-report:{config.variant}:full" if config.variant else "test-report:full"
-                    create_buildkite_annotation(body, context, style, priority=20, scope="build")
+                    create_buildkite_annotation(body, context, style, priority=10, scope="build")
         
         # Exit with failure code if fail_on_status is set and matches the report status
         summary = json.loads(generation.summary_path.read_text())
