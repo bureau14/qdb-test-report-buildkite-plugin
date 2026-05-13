@@ -161,10 +161,7 @@ def report_to_report_ui_data(
     if report.build_url:
         root_labels.append(f"buildkite-build-url:{report.build_url}")
 
-    root_node = builder.node(
-        report.title, report.duration_seconds, [labels_section(root_labels)]
-    )
-    root_child_ids: list[str] = []
+    suite_ids: list[str] = []
 
     for suite in report.suites.values():
         suite_child_ids: list[str] = []
@@ -199,10 +196,9 @@ def report_to_report_ui_data(
                 suite_duration(suite),
                 [labels_section([f"testsuite:{suite.name}", "source:junit"])],
             )
-            root_child_ids.append(suite_node["id"])
+            suite_ids.append(suite_node["id"])
             builder.add_children(suite_node["id"], suite_child_ids)
 
-    builder.add_children(root_node["id"], root_child_ids)
     builder.finalize_child_statuses()
 
     execution_data = {
@@ -221,6 +217,7 @@ def report_to_report_ui_data(
             "rootStatus": report.root_status,
         },
         "sections": [
+            labels_section(root_labels),
             kvp_section(
                 "Report summary",
                 {
@@ -242,7 +239,7 @@ def report_to_report_ui_data(
                 },
             ),
         ],
-        "roots": [root_node["id"]],
+        "roots": suite_ids,
         "children": dict(builder.children),
         "testNodes": builder.test_nodes,
     }
