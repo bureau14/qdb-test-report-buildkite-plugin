@@ -140,7 +140,7 @@ def execution_sections(
                 f"platform:{execution.platform}",
                 f"testsuite:{execution.suite_name}",
                 "source:junit",
-                f"source-file:{execution.source_file.as_posix()}",
+                f"source-file:{execution.source_id}",
             ]
         )
     ]

@@ -8,11 +8,19 @@ from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 import sys
 import xml.etree.ElementTree as ET
 
 STATUS_ORDER = ["SUCCESSFUL", "SKIPPED", "FAILED", "ERRORED"]
 STATUS_SEVERITY = {"SUCCESSFUL": 0, "SKIPPED": 1, "FAILED": 2, "ERRORED": 3}
+
+# Pattern to match Buildkite Job IDs (UUIDs). We strip these from test identities
+# to support Buildkite parallelism: multiple jobs for the same variant can each
+# upload their own JUnit XML without being treated as distinct tests in the report.
+UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I
+)
 
 
 def log_info(message: str) -> None:
@@ -37,6 +45,7 @@ def format_counts(counter: Counter[str]) -> str:
 class TestcaseExecution:
     platform: str
     source_file: Path
+    source_id: str
     suite_name: str
     classname: str
     name: str
@@ -282,6 +291,7 @@ def parse_junit_file(
                 TestcaseExecution(
                     platform=platform,
                     source_file=path,
+                    source_id=source_id,
                     suite_name=suite_name,
                     classname=classname,
                     name=name,
@@ -334,11 +344,22 @@ def build_report(
         if not xml_files:
             log_warn(f"platform={platform} path={input_path} produced no XML files")
         for xml_file in xml_files:
-            source_id = (
+            rel_path = (
                 xml_file.relative_to(input_path).as_posix()
                 if input_path.is_dir()
                 else xml_file.name
             )
+            # Strip UUIDs and the platform name from the source_id components.
+            # We keep UUIDs in the physical path to avoid file collisions when
+            # multiple parallel Buildkite jobs upload the same filename, but
+            # we strip them from the logical identity so the report correctly
+            # aggregates results from all parallel jobs into a single row.
+            parts = rel_path.split("/")
+            source_id = (
+                "/".join(p for p in parts if not UUID_RE.match(p) and p != platform)
+                or rel_path
+            )
+
             file_executions = parse_junit_file(xml_file, platform, source_id)
             total_raw_executions += len(file_executions)
             for execution in file_executions:
