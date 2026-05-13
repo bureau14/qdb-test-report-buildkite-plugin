@@ -1,0 +1,55 @@
+/**
+ * Modified from original source: https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/main.ts
+ */
+import { createApp } from "vue";
+import { createI18n } from "vue-i18n";
+
+import "./style.css";
+import App from "./App.vue";
+import TestExecution from "./components/common/TestExecution.ts";
+import VueEasyLightbox from "vue-easy-lightbox";
+
+const app = createApp(App, {
+  executions: globalThis.testExecutions.map((it) => new TestExecution(it)),
+});
+
+app.use(
+  createI18n({
+    messages: {
+      en: {
+        executionSummary: {
+          testCount: "No nodes | 1 node | {count} nodes",
+          testsPerTargetCount:
+            "No tests per target | 1 test per target | {count} tests per target",
+          targetCount: "No targets | 1 target | {count} targets",
+          errored: "1 errored | {count} errored",
+          failed: "1 failed | {count} failed",
+          aborted: "1 aborted | {count} aborted",
+          skipped: "1 skipped | {count} skipped",
+          execution: "in 1 execution | in { count } executions",
+        },
+        clipboard: {
+          copy: "Copy to clipboard",
+        },
+        duration: {
+          hours: "{count} h",
+          minutes: "{count} m",
+          seconds: "{count} s",
+          millis: "{count} ms",
+        },
+        toolbar: {
+          collapseAll: "Collapse all",
+          expandAll: "Expand all",
+          showAborted: "Show aborted",
+          showFailedAndErrored: "Show failed/errored",
+          showSkipped: "Show skipped",
+          showSuccessful: "Show successful",
+        },
+      },
+    },
+  }),
+);
+
+app.use(VueEasyLightbox);
+
+app.mount("#app");
