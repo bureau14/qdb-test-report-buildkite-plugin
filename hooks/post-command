@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${DIR}/../lib/shared.bash"
+
+if [[ "$(plugin_read_config DEBUG false)" =~ ^(true|on|1)$ ]]; then
+  set -x
+fi
+
+if [[ -z "${BUILDKITE_PLUGIN_QDB_TEST_REPORT_REPORT_ID:-}" ]]; then
+  exit 0
+fi
+
+echo "~~~ :bar_chart: Generating test report"
+
+set +e
+run_test_report_py
+status=$?
+set -e
+
+if [[ $status -eq 64 ]]; then
+  # Report status check failed (e.g. failed tests and fail_on_status=failed)
+  # Exit with 64 to signal a test failure status.
+  exit 64
+elif [[ $status -ne 0 ]]; then
+  # Internal plugin error (e.g. generation or upload failed)
+  echo "ERROR: Test report plugin failed with exit code $status"
+  exit 1
+fi
+
+# Success or fail_on_status=never.
+# Exit 0 and let Buildkite preserve the original command exit status.
+exit 0
