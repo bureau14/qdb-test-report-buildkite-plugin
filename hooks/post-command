@@ -8,7 +8,7 @@ if [[ "$(plugin_read_config DEBUG false)" =~ ^(true|on|1)$ ]]; then
   set -x
 fi
 
-if [[ -z "${BUILDKITE_PLUGIN_QDB_TEST_REPORT_REPORT_ID:-}" ]]; then
+if [[ -z "${BUILDKITE_PLUGIN_QDB_TEST_REPORT_SCOPE:-}" ]]; then
   exit 0
 fi
 

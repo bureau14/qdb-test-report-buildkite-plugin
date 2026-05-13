@@ -11,11 +11,13 @@ from urllib.parse import urlparse
 
 try:  # boto3 is installed by the plugin venv in Buildkite; keep unit tests lightweight.
     import boto3
+    from boto3.s3.transfer import TransferConfig
     from botocore.config import Config
     from botocore.exceptions import ClientError
 except ModuleNotFoundError:  # pragma: no cover - exercised only when optional deps are absent.
     boto3 = None  # type: ignore[assignment]
     Config = None  # type: ignore[assignment]
+    TransferConfig = None  # type: ignore[assignment]
 
     class ClientError(Exception):  # type: ignore[no-redef]
         pass
@@ -69,6 +71,13 @@ class PublishedObject:
     key: str
     url: str | None
     size_bytes: int
+
+
+@dataclass(frozen=True)
+class ObjectInfo:
+    key: str
+    size_bytes: int
+    last_modified: Any | None = None
 
 
 def die(msg: str) -> None:
@@ -302,6 +311,53 @@ def internal_url(cfg: StoreConfig, key: str) -> str | None:
 
 # Backward-compatible name for tests/spec prose that still says "public_url".
 public_url = internal_url
+
+
+def list_objects(
+    cfg: StoreConfig,
+    auth: ObjectAuth,
+    bucket: str,
+    prefix: str,
+) -> list[ObjectInfo]:
+    """List objects under an S3/R2 prefix using the configured backend."""
+
+    def _do() -> list[ObjectInfo]:
+        client = _s3_client(cfg, auth)
+        paginator = client.get_paginator("list_objects_v2")
+        objects: list[ObjectInfo] = []
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for item in page.get("Contents", []):
+                objects.append(
+                    ObjectInfo(
+                        key=item["Key"],
+                        size_bytes=int(item.get("Size", 0)),
+                        last_modified=item.get("LastModified"),
+                    )
+                )
+        return objects
+
+    return _with_retry(_do, f"list s3://{bucket}/{prefix}")
+
+
+def download_file(
+    cfg: StoreConfig,
+    auth: ObjectAuth,
+    bucket: str,
+    key: str,
+    local_path: Path,
+    *,
+    concurrency: int = 32,
+) -> None:
+    """Download one object to a local path, creating parent directories first."""
+
+    path = Path(local_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _do():
+        transfer_config = TransferConfig(max_concurrency=concurrency) if TransferConfig is not None else None
+        return _s3_client(cfg, auth).download_file(bucket, key, str(path), Config=transfer_config)
+
+    _with_retry(_do, key)
 
 
 def upload_file(

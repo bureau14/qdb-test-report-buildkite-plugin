@@ -11,6 +11,7 @@ def build_annotation_body(title: str, summary: dict, html_url: str) -> str:
     failed = counts.get("FAILED", 0)
     errored = counts.get("ERRORED", 0)
     skipped = counts.get("SKIPPED", 0)
+    passed = counts.get("SUCCESSFUL", 0)
     
     # 31770 tests per target, 2 targets, 2 failed, 254 skipped
     # Adjust based on summary data
@@ -24,16 +25,14 @@ def build_annotation_body(title: str, summary: dict, html_url: str) -> str:
     else:
         parts.append(f"{logical_tests} tests")
         
-    if failed > 0:
-        parts.append(f"{failed} failed")
-    if errored > 0:
-        parts.append(f"{errored} errored")
-    if skipped > 0:
-        parts.append(f"{skipped} skipped")
+    parts.append(f"{passed} passed")
+    parts.append(f"{failed} failed")
+    parts.append(f"{errored} errored")
+    parts.append(f"{skipped} skipped")
         
     stats_line = ", ".join(parts)
     
-    body = f"## {title}\n\n{stats_line}\n\n[Open HTML report]({html_url})"
+    body = f"## {title}\n\n{stats_line}\n\n<a href=\"{html_url}\" target=\"_blank\" rel=\"noopener noreferrer\">Open full report</a>"
     return body
 
 def get_annotation_style(summary: dict) -> str:

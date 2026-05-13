@@ -3,7 +3,7 @@ import io
 import json
 import os
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from contextlib import redirect_stderr
 
 # Add tools to path so we can import junit_html_report
@@ -13,19 +13,51 @@ if tools_path not in sys.path:
 
 import junit_html_report
 
-from plugin_config import PluginConfig, load_plugin_config
-from report_paths import build_report_location, ReportLocation
-from object_store import (
-    load_store_config,
-    resolve_object_auth,
-    upload_file,
-    parse_s3,
-    aws_clients,
-    key_join,
-    PublishedObject,
-)
-from xml_inputs import collect_xml_uploads, XmlUpload
-from annotations import build_annotation_body, get_annotation_style, create_buildkite_annotation
+try:  # Package imports for tests.
+    from .plugin_config import PluginConfig, PlatformConfig, load_plugin_config
+    from .report_paths import build_report_location, ReportLocation
+    from .object_store import (
+        ObjectAuth,
+        StoreConfig,
+        load_store_config,
+        resolve_object_auth,
+        upload_file,
+        parse_s3,
+        aws_clients,
+        key_join,
+        PublishedObject,
+    )
+    from .report_downloads import collect_full_scope_xml, build_job_xml_prefix
+    from .xml_inputs import collect_xml_uploads, XmlUpload
+    from .annotations import build_annotation_body, get_annotation_style, create_buildkite_annotation
+except ImportError:  # pragma: no cover - direct script path used by plugin hooks/local debugging.
+    from plugin_config import PluginConfig, PlatformConfig, load_plugin_config
+    from report_paths import build_report_location, ReportLocation
+    from object_store import (
+        ObjectAuth,
+        StoreConfig,
+        load_store_config,
+        resolve_object_auth,
+        upload_file,
+        parse_s3,
+        aws_clients,
+        key_join,
+        PublishedObject,
+    )
+    from report_downloads import collect_full_scope_xml, build_job_xml_prefix
+    from xml_inputs import collect_xml_uploads, XmlUpload
+    from annotations import build_annotation_body, get_annotation_style, create_buildkite_annotation
+
+FULL_SCOPE_XML_STAGE_ROOT = Path(".buildkite-test-report") / "downloaded-xml"
+
+
+@dataclass(frozen=True)
+class ObjectStoreContext:
+    store_cfg: StoreConfig
+    auth: ObjectAuth
+    bucket: str
+    prefix: str
+
 
 @dataclass(frozen=True)
 class GenerationResult:
@@ -81,25 +113,33 @@ def run_report_generation(config: PluginConfig, output_dir: Path) -> GenerationR
         log_path=log_path,
     )
 
+def resolve_object_store_context(permission: str) -> ObjectStoreContext:
+    _s3, ssm = aws_clients()
+    store_cfg = load_store_config(ssm)
+    auth = resolve_object_auth(ssm, store_cfg, permission)
+    bucket, prefix = parse_s3(store_cfg.destination)
+    return ObjectStoreContext(store_cfg=store_cfg, auth=auth, bucket=bucket, prefix=prefix)
+
+
 def upload_report_artifacts(
     config: PluginConfig,
     generation: GenerationResult,
     xml_uploads: list[XmlUpload],
+    store_context: ObjectStoreContext | None = None,
 ) -> dict[str, PublishedObject]:
     """
     Uploads all report artifacts (HTML, summary, log, XML) to the object store.
     """
-    s3, ssm = aws_clients()
-    store_cfg = load_store_config(ssm)
-    auth = resolve_object_auth(ssm, store_cfg, "upload")
-    
-    bucket, prefix = parse_s3(store_cfg.destination)
+    context = store_context or resolve_object_store_context("upload")
+    store_cfg = context.store_cfg
+    auth = context.auth
+    bucket = context.bucket
+    prefix = context.prefix
     
     location = build_report_location(
         destination_prefix=prefix,
         project_id=config.project_id,
         git_ref=config.git_ref,
-        report_id=config.report_id,
         build_id=config.build_id,
         scope=config.scope,
         job_id=config.job_id,
@@ -148,16 +188,43 @@ def main():
     try:
         config = load_plugin_config()
         
-        # Collect XMLs first to ensure they exist
+        store_context: ObjectStoreContext | None = None
+        if config.scope == "full" and not config.dry_run:
+            store_context = resolve_object_store_context("object-read-write")
+            variants = [platform.name for platform in config.platforms]
+            print(
+                f"INFO  Downloading full-scope JUnit XML for variants: {', '.join(variants)}",
+                file=sys.stderr,
+            )
+            collect_full_scope_xml(
+                cfg=store_context.store_cfg,
+                auth=store_context.auth,
+                bucket=store_context.bucket,
+                destination_prefix=store_context.prefix,
+                project_id=config.project_id,
+                git_ref=config.git_ref,
+                build_id=config.build_id,
+                variants=variants,
+                output_dir=FULL_SCOPE_XML_STAGE_ROOT,
+            )
+            config = replace(
+                config,
+                platforms=[
+                    PlatformConfig(name=platform.name, path=FULL_SCOPE_XML_STAGE_ROOT / platform.name)
+                    for platform in config.platforms
+                ],
+            )
+
+        # Collect XMLs first to ensure they exist. For full non-dry runs this reads
+        # the object-store staging directory populated above.
         xml_uploads = collect_xml_uploads(config.platforms)
         
         # Create temp dir for generation
-        # e.g. .buildkite-test-report/<report_id>/<scope>/<variant-or-full>/
         variant_or_full = config.variant if (config.scope == "job" or (config.scope == "full" and config.variant)) else "full"
-        tmp_base = Path(".buildkite-test-report") / config.report_id / config.scope / variant_or_full
+        tmp_base = Path(".buildkite-test-report") / config.scope / variant_or_full
         
         # Generate report
-        print(f"INFO  Generating {config.scope} report id={config.report_id}", file=sys.stderr)
+        print(f"INFO  Generating {config.scope} report", file=sys.stderr)
         generation = run_report_generation(config, tmp_base)
         
         if config.dry_run:
@@ -169,7 +236,6 @@ def main():
                 destination_prefix="prefix",
                 project_id=config.project_id,
                 git_ref=config.git_ref,
-                report_id=config.report_id,
                 build_id=config.build_id,
                 scope=config.scope,
                 job_id=config.job_id,
@@ -177,6 +243,16 @@ def main():
             )
             print(f"INFO  [dry-run] Planned HTML key: {location.html_key}", file=sys.stderr)
             print(f"INFO  [dry-run] Planned XML prefix: {location.xml_prefix}", file=sys.stderr)
+            if config.scope == "full":
+                for platform in config.platforms:
+                    prefix = build_job_xml_prefix(
+                        destination_prefix="prefix",
+                        project_id=config.project_id,
+                        git_ref=config.git_ref,
+                        build_id=config.build_id,
+                        variant=platform.name,
+                    )
+                    print(f"INFO  [dry-run] Would list XML prefix: {prefix}", file=sys.stderr)
             
             summary = json.loads(generation.summary_path.read_text())
             body = build_annotation_body(config.title, summary, "https://reports.example.com/" + location.html_key)
@@ -184,7 +260,7 @@ def main():
             return 0
             
         # Upload
-        uploads = upload_report_artifacts(config, generation, xml_uploads)
+        uploads = upload_report_artifacts(config, generation, xml_uploads, store_context=store_context)
         
         # Annotation
         if config.annotate:
@@ -197,10 +273,10 @@ def main():
                 style = get_annotation_style(summary)
                 
                 if config.scope == "job":
-                    context = f"test-report:{config.report_id}:{config.variant}:{config.job_id}"
+                    context = f"test-report:{config.variant}:{config.job_id}"
                     create_buildkite_annotation(body, context, style, priority=10, scope="job")
                 else:
-                    context = f"test-report:{config.report_id}:full"
+                    context = "test-report:full"
                     create_buildkite_annotation(body, context, style, priority=20, scope="build")
         
         # Final status check (Task 10 logic)

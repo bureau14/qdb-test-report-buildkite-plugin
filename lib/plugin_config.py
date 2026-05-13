@@ -10,7 +10,6 @@ class PlatformConfig:
 
 @dataclass(frozen=True)
 class PluginConfig:
-    report_id: str
     scope: str
     title: str
     variant: str | None
@@ -43,10 +42,6 @@ def _get_bool_env(key: str, default: bool) -> bool:
 
 def load_plugin_config() -> PluginConfig:
     # Required properties
-    report_id = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_REPORT_ID")
-    if not report_id:
-        raise ValueError("missing required config: report_id")
-        
     scope = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_SCOPE")
     if not scope:
         raise ValueError("missing required config: scope")
@@ -112,7 +107,6 @@ def load_plugin_config() -> PluginConfig:
             raise ValueError("scope=job requires BUILDKITE_JOB_ID")
 
     return PluginConfig(
-        report_id=report_id,
         scope=scope,
         title=title,
         variant=variant,

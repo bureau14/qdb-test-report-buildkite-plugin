@@ -5,9 +5,6 @@ requirements:
   - python3
 configuration:
   properties:
-    report_id:
-      type: string
-      description: Stable report identifier, e.g. unit-tests
     scope:
       type: string
       enum: [job, full]
@@ -57,5 +54,5 @@ configuration:
     debug:
       type: boolean
       description: Enable bash debug tracing
-  required: [report_id, scope, title, platforms]
+  required: [scope, title, platforms]
   additionalProperties: false

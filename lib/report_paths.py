@@ -1,5 +1,8 @@
 from dataclasses import dataclass
-from object_store import key_join
+try:  # Support package imports in tests and direct-script imports in Buildkite.
+    from .object_store import key_join
+except ImportError:  # pragma: no cover
+    from object_store import key_join
 
 @dataclass(frozen=True)
 class ReportLocation:
@@ -25,7 +28,6 @@ def build_report_location(
     destination_prefix: str,
     project_id: str,
     git_ref: str,
-    report_id: str,
     build_id: str,
     scope: str,
     job_id: str | None,
@@ -34,8 +36,8 @@ def build_report_location(
     if scope == "job" and not variant:
         raise ValueError("job scope requires variant")
 
-    # Base parts: <prefix>/<project_id>/<git_ref>/reports/<report_id>
-    parts = [destination_prefix, project_id, git_ref, "reports", report_id]
+    # Base parts: <prefix>/<project_id>/<git_ref>/reports
+    parts = [destination_prefix, project_id, git_ref, "reports"]
     
     if variant:
         parts.extend(["variants", variant])
