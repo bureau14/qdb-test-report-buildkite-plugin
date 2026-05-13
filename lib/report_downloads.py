@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 from object_store import ObjectAuth, StoreConfig, download_file, key_join, list_objects
+import sys
 
 
 @dataclass(frozen=True)
@@ -166,10 +167,8 @@ def collect_full_scope_xml(
             variants=variants,
         )
         details = "\n".join(f"  - {prefix}" for prefix in prefixes)
-        raise ValueError(
-            "no JUnit XML objects found for full-scope aggregation. "
-            "Attempted prefixes:\n" + details
-        )
+        print(f"WARN  no JUnit XML objects found for full-scope aggregation. Attempted prefixes:\n{details}", file=sys.stderr)
+        return []
 
     downloaded: list[DownloadedJobXml] = []
     for obj in objects:

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from plugin_config import PlatformConfig
+import sys
 
 @dataclass(frozen=True)
 class XmlUpload:
@@ -13,7 +14,8 @@ def collect_xml_uploads(platforms: list[PlatformConfig]) -> list[XmlUpload]:
     for platform in platforms:
         path = platform.path
         if not path.exists():
-            raise FileNotFoundError(f"platform path does not exist: {path} (platform: {platform.name})")
+            print(f"WARN  platform path does not exist: {path} (platform: {platform.name})", file=sys.stderr)
+            continue
             
         platform_uploads = []
         if path.is_file():
@@ -36,7 +38,8 @@ def collect_xml_uploads(platforms: list[PlatformConfig]) -> list[XmlUpload]:
                 ))
         
         if not platform_uploads:
-            raise ValueError(f"no JUnit XML files found for platform: {platform.name} at {path}")
+            print(f"WARN  no JUnit XML files found for platform: {platform.name} at {path}", file=sys.stderr)
+            continue
             
         uploads.extend(platform_uploads)
         

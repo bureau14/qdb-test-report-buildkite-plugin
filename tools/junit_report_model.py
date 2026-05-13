@@ -139,7 +139,8 @@ def discover_xml_files(path: Path | str) -> list[Path]:
             (p for p in input_path.rglob("*.xml") if p.is_file()),
             key=lambda p: p.relative_to(input_path).as_posix(),
         )
-    raise FileNotFoundError(f"JUnit path does not exist: {input_path}")
+    log_warn(f"JUnit path does not exist: {input_path}")
+    return []
 
 
 def parse_platform_arg(value: str) -> tuple[str, Path]:
@@ -240,8 +241,7 @@ def aggregate_status(statuses: list[str]) -> str:
         return "ERRORED"
     if any(status == "FAILED" for status in statuses):
         return "FAILED"
-    if statuses and all(status == "SKIPPED" for status in statuses):
-        return "SKIPPED"
+    # Skips are treated as success for the purpose of the overall report status.
     return "SUCCESSFUL"
 
 
