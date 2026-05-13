@@ -2,6 +2,7 @@
 """Generate a self-contained HTML report directly from JUnit XML."""
 
 from __future__ import annotations
+from typing import List, Optional, Tuple, Union
 
 import argparse
 import json
@@ -52,12 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
 def generate_html_report(
     *,
     title: str,
-    platform_specs: list[tuple[str, Path | str]],
+    platform_specs: List[Tuple[str, Union[Path, str]]],
     output: Path,
-    summary_json: Path | None = None,
+    summary_json: Optional[Path] = None,
     template: Path = DEFAULT_TEMPLATE,
-    execution_name: str | None = None,
-    build_url: str | None = None,
+    execution_name: Optional[str] = None,
+    build_url: Optional[str] = None,
     only_failures: bool = False,
     fail_on_status: str = "failed",
 ) -> int:
@@ -100,7 +101,7 @@ def generate_html_report(
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return generate_html_report(

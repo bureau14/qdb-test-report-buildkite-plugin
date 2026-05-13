@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import List, Optional
 
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -71,15 +72,15 @@ def attempted_job_xml_prefixes(
     project_id: str,
     git_ref: str,
     build_id: str,
-    variants: list[str],
-) -> list[str]:
+    variants: List[str],
+) -> List[str]:
     return [
         f"s3://{bucket}/{build_job_xml_prefix(destination_prefix=destination_prefix, project_id=project_id, git_ref=git_ref, build_id=build_id, variant=variant)}"
         for variant in variants
     ]
 
 
-def _xml_metadata_from_key(*, variant: str, prefix: str, key: str, size_bytes: int) -> JobXmlObject | None:
+def _xml_metadata_from_key(*, variant: str, prefix: str, key: str, size_bytes: int) -> Optional[JobXmlObject]:
     if not key.endswith(".xml"):
         return None
     relative_to_jobs = key[len(prefix) :].lstrip("/") if key.startswith(prefix) else key
@@ -107,11 +108,11 @@ def find_job_xml_objects(
     project_id: str,
     git_ref: str,
     build_id: str,
-    variants: list[str],
-) -> list[JobXmlObject]:
+    variants: List[str],
+) -> List[JobXmlObject]:
     """Find JUnit XML objects uploaded by job-scope report steps."""
 
-    found: list[JobXmlObject] = []
+    found: List[JobXmlObject] = []
     for variant in variants:
         prefix = build_job_xml_prefix(
             destination_prefix=destination_prefix,
@@ -141,9 +142,9 @@ def collect_full_scope_xml(
     project_id: str,
     git_ref: str,
     build_id: str,
-    variants: list[str],
+    variants: List[str],
     output_dir: Path,
-) -> list[DownloadedJobXml]:
+) -> List[DownloadedJobXml]:
     """Download job-scope XML into a full-scope staging directory."""
 
     objects = find_job_xml_objects(
@@ -170,7 +171,7 @@ def collect_full_scope_xml(
         print(f"WARN  no JUnit XML objects found for full-scope aggregation. Attempted prefixes:\n{details}", file=sys.stderr)
         return []
 
-    downloaded: list[DownloadedJobXml] = []
+    downloaded: List[DownloadedJobXml] = []
     for obj in objects:
         local_path = Path(output_dir) / obj.variant / obj.job_id / obj.relative_path
         download_file(cfg, auth, bucket, obj.key, local_path)

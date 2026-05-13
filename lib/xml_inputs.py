@@ -1,3 +1,4 @@
+from typing import List
 from dataclasses import dataclass
 from pathlib import Path
 from plugin_config import PlatformConfig
@@ -9,7 +10,7 @@ class XmlUpload:
     object_relative_path: str
 
 
-def collect_xml_uploads(platforms: list[PlatformConfig]) -> list[XmlUpload]:
+def collect_xml_uploads(platforms: List[PlatformConfig]) -> List[XmlUpload]:
     uploads = []
     for platform in platforms:
         path = platform.path

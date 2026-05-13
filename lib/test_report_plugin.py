@@ -1,3 +1,4 @@
+from typing import Dict, List, Optional
 import sys
 import io
 import json
@@ -94,9 +95,9 @@ def resolve_object_store_context(permission: str) -> ObjectStoreContext:
 def upload_report_artifacts(
     config: PluginConfig,
     generation: GenerationResult,
-    xml_uploads: list[XmlUpload],
-    store_context: ObjectStoreContext | None = None,
-) -> dict[str, PublishedObject]:
+    xml_uploads: List[XmlUpload],
+    store_context: Optional[ObjectStoreContext] = None,
+) -> Dict[str, PublishedObject]:
     """
     Uploads all report artifacts (HTML, summary, log, XML) to the object store.
     """
@@ -151,7 +152,7 @@ def main():
     try:
         config = load_plugin_config()
         
-        store_context: ObjectStoreContext | None = None
+        store_context: Optional[ObjectStoreContext] = None
         if config.scope == "full":
             store_context = resolve_object_store_context("object-read-write")
             variants = [platform.name for platform in config.platforms]

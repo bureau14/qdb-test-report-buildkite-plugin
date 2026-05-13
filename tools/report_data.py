@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 from junit_report_model import (
     LogicalTest,
@@ -21,22 +21,22 @@ def duration_millis(seconds: float) -> int:
     return int(round(max(seconds, 0.0) * 1000))
 
 
-def labels_section(labels: list[str]) -> dict[str, Any]:
+def labels_section(labels: List[str]) -> Dict[str, Any]:
     return {"title": "Tags", "blocks": [{"type": "labels", "content": sorted(labels)}]}
 
 
-def kvp_section(title: str, content: dict[str, Any]) -> dict[str, Any]:
+def kvp_section(title: str, content: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "title": title,
         "blocks": [{"type": "kvp", "content": {k: str(v) for k, v in content.items()}}],
     }
 
 
-def reason_section(reason: str) -> dict[str, Any]:
+def reason_section(reason: str) -> Dict[str, Any]:
     return {"title": "Reason", "blocks": [{"type": "p", "content": reason}]}
 
 
-def output_section(output: str, generated_at: str) -> dict[str, Any]:
+def output_section(output: str, generated_at: str) -> Dict[str, Any]:
     return {
         "title": "Attachments",
         "blocks": [
@@ -57,8 +57,8 @@ def output_section(output: str, generated_at: str) -> dict[str, Any]:
 class UiDataBuilder:
     def __init__(self) -> None:
         self._next_id = 1
-        self.test_nodes: list[dict[str, Any]] = []
-        self.children: "OrderedDict[str, dict[str, list[str]]]" = OrderedDict()
+        self.test_nodes: List[Dict[str, Any]] = []
+        self.children: "OrderedDict[str, Dict[str, List[str]]]" = OrderedDict()
 
     def next_id(self) -> str:
         value = str(self._next_id)
@@ -69,10 +69,10 @@ class UiDataBuilder:
         self,
         name: str,
         duration_seconds_value: float,
-        sections: list[dict[str, Any]] | None = None,
-        status: str | None = None,
-    ) -> dict[str, Any]:
-        result: dict[str, Any] = {
+        sections: List[Dict[str, Optional[Any]]] = None,
+        status: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        result: Dict[str, Any] = {
             "id": self.next_id(),
             "name": name,
             "durationMillis": duration_millis(duration_seconds_value),
@@ -84,7 +84,7 @@ class UiDataBuilder:
         self.test_nodes.append(result)
         return result
 
-    def add_children(self, parent_id: str, child_ids: list[str]) -> None:
+    def add_children(self, parent_id: str, child_ids: List[str]) -> None:
         self.children[parent_id] = {"ids": child_ids, "childStatuses": []}
 
     def finalize_child_statuses(self) -> None:
@@ -114,7 +114,7 @@ def suite_duration(suite: TestSuite) -> float:
     return sum(logical_duration(logical) for logical in suite.logical_tests.values())
 
 
-def logical_sections(logical: LogicalTest) -> list[dict[str, Any]]:
+def logical_sections(logical: LogicalTest) -> List[Dict[str, Any]]:
     labels = [
         f"logical-test-id:{logical.logical_id}",
         f"testsuite:{logical.suite_name}",
@@ -133,7 +133,7 @@ def logical_sections(logical: LogicalTest) -> list[dict[str, Any]]:
 
 def execution_sections(
     execution: TestcaseExecution, generated_at: str
-) -> list[dict[str, Any]]:
+) -> List[Dict[str, Any]]:
     sections = [
         labels_section(
             [
@@ -152,8 +152,8 @@ def execution_sections(
 
 
 def report_to_report_ui_data(
-    report: Report, execution_name: str | None = None, only_failures: bool = False
-) -> list[dict[str, Any]]:
+    report: Report, execution_name: Optional[str] = None, only_failures: bool = False
+) -> List[Dict[str, Any]]:
     builder = UiDataBuilder()
     execution_id = builder.next_id()
 
@@ -161,13 +161,13 @@ def report_to_report_ui_data(
     if report.build_url:
         root_labels.append(f"buildkite-build-url:{report.build_url}")
 
-    suite_ids: list[str] = []
+    suite_ids: List[str] = []
 
     for suite in report.suites.values():
-        suite_child_ids: list[str] = []
+        suite_child_ids: List[str] = []
 
         for logical in suite.logical_tests.values():
-            execution_child_ids: list[str] = []
+            execution_child_ids: List[str] = []
 
             for execution in logical.executions.values():
                 if only_failures and execution.status not in {"FAILED", "ERRORED"}:

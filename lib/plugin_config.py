@@ -1,3 +1,4 @@
+from typing import List, Optional
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,20 +13,20 @@ class PlatformConfig:
 class PluginConfig:
     scope: str
     title: str
-    variant: str | None
-    execution_name: str | None
+    variant: Optional[str]
+    execution_name: Optional[str]
     project_id: str
     git_ref: str
     build_id: str
-    job_id: str | None
-    build_url: str | None
-    platforms: list[PlatformConfig]
+    job_id: Optional[str]
+    build_url: Optional[str]
+    platforms: List[PlatformConfig]
     only_failures: bool
     annotate: bool
     fail_on_status: str
 
 
-def _get_env(key: str, default: str | None = None) -> str | None:
+def _get_env(key: str, default: Optional[str] = None) -> Optional[str]:
     return os.environ.get(key, default)
 
 

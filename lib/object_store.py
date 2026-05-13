@@ -6,7 +6,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 import boto3
@@ -38,11 +38,11 @@ class StoreConfig:
 
     backend: str
     destination: str
-    endpoint_url: str | None = None
-    r2_account_id: str | None = None
-    r2_access_key_id: str | None = None
-    r2_secret_access_key: str | None = None
-    artifacts_domain: str | None = None
+    endpoint_url: Optional[str] = None
+    r2_account_id: Optional[str] = None
+    r2_access_key_id: Optional[str] = None
+    r2_secret_access_key: Optional[str] = None
+    artifacts_domain: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -53,15 +53,15 @@ class ObjectAuth:
     operations use explicit S3-compatible access keys resolved from env/SSM.
     """
 
-    access_key_id: str | None = None
-    secret_access_key: str | None = None
+    access_key_id: Optional[str] = None
+    secret_access_key: Optional[str] = None
 
 
 @dataclass(frozen=True)
 class PublishedObject:
     bucket: str
     key: str
-    url: str | None
+    url: Optional[str]
     size_bytes: int
 
 
@@ -69,7 +69,7 @@ class PublishedObject:
 class ObjectInfo:
     key: str
     size_bytes: int
-    last_modified: Any | None = None
+    last_modified: Optional[Any] = None
 
 
 def die(msg: str) -> None:
@@ -116,7 +116,7 @@ def aws_clients():
     )
 
 
-def _ssm_get_optional(ssm, name: str, with_decryption: bool = True) -> str | None:
+def _ssm_get_optional(ssm, name: str, with_decryption: bool = True) -> Optional[str]:
     """Return SSM parameter value or None if absent."""
 
     try:
@@ -130,7 +130,7 @@ def _ssm_get_optional(ssm, name: str, with_decryption: bool = True) -> str | Non
         die(f"failed to read SSM parameter {name}: {code} — {msg}")
 
 
-def _check_placeholder(value: str | None, label: str) -> None:
+def _check_placeholder(value: Optional[str], label: str) -> None:
     if value and any(value.startswith(prefix) for prefix in _PLACEHOLDER_PREFIXES):
         die(
             f"{label} contains placeholder value {value!r} — "
@@ -138,7 +138,7 @@ def _check_placeholder(value: str | None, label: str) -> None:
         )
 
 
-def _env_or_ssm(ssm, env_name: str, ssm_name: str, with_decryption: bool = True) -> str | None:
+def _env_or_ssm(ssm, env_name: str, ssm_name: str, with_decryption: bool = True) -> Optional[str]:
     """Read env var with SSM fallback. Env takes precedence for per-job overrides."""
 
     return os.environ.get(env_name) or _ssm_get_optional(ssm, ssm_name, with_decryption=with_decryption)
@@ -224,7 +224,7 @@ def load_store_config(ssm) -> StoreConfig:
     )
 
 
-def parse_s3(uri: str) -> tuple[str, str]:
+def parse_s3(uri: str) -> Tuple[str, str]:
     """Parse s3://bucket/prefix into (bucket, prefix); plain names are buckets."""
 
     if not uri.startswith("s3://"):
@@ -239,7 +239,7 @@ def key_join(*parts: str) -> str:
     return "/".join(str(part).strip("/") for part in parts if str(part).strip("/"))
 
 
-def fmt_size(n: int | float) -> str:
+def fmt_size(n: Union[int, float]) -> str:
     size = float(n)
     for unit in ("B", "KiB", "MiB", "GiB"):
         if abs(size) < 1024:
@@ -276,7 +276,7 @@ def _s3_client(cfg: StoreConfig, auth: ObjectAuth):
             s3={"addressing_style": "path"},
         )
 
-    kwargs: dict[str, Any] = {"config": client_cfg}
+    kwargs: Dict[str, Any] = {"config": client_cfg}
     if cfg.backend == "r2":
         kwargs["region_name"] = "auto"
     if cfg.endpoint_url:
@@ -288,7 +288,7 @@ def _s3_client(cfg: StoreConfig, auth: ObjectAuth):
     return boto3.client("s3", **kwargs)
 
 
-def internal_url(cfg: StoreConfig, key: str) -> str | None:
+def internal_url(cfg: StoreConfig, key: str) -> Optional[str]:
     if not cfg.artifacts_domain:
         return None
     return key_join(f"https://{cfg.artifacts_domain}", key)
@@ -303,13 +303,13 @@ def list_objects(
     auth: ObjectAuth,
     bucket: str,
     prefix: str,
-) -> list[ObjectInfo]:
+) -> List[ObjectInfo]:
     """List objects under an S3/R2 prefix using the configured backend."""
 
-    def _do() -> list[ObjectInfo]:
+    def _do() -> List[ObjectInfo]:
         client = _s3_client(cfg, auth)
         paginator = client.get_paginator("list_objects_v2")
-        objects: list[ObjectInfo] = []
+        objects: List[ObjectInfo] = []
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
             for item in page.get("Contents", []):
                 objects.append(

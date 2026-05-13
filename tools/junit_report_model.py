@@ -2,6 +2,7 @@
 """Parse JUnit XML files into a neutral report model."""
 
 from __future__ import annotations
+from typing import Dict, List, Optional, Tuple, Union
 
 import argparse
 from collections import Counter, OrderedDict
@@ -52,8 +53,8 @@ class TestcaseExecution:
     logical_id: str
     status: str
     duration_seconds: float
-    reason: str | None = None
-    output: str | None = None
+    reason: Optional[str] = None
+    output: Optional[str] = None
 
 
 @dataclass
@@ -76,9 +77,9 @@ class TestSuite:
 @dataclass
 class Report:
     title: str
-    platforms: list[str]
+    platforms: List[str]
     suites: "OrderedDict[str, TestSuite]"
-    build_url: str | None = None
+    build_url: Optional[str] = None
     generated_at: str = ""
     total_files: int = 0
     raw_testcases: int = 0
@@ -129,7 +130,7 @@ def utc_now_iso() -> str:
     )
 
 
-def discover_xml_files(path: Path | str) -> list[Path]:
+def discover_xml_files(path: Union[Path, str]) -> List[Path]:
     """Return XML files for a file or directory, sorted by deterministic relative path."""
     input_path = Path(path)
     if input_path.is_file():
@@ -143,7 +144,7 @@ def discover_xml_files(path: Path | str) -> list[Path]:
     return []
 
 
-def parse_platform_arg(value: str) -> tuple[str, Path]:
+def parse_platform_arg(value: str) -> Tuple[str, Path]:
     if "=" not in value:
         raise argparse.ArgumentTypeError("platform must use name=path format")
     name, raw_path = value.split("=", 1)
@@ -156,7 +157,7 @@ def parse_platform_arg(value: str) -> tuple[str, Path]:
 
 def logical_test_identity(
     testcase: ET.Element, source_id: str
-) -> tuple[str, str, str]:
+) -> Tuple[str, str, str]:
     name = testcase.attrib.get("name", "").strip() or "<unnamed>"
     classname = testcase.attrib.get("classname", "").strip()
     test_id = f"{classname}::{name}" if classname else name
@@ -173,7 +174,7 @@ def testcase_status(testcase: ET.Element) -> str:
     return "SUCCESSFUL"
 
 
-def specific_reason_from_text(text: str | None) -> str | None:
+def specific_reason_from_text(text: Optional[str]) -> Optional[str]:
     if not text:
         return None
     lines = [line.strip() for line in text.splitlines() if line.strip()]
@@ -188,7 +189,7 @@ def specific_reason_from_text(text: str | None) -> str | None:
 
 def testcase_reason_and_output(
     testcase: ET.Element, status: str
-) -> tuple[str | None, str | None]:
+) -> Tuple[Optional[str], Optional[str]]:
     if status == "ERRORED":
         node = testcase.find("error")
     elif status == "FAILED":
@@ -199,7 +200,7 @@ def testcase_reason_and_output(
         node = None
 
     reason = None
-    output_parts: list[str] = []
+    output_parts: List[str] = []
     if node is not None:
         raw_message = node.attrib.get("message")
         node_text = node.text.strip() if node.text and node.text.strip() else None
@@ -236,7 +237,7 @@ def duration_seconds(testcase: ET.Element) -> float:
     return max(value, 0.0)
 
 
-def aggregate_status(statuses: list[str]) -> str:
+def aggregate_status(statuses: List[str]) -> str:
     if any(status == "ERRORED" for status in statuses):
         return "ERRORED"
     if any(status == "FAILED" for status in statuses):
@@ -257,7 +258,7 @@ def local_name(element: ET.Element) -> str:
     return element.tag.rsplit("}", 1)[-1]
 
 
-def iter_junit_suites(root: ET.Element) -> list[ET.Element]:
+def iter_junit_suites(root: ET.Element) -> List[ET.Element]:
     if local_name(root) == "testsuite":
         return [root]
     return [element for element in root.iter() if local_name(element) == "testsuite"]
@@ -266,12 +267,12 @@ def iter_junit_suites(root: ET.Element) -> list[ET.Element]:
 def parse_junit_file(
     path: Path,
     platform: str,
-    source_id: str | None = None,
-) -> list[TestcaseExecution]:
+    source_id: Optional[str] = None,
+) -> List[TestcaseExecution]:
     if source_id is None:
         source_id = path.name
     root = ET.parse(path).getroot()
-    executions: list[TestcaseExecution] = []
+    executions: List[TestcaseExecution] = []
     suites = iter_junit_suites(root)
     if not suites:
         log_warn(f"no testsuite elements found file={path} platform={platform}")
@@ -323,8 +324,8 @@ def parse_junit_file(
 
 def build_report(
     title: str,
-    platform_specs: list[tuple[str, Path | str]],
-    build_url: str | None = None,
+    platform_specs: List[Tuple[str, Union[Path, str]]],
+    build_url: Optional[str] = None,
 ) -> Report:
     log_info(
         f"Start JUnit report model build title={title!r} platforms={len(platform_specs)}"
