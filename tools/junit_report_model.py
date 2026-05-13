@@ -153,11 +153,13 @@ def parse_platform_arg(value: str) -> tuple[str, Path]:
     return name.strip(), Path(raw_path)
 
 
-def logical_test_identity(testcase: ET.Element, source_id: str) -> tuple[str, str, str]:
+def logical_test_identity(
+    testcase: ET.Element, source_id: str
+) -> tuple[str, str, str]:
     name = testcase.attrib.get("name", "").strip() or "<unnamed>"
     classname = testcase.attrib.get("classname", "").strip()
     test_id = f"{classname}::{name}" if classname else name
-    return f"{source_id}::{test_id}", classname, name
+    return test_id, classname, name
 
 
 def testcase_status(testcase: ET.Element) -> str:
@@ -262,7 +264,9 @@ def iter_junit_suites(root: ET.Element) -> list[ET.Element]:
 
 
 def parse_junit_file(
-    path: Path, platform: str, source_id: str | None = None
+    path: Path,
+    platform: str,
+    source_id: str | None = None,
 ) -> list[TestcaseExecution]:
     if source_id is None:
         source_id = path.name
@@ -282,7 +286,9 @@ def parse_junit_file(
                 f"empty testsuite file={path} platform={platform} suite={suite_name}"
             )
         for testcase in suite_testcases:
-            logical_id, classname, name = logical_test_identity(testcase, source_id)
+            logical_id, classname, name = logical_test_identity(
+                testcase, source_id
+            )
             status = testcase_status(testcase)
             reason, output = testcase_reason_and_output(testcase, status)
             executions.append(
@@ -326,22 +332,19 @@ def build_report(
     suites: "OrderedDict[str, TestSuite]" = OrderedDict()
     total_files = 0
     total_raw_executions = 0
+    all_files_to_process = []
     duplicates_seen = 0
     duplicates_replaced = 0
 
     for platform, raw_path in platform_specs:
         input_path = Path(raw_path)
         log_info(f"Inspect platform={platform} path={input_path}")
-        xml_files = discover_xml_files(input_path)
-        total_files += len(xml_files)
-        log_info(
-            f"platform={platform} path={input_path} discovered {len(xml_files)} XML file(s)"
-        )
-        if not xml_files:
-            log_warn(f"platform={platform} path={input_path} produced no XML files")
-        for xml_file in xml_files:
+        platform_xml_files = discover_xml_files(input_path)
+        total_files += len(platform_xml_files)
+        log_info(f"platform={platform} discovered {len(platform_xml_files)} XML file(s)")
+        for xml_file in platform_xml_files:
             rel_path = (
-                xml_file.relative_to(input_path).as_posix()
+                xml_file.relative_to(input_path.parent if input_path.is_file() else input_path).as_posix()
                 if input_path.is_dir()
                 else xml_file.name
             )
@@ -355,44 +358,53 @@ def build_report(
                 "/".join(p for p in parts if not UUID_RE.match(p) and p != platform)
                 or rel_path
             )
+            all_files_to_process.append((platform, xml_file, source_id))
 
-            file_executions = parse_junit_file(xml_file, platform, source_id)
-            total_raw_executions += len(file_executions)
-            for execution in file_executions:
-                suite = suites.get(execution.suite_name)
-                if suite is None:
-                    suite = TestSuite(name=execution.suite_name)
-                    suites[execution.suite_name] = suite
-                    log_info(f"created testsuite suite={execution.suite_name}")
-                logical = suite.logical_tests.get(execution.logical_id)
-                if logical is None:
-                    logical = LogicalTest(
-                        suite_name=execution.suite_name,
-                        logical_id=execution.logical_id,
-                        classname=execution.classname,
-                        name=execution.name,
+    if not all_files_to_process:
+        log_warn("No JUnit XML files discovered across all platforms")
+
+    log_info("Omitting filename prefix from all test identities")
+
+    for platform, xml_file, source_id in all_files_to_process:
+        file_executions = parse_junit_file(
+            xml_file, platform, source_id
+        )
+        total_raw_executions += len(file_executions)
+        for execution in file_executions:
+            suite = suites.get(execution.suite_name)
+            if suite is None:
+                suite = TestSuite(name=execution.suite_name)
+                suites[execution.suite_name] = suite
+                log_info(f"created testsuite suite={execution.suite_name}")
+            logical = suite.logical_tests.get(execution.logical_id)
+            if logical is None:
+                logical = LogicalTest(
+                    suite_name=execution.suite_name,
+                    logical_id=execution.logical_id,
+                    classname=execution.classname,
+                    name=execution.name,
+                )
+                suite.logical_tests[execution.logical_id] = logical
+            existing = logical.executions.get(platform)
+            if existing is None:
+                logical.executions[platform] = execution
+            else:
+                duplicates_seen += 1
+                chosen = worse_execution(existing, execution)
+                if chosen is execution:
+                    duplicates_replaced += 1
+                    log_warn(
+                        f"duplicate replaced test={execution.logical_id} platform={platform} "
+                        f"suite={execution.suite_name} old_status={existing.status} "
+                        f"new_status={execution.status} old_file={existing.source_file} new_file={execution.source_file}"
                     )
-                    suite.logical_tests[execution.logical_id] = logical
-                existing = logical.executions.get(platform)
-                if existing is None:
-                    logical.executions[platform] = execution
                 else:
-                    duplicates_seen += 1
-                    chosen = worse_execution(existing, execution)
-                    if chosen is execution:
-                        duplicates_replaced += 1
-                        log_warn(
-                            f"duplicate replaced test={execution.logical_id} platform={platform} "
-                            f"suite={execution.suite_name} old_status={existing.status} "
-                            f"new_status={execution.status} old_file={existing.source_file} new_file={execution.source_file}"
-                        )
-                    else:
-                        log_warn(
-                            f"duplicate kept-existing test={execution.logical_id} platform={platform} "
-                            f"suite={execution.suite_name} existing_status={existing.status} "
-                            f"duplicate_status={execution.status} existing_file={existing.source_file} duplicate_file={execution.source_file}"
-                        )
-                    logical.executions[platform] = chosen
+                    log_warn(
+                        f"duplicate kept-existing test={execution.logical_id} platform={platform} "
+                        f"suite={execution.suite_name} existing_status={existing.status} "
+                        f"duplicate_status={execution.status} existing_file={existing.source_file} duplicate_file={execution.source_file}"
+                    )
+                logical.executions[platform] = chosen
 
     report = Report(
         title=title,
