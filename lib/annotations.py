@@ -1,3 +1,4 @@
+from __future__ import annotations
 import subprocess
 import sys
 
@@ -12,14 +13,14 @@ def build_annotation_body(title: str, summary: dict, html_url: str) -> str:
     passed = counts.get("SUCCESSFUL", 0)
     
     logical_tests = summary.get("logical_tests", 0)
-    targets = summary.get("targets", 1)
+    targets = len(summary.get("resolved_platforms", []))
+    if targets == 0:
+        targets = summary.get("targets", 1)
     
     parts = []
+    parts.append(f"{logical_tests} tests")
     if targets > 1:
-        parts.append(f"{logical_tests} tests per target")
         parts.append(f"{targets} targets")
-    else:
-        parts.append(f"{logical_tests} tests")
         
     parts.append(f"{passed} passed")
     parts.append(f"{failed} failed")

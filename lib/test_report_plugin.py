@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Dict, List, Optional
 import sys
 import io
@@ -181,7 +182,7 @@ def main():
 
         # Collect XMLs first to ensure they exist. For full runs this reads
         # the object-store staging directory populated above.
-        xml_uploads = collect_xml_uploads(config.platforms)
+        xml_uploads = collect_xml_uploads(config.platforms, config.scope)
         
         # Create temp dir for HTML report generation output. For job scope or full scope with variant, we can use a stable path to allow in-place updates; otherwise we use a unique temp dir.
         variant_or_full = config.variant if (config.scope == "job" or (config.scope == "full" and config.variant)) else "full"

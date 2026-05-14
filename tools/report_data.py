@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from junit_report_model import (
     LogicalTest,
@@ -90,9 +90,9 @@ class UiDataBuilder:
     def finalize_child_statuses(self) -> None:
         node_by_id = {node["id"]: node for node in self.test_nodes}
 
-        def statuses_for(node_id: str) -> set[str]:
+        def statuses_for(node_id: str) -> Set[str]:
             if node_id in self.children:
-                statuses: set[str] = set()
+                statuses: Set[str] = set()
                 for child_id in self.children[node_id]["ids"]:
                     statuses.update(statuses_for(child_id))
                 self.children[node_id]["childStatuses"] = sorted(
@@ -211,6 +211,7 @@ def report_to_report_ui_data(
             "logicalTests": report.logical_test_count,
             "platformExecutions": report.platform_execution_count,
             "targets": len(report.platforms),
+            "resolvedPlatforms": report.resolved_platforms,
             "structuralContainers": len(builder.test_nodes)
             - report.platform_execution_count,
             "statusCounts": dict(report.status_counts),

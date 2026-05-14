@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import List
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 UI_DIR = REPO_ROOT / "ui" / "report-ui"
@@ -17,7 +18,7 @@ INIT_SCRIPT_TAGS = (
 )
 
 
-def run(command: list[str], cwd: Path) -> None:
+def run(command: List[str], cwd: Path) -> None:
     subprocess.run(command, cwd=cwd, check=True)
 
 

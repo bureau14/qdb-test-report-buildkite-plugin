@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import List
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,11 +11,13 @@ class XmlUpload:
     object_relative_path: str
 
 
-def collect_xml_uploads(platforms: List[PlatformConfig]) -> List[XmlUpload]:
+def collect_xml_uploads(platforms: List[PlatformConfig], scope: str) -> List[XmlUpload]:
     uploads = []
     for platform in platforms:
         path = platform.path
         if not path.exists():
+            if scope == "job":
+                raise FileNotFoundError(f"platform path does not exist: {path} (platform: {platform.name})")
             print(f"WARN  platform path does not exist: {path} (platform: {platform.name})", file=sys.stderr)
             continue
             
@@ -39,6 +42,8 @@ def collect_xml_uploads(platforms: List[PlatformConfig]) -> List[XmlUpload]:
                 ))
         
         if not platform_uploads:
+            if scope == "job":
+                raise FileNotFoundError(f"no JUnit XML files found for platform: {platform.name} at {path}")
             print(f"WARN  no JUnit XML files found for platform: {platform.name} at {path}", file=sys.stderr)
             continue
             

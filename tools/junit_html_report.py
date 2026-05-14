@@ -80,6 +80,7 @@ def generate_html_report(
             "logical_tests": report.logical_test_count,
             "platform_executions": report.platform_execution_count,
             "targets": len(report.platforms),
+            "resolved_platforms": report.resolved_platforms,
             "status_counts": dict(report.status_counts),
             "root_status": report.root_status,
         }

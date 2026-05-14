@@ -2,10 +2,8 @@
 """Parse JUnit XML files into a neutral report model."""
 
 from __future__ import annotations
-from typing import Dict, List, Optional, Tuple, Union
-
+from typing import Dict, List, Optional, Tuple, Union, Counter, OrderedDict
 import argparse
-from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -85,6 +83,16 @@ class Report:
     raw_testcases: int = 0
     duplicates_seen: int = 0
     duplicates_replaced: int = 0
+
+    @property
+    def resolved_platforms(self) -> List[str]:
+        """Returns the list of platforms that actually had at least one test execution."""
+        seen = set()
+        for suite in self.suites.values():
+            for logical in suite.logical_tests.values():
+                for platform in logical.executions:
+                    seen.add(platform)
+        return [p for p in self.platforms if p in seen]
 
     @property
     def logical_test_count(self) -> int:

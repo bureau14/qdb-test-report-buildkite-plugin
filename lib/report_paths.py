@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 from dataclasses import dataclass
 from object_store import key_join
 
@@ -9,7 +11,7 @@ class ReportLocation:
     xml_prefix: str
 
 
-def report_scope_key(scope: str, job_id: str | None) -> str:
+def report_scope_key(scope: str, job_id: Optional[str]) -> str:
     if scope == "full":
         return "full"
     if scope == "job":
@@ -26,8 +28,8 @@ def build_report_location(
     git_ref: str,
     build_id: str,
     scope: str,
-    job_id: str | None,
-    variant: str | None = None,
+    job_id: Optional[str],
+    variant: Optional[str] = None,
 ) -> ReportLocation:
     if scope == "job" and not variant:
         raise ValueError("job scope requires variant")
