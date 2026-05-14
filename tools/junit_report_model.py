@@ -7,6 +7,7 @@ import argparse
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+import glob
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -138,9 +139,22 @@ def utc_now_iso() -> str:
     )
 
 
+def has_glob_magic(path: Union[Path, str]) -> bool:
+    return any(char in str(path) for char in "*?[]")
+
+
 def discover_xml_files(path: Union[Path, str]) -> List[Path]:
-    """Return XML files for a file or directory, sorted by deterministic relative path."""
+    """Return XML files for a file, directory, or glob, sorted deterministically."""
     input_path = Path(path)
+    if has_glob_magic(input_path):
+        return sorted(
+            {
+                Path(match).resolve()
+                for match in glob.glob(str(input_path), recursive=True)
+                if Path(match).is_file() and Path(match).suffix == ".xml"
+            },
+            key=lambda p: p.as_posix(),
+        )
     if input_path.is_file():
         return [input_path]
     if input_path.is_dir():
