@@ -3,6 +3,7 @@ from typing import Optional
 from dataclasses import dataclass
 from object_store import key_join
 
+
 @dataclass(frozen=True)
 class ReportLocation:
     base_prefix: str
@@ -36,20 +37,20 @@ def build_report_location(
 
     # Base parts: <prefix>/<project_id>/<git_ref>/reports
     parts = [destination_prefix, project_id, git_ref, "reports"]
-    
+
     if variant:
         parts.extend(["variants", variant])
-        
+
     parts.extend(["builds", build_id])
-    
+
     scope_key = report_scope_key(scope, job_id)
     parts.append(scope_key)
-    
+
     base_prefix = key_join(*parts)
-    
+
     return ReportLocation(
         base_prefix=base_prefix,
         html_key=key_join(base_prefix, "index.html"),
         summary_key=key_join(base_prefix, "summary.json"),
-        xml_prefix=key_join(base_prefix, "xml")
+        xml_prefix=key_join(base_prefix, "xml"),
     )

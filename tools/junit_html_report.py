@@ -71,7 +71,10 @@ def generate_html_report(
         report, execution_name=execution_name, only_failures=only_failures
     )
     output_path = write_html_report(data, output, template)
-    print(f"INFO  Wrote HTML report output={output_path} bytes={output_path.stat().st_size}", file=sys.stderr)
+    print(
+        f"INFO  Wrote HTML report output={output_path} bytes={output_path.stat().st_size}",
+        file=sys.stderr,
+    )
 
     if summary_json:
         summary = {
@@ -96,7 +99,9 @@ def generate_html_report(
     )
 
     if fail_on_status != "never" and report.root_status == fail_on_status.upper():
-        print(f"INFO  Exiting with status {report.root_status} (code 64)", file=sys.stderr)
+        print(
+            f"INFO  Exiting with status {report.root_status} (code 64)", file=sys.stderr
+        )
         return 64
 
     return 0

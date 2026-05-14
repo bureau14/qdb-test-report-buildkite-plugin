@@ -2,6 +2,7 @@ from __future__ import annotations
 import subprocess
 import sys
 
+
 def build_annotation_body(title: str, summary: dict, html_url: str) -> str:
     """
     Builds the markdown body for the Buildkite annotation.
@@ -11,26 +12,27 @@ def build_annotation_body(title: str, summary: dict, html_url: str) -> str:
     errored = counts.get("ERRORED", 0)
     skipped = counts.get("SKIPPED", 0)
     passed = counts.get("SUCCESSFUL", 0)
-    
+
     logical_tests = summary.get("logical_tests", 0)
     targets = len(summary.get("resolved_platforms", []))
     if targets == 0:
         targets = summary.get("targets", 1)
-    
+
     parts = []
     parts.append(f"{logical_tests} tests")
     if targets > 1:
         parts.append(f"{targets} targets")
-        
+
     parts.append(f"{passed} passed")
     parts.append(f"{failed} failed")
     parts.append(f"{errored} errored")
     parts.append(f"{skipped} skipped")
-        
+
     stats_line = ", ".join(parts)
-    
-    body = f"## {title}\n\n{stats_line}\n\n<a href=\"{html_url}\" target=\"_blank\" rel=\"noopener noreferrer\">Open full report</a>"
+
+    body = f'## {title}\n\n{stats_line}\n\n<a href="{html_url}" target="_blank" rel="noopener noreferrer">Open full report</a>'
     return body
+
 
 def get_annotation_style(summary: dict) -> str:
     """
@@ -41,7 +43,7 @@ def get_annotation_style(summary: dict) -> str:
     failed = counts.get("FAILED", 0)
     errored = counts.get("ERRORED", 0)
     skipped = counts.get("SKIPPED", 0)
-    
+
     if failed > 0 or errored > 0 or root_status in ("FAILED", "ERRORED"):
         return "error"
     if skipped > 0:
@@ -50,26 +52,28 @@ def get_annotation_style(summary: dict) -> str:
         return "success"
     return "info"
 
+
 def create_buildkite_annotation(
-    body: str,
-    context: str,
-    style: str,
-    priority: int,
-    scope: str = "build"
+    body: str, context: str, style: str, priority: int, scope: str = "build"
 ):
     """
     Calls buildkite-agent annotate to create the annotation.
     """
     args = [
-        "buildkite-agent", "annotate", body,
-        "--context", context,
-        "--style", style,
-        "--priority", str(priority),
+        "buildkite-agent",
+        "annotate",
+        body,
+        "--context",
+        context,
+        "--style",
+        style,
+        "--priority",
+        str(priority),
     ]
     if scope == "job":
         args.append("--scope")
         args.append("job")
-        
+
     try:
         subprocess.run(args, check=True)
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:

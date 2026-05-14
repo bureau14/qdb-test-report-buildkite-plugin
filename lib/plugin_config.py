@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+
 @dataclass(frozen=True)
 class PlatformConfig:
     name: str
@@ -45,7 +46,9 @@ def resolve_buildkite_git_ref() -> str:
     branch = _get_env("BUILDKITE_BRANCH")
     if branch:
         return f"refs/heads/{branch}"
-    raise ValueError("missing Buildkite git ref: expected BUILDKITE_TAG or BUILDKITE_BRANCH")
+    raise ValueError(
+        "missing Buildkite git ref: expected BUILDKITE_TAG or BUILDKITE_BRANCH"
+    )
 
 
 def load_plugin_config() -> PluginConfig:
@@ -55,11 +58,11 @@ def load_plugin_config() -> PluginConfig:
         raise ValueError("missing required config: scope")
     if scope not in ("job", "full"):
         raise ValueError(f"scope must be 'job' or 'full', got {scope!r}")
-        
+
     title = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE")
     if not title:
         raise ValueError("missing required config: title")
-        
+
     # Platforms
     platforms = []
     idx = 0
@@ -70,32 +73,44 @@ def load_plugin_config() -> PluginConfig:
             break
         platforms.append(PlatformConfig(name=name, path=Path(path)))
         idx += 1
-        
+
     if not platforms:
-        raise ValueError("missing required config: platforms (at least one platform is required)")
+        raise ValueError(
+            "missing required config: platforms (at least one platform is required)"
+        )
 
     # Optional/Defaulted properties
     variant = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_VARIANT")
     execution_name = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_EXECUTION_NAME")
-    
-    project_id = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_PROJECT_ID") or _get_env("BUILDKITE_PIPELINE_SLUG")
+
+    project_id = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_PROJECT_ID") or _get_env(
+        "BUILDKITE_PIPELINE_SLUG"
+    )
     if not project_id:
-        raise ValueError("missing required config: project_id (BUILDKITE_PIPELINE_SLUG not set)")
-        
+        raise ValueError(
+            "missing required config: project_id (BUILDKITE_PIPELINE_SLUG not set)"
+        )
+
     build_id = _get_env("BUILDKITE_BUILD_ID")
     if not build_id:
-        raise ValueError("missing required config: build_id (BUILDKITE_BUILD_ID not set)")
-        
+        raise ValueError(
+            "missing required config: build_id (BUILDKITE_BUILD_ID not set)"
+        )
+
     job_id = _get_env("BUILDKITE_JOB_ID")
     build_url = _get_env("BUILDKITE_BUILD_URL")
 
     git_ref = resolve_buildkite_git_ref()
 
-    only_failures = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_ONLY_FAILURES", False)
+    only_failures = _get_bool_env(
+        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_ONLY_FAILURES", False
+    )
     annotate = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_ANNOTATE", True)
-    
+
     default_fail_on_status = "never" if scope == "job" else "failed"
-    fail_on_status = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_FAIL_ON_STATUS", default_fail_on_status)
+    fail_on_status = _get_env(
+        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_FAIL_ON_STATUS", default_fail_on_status
+    )
 
     # Validation
     if scope == "job":

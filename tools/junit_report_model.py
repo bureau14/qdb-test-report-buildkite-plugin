@@ -163,9 +163,7 @@ def parse_platform_arg(value: str) -> Tuple[str, Path]:
     return name.strip(), Path(raw_path)
 
 
-def logical_test_identity(
-    testcase: ET.Element, source_id: str
-) -> Tuple[str, str, str]:
+def logical_test_identity(testcase: ET.Element, source_id: str) -> Tuple[str, str, str]:
     name = testcase.attrib.get("name", "").strip() or "<unnamed>"
     classname = testcase.attrib.get("classname", "").strip()
     test_id = f"{classname}::{name}" if classname else name
@@ -295,9 +293,7 @@ def parse_junit_file(
                 f"empty testsuite file={path} platform={platform} suite={suite_name}"
             )
         for testcase in suite_testcases:
-            logical_id, classname, name = logical_test_identity(
-                testcase, source_id
-            )
+            logical_id, classname, name = logical_test_identity(testcase, source_id)
             status = testcase_status(testcase)
             reason, output = testcase_reason_and_output(testcase, status)
             executions.append(
@@ -350,10 +346,14 @@ def build_report(
         log_info(f"Inspect platform={platform} path={input_path}")
         platform_xml_files = discover_xml_files(input_path)
         total_files += len(platform_xml_files)
-        log_info(f"platform={platform} discovered {len(platform_xml_files)} XML file(s)")
+        log_info(
+            f"platform={platform} discovered {len(platform_xml_files)} XML file(s)"
+        )
         for xml_file in platform_xml_files:
             rel_path = (
-                xml_file.relative_to(input_path.parent if input_path.is_file() else input_path).as_posix()
+                xml_file.relative_to(
+                    input_path.parent if input_path.is_file() else input_path
+                ).as_posix()
                 if input_path.is_dir()
                 else xml_file.name
             )
@@ -375,9 +375,7 @@ def build_report(
     log_info("Omitting filename prefix from all test identities")
 
     for platform, xml_file, source_id in all_files_to_process:
-        file_executions = parse_junit_file(
-            xml_file, platform, source_id
-        )
+        file_executions = parse_junit_file(xml_file, platform, source_id)
         total_raw_executions += len(file_executions)
         for execution in file_executions:
             suite = suites.get(execution.suite_name)

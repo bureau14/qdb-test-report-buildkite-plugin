@@ -80,7 +80,9 @@ def attempted_job_xml_prefixes(
     ]
 
 
-def _xml_metadata_from_key(*, variant: str, prefix: str, key: str, size_bytes: int) -> Optional[JobXmlObject]:
+def _xml_metadata_from_key(
+    *, variant: str, prefix: str, key: str, size_bytes: int
+) -> Optional[JobXmlObject]:
     if not key.endswith(".xml"):
         return None
     relative_to_jobs = key[len(prefix) :].lstrip("/") if key.startswith(prefix) else key
@@ -168,7 +170,10 @@ def collect_full_scope_xml(
             variants=variants,
         )
         details = "\n".join(f"  - {prefix}" for prefix in prefixes)
-        print(f"WARN  no JUnit XML objects found for full-scope aggregation. Attempted prefixes:\n{details}", file=sys.stderr)
+        print(
+            f"WARN  no JUnit XML objects found for full-scope aggregation. Attempted prefixes:\n{details}",
+            file=sys.stderr,
+        )
         return []
 
     downloaded: List[DownloadedJobXml] = []

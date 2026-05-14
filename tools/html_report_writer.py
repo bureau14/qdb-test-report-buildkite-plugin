@@ -36,7 +36,9 @@ def render_html(data: Any, template_path: Union[Path, str] = DEFAULT_TEMPLATE) -
 
 
 def write_html_report(
-    data: Any, output: Union[Path, str], template_path: Union[Path, str] = DEFAULT_TEMPLATE
+    data: Any,
+    output: Union[Path, str],
+    template_path: Union[Path, str] = DEFAULT_TEMPLATE,
 ) -> Path:
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
