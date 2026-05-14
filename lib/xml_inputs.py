@@ -3,6 +3,7 @@ from typing import List
 from dataclasses import dataclass
 from pathlib import Path
 from plugin_config import PlatformConfig
+import glob
 import sys
 
 
@@ -16,7 +17,29 @@ def collect_xml_uploads(platforms: List[PlatformConfig], scope: str) -> List[Xml
     uploads = []
     for platform in platforms:
         path = platform.path
-        if not path.exists():
+        platform_uploads = []
+
+        path_str = str(path)
+        is_glob = any(c in path_str for c in "*?[]")
+
+        if is_glob:
+            cwd = Path.cwd().resolve()
+            xml_files = sorted(
+                {
+                    Path(f).resolve()
+                    for f in glob.glob(path_str, recursive=True)
+                    if Path(f).is_file()
+                }
+            )
+            for xml_file in xml_files:
+                rel_path = xml_file.relative_to(cwd).as_posix()
+                platform_uploads.append(
+                    XmlUpload(
+                        local_path=xml_file,
+                        object_relative_path=f"{platform.name}/{rel_path}",
+                    )
+                )
+        elif not path.exists():
             if scope == "job":
                 raise FileNotFoundError(
                     f"platform path does not exist: {path} (platform: {platform.name})"
@@ -26,9 +49,7 @@ def collect_xml_uploads(platforms: List[PlatformConfig], scope: str) -> List[Xml
                 file=sys.stderr,
             )
             continue
-
-        platform_uploads = []
-        if path.is_file():
+        elif path.is_file():
             # For single file, we use its name
             platform_uploads.append(
                 XmlUpload(
