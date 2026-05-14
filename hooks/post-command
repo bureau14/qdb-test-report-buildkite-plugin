@@ -20,7 +20,8 @@ status=$?
 set -e
 
 if [[ $status -eq 64 ]]; then
-  # Report status check failed (e.g. failed tests and fail_on_status=failed)
+  # Test-failure gate failed (fail_on_test_failures=true and at least one
+  # failure/error was present in the generated report).
   # Exit with 64 to signal a test failure status.
   exit 64
 elif [[ $status -ne 0 ]]; then
@@ -29,6 +30,6 @@ elif [[ $status -ne 0 ]]; then
   exit 1
 fi
 
-# Success or fail_on_status=never.
+# Success or fail_on_test_failures=false.
 # Exit 0 and let Buildkite preserve the original command exit status.
 exit 0

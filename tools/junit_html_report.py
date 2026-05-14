@@ -42,10 +42,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip SUCCESSFUL and SKIPPED tests in the report tree; summary still shows full counts",
     )
     parser.add_argument(
-        "--fail-on-status",
-        choices=["failed", "errored", "never"],
-        default="failed",
-        help="Exit with code 64 if the report status matches these criteria (default: failed). Use 'never' to disable.",
+        "--fail-on-test-failures",
+        action="store_true",
+        help="Exit with code 64 if any test failed or errored.",
     )
     return parser
 
@@ -60,7 +59,7 @@ def generate_html_report(
     execution_name: Optional[str] = None,
     build_url: Optional[str] = None,
     only_failures: bool = False,
-    fail_on_status: str = "failed",
+    fail_on_test_failures: bool = False,
 ) -> int:
     report = build_report(
         title=title,
@@ -98,9 +97,11 @@ def generate_html_report(
         file=sys.stderr,
     )
 
-    if fail_on_status != "never" and report.root_status == fail_on_status.upper():
+    failed_or_errored = report.status_counts["FAILED"] + report.status_counts["ERRORED"]
+    if fail_on_test_failures and failed_or_errored:
         print(
-            f"INFO  Exiting with status {report.root_status} (code 64)", file=sys.stderr
+            f"INFO  Exiting with {failed_or_errored} failed/errored test execution(s) (code 64)",
+            file=sys.stderr,
         )
         return 64
 
@@ -119,7 +120,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             execution_name=args.execution_name,
             build_url=args.build_url,
             only_failures=args.only_failures,
-            fail_on_status=args.fail_on_status,
+            fail_on_test_failures=args.fail_on_test_failures,
         )
     except Exception as exc:  # pragma: no cover - CLI guard
         print(f"error: {exc}", file=sys.stderr)
