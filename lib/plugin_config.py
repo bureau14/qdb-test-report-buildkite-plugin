@@ -25,7 +25,7 @@ class PluginConfig:
     platforms: List[PlatformConfig]
     only_failures: bool
     annotate: bool
-    fail_on_status: str
+    fail_on_test_failures: bool
 
 
 def _get_env(key: str, default: Optional[str] = None) -> Optional[str]:
@@ -107,9 +107,8 @@ def load_plugin_config() -> PluginConfig:
     )
     annotate = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_ANNOTATE", True)
 
-    default_fail_on_status = "never" if scope == "job" else "failed"
-    fail_on_status = _get_env(
-        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_FAIL_ON_STATUS", default_fail_on_status
+    fail_on_test_failures = _get_bool_env(
+        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_FAIL_ON_TEST_FAILURES", scope == "job"
     )
 
     # Validation
@@ -132,5 +131,5 @@ def load_plugin_config() -> PluginConfig:
         platforms=platforms,
         only_failures=only_failures,
         annotate=annotate,
-        fail_on_status=fail_on_status,
+        fail_on_test_failures=fail_on_test_failures,
     )

@@ -101,14 +101,15 @@ def run_report_generation(config: PluginConfig, output_dir: Path) -> GenerationR
             execution_name=config.execution_name,
             build_url=config.build_url,
             only_failures=config.only_failures,
-            fail_on_status="never",
+            fail_on_test_failures=False,
         )
 
     log_content = log_stream.getvalue()
     log_path.write_text(log_content)
 
     if exit_code != 0:
-        # If exit_code is non-zero even with --fail-on-status never, something is wrong.
+        # Report generation should not apply test-failure exit behavior here; the
+        # plugin decides final status after artifacts/annotations are published.
         raise RuntimeError(
             f"Report generation failed with exit code {exit_code}. Logs:\n{log_content}"
         )
@@ -305,14 +306,15 @@ def main():
                         body, context, style, priority=10, scope="build"
                     )
 
-        # Exit with failure code if fail_on_status is set and matches the report status
+        # Exit with failure code when enabled and any test failed or errored.
         summary = json.loads(generation.summary_path.read_text())
-        if (
-            config.fail_on_status != "never"
-            and summary.get("root_status") == config.fail_on_status.upper()
-        ):
+        status_counts = summary.get("status_counts", {})
+        failed_or_errored = int(status_counts.get("FAILED", 0)) + int(
+            status_counts.get("ERRORED", 0)
+        )
+        if config.fail_on_test_failures and failed_or_errored:
             print(
-                f"INFO  Report status {summary.get('root_status')} matches fail_on_status={config.fail_on_status}. Exiting 64.",
+                f"INFO  Report has {failed_or_errored} failed/errored test execution(s) and fail_on_test_failures=true. Exiting 64.",
                 file=sys.stderr,
             )
             return 64
