@@ -54,6 +54,33 @@ class GenerationResult:
     log_path: Path
 
 
+def full_scope_missing_variants(
+    platforms: List[PlatformConfig], xml_uploads: List[XmlUpload]
+) -> List[str]:
+    """Return configured full-scope variants that have no collected XML files."""
+    variants_with_xml = {
+        upload.object_relative_path.split("/", 1)[0]
+        for upload in xml_uploads
+        if "/" in upload.object_relative_path
+    }
+    return [
+        platform.name
+        for platform in platforms
+        if platform.name not in variants_with_xml
+    ]
+
+
+def add_summary_warnings(summary_path: Path, warnings: List[str]) -> None:
+    if not warnings:
+        return
+
+    summary = json.loads(summary_path.read_text())
+    existing = list(summary.get("warnings", []))
+    existing.extend(warnings)
+    summary["warnings"] = existing
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+
+
 def run_report_generation(config: PluginConfig, output_dir: Path) -> GenerationResult:
     """
     Runs the HTML report generator and returns the paths to the generated files.
@@ -218,6 +245,19 @@ def main():
         # Collect XMLs first to ensure they exist. For full runs this reads
         # the object-store staging directory populated above.
         xml_uploads = collect_xml_uploads(config.platforms, config.scope)
+        summary_warnings: List[str] = []
+        if config.scope == "full":
+            missing_variants = full_scope_missing_variants(
+                config.platforms, xml_uploads
+            )
+            if missing_variants:
+                variant_list = ", ".join(missing_variants)
+                warning = (
+                    f"Missing full-scope report variants: {variant_list}. "
+                    "This usually means a job failed before publishing test XML."
+                )
+                print(f"WARN  {warning}", file=sys.stderr)
+                summary_warnings.append(warning)
 
         # Create temp dir for HTML report generation output. For job scope or full scope with variant, we can use a stable path to allow in-place updates; otherwise we use a unique temp dir.
         variant_or_full = (
@@ -230,6 +270,7 @@ def main():
         # Generate report
         print(f"INFO  Generating {config.scope} report", file=sys.stderr)
         generation = run_report_generation(config, tmp_base)
+        add_summary_warnings(generation.summary_path, summary_warnings)
 
         # Upload JUNIT reports, HTML report, summary
         uploads = upload_report_artifacts(

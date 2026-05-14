@@ -29,8 +29,13 @@ def build_annotation_body(title: str, summary: dict, html_url: str) -> str:
     parts.append(f"{skipped} skipped")
 
     stats_line = ", ".join(parts)
+    warnings = summary.get("warnings", [])
 
-    body = f'## {title}\n\n{stats_line}\n\n<a href="{html_url}" target="_blank" rel="noopener noreferrer">Open full report</a>'
+    body = f"## {title}\n\n{stats_line}"
+    if warnings:
+        warning_lines = "\n".join(f"- {warning}" for warning in warnings)
+        body += f"\n\n⚠️ Warnings\n\n{warning_lines}"
+    body += f'\n\n<a href="{html_url}" target="_blank" rel="noopener noreferrer">Open full report</a>'
     return body
 
 
@@ -45,6 +50,9 @@ def get_annotation_style(summary: dict) -> str:
 
     if failed > 0 or errored > 0 or root_status in ("FAILED", "ERRORED"):
         return "error"
+
+    if summary.get("warnings"):
+        return "warning"
 
     # Skips are treated as success.
     if root_status == "SUCCESSFUL":
