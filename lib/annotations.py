@@ -42,14 +42,14 @@ def get_annotation_style(summary: dict) -> str:
     counts = summary.get("status_counts", {})
     failed = counts.get("FAILED", 0)
     errored = counts.get("ERRORED", 0)
-    skipped = counts.get("SKIPPED", 0)
 
     if failed > 0 or errored > 0 or root_status in ("FAILED", "ERRORED"):
         return "error"
-    if skipped > 0:
-        return "warning"
+
+    # Skips are treated as success.
     if root_status == "SUCCESSFUL":
         return "success"
+
     return "info"
 
 
