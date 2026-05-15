@@ -212,9 +212,9 @@ def report_to_report_ui_data(
             "platformExecutions": report.platform_execution_count,
             "targets": len(report.platforms),
             "resolvedPlatforms": report.resolved_platforms,
-            "structuralContainers": len(builder.test_nodes)
-            - report.platform_execution_count,
+            "structuralContainers": len(report.suites) + report.logical_test_count,
             "statusCounts": dict(report.status_counts),
+            "logicalStatusCounts": dict(report.logical_status_counts),
             "rootStatus": report.root_status,
         },
         "sections": [

@@ -34,7 +34,7 @@ configuration:
         required: [name, path]
     only_failures:
       type: boolean
-      description: Generate HTML tree containing only failures/errors while keeping full summary counts
+      description: Generate a faster large-report HTML tree containing only failures/errors while keeping full summary counts
     annotate:
       type: boolean
       description: Create Buildkite annotation linking to HTML; default true

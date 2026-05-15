@@ -1,7 +1,10 @@
+// Modified from original source: https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/components/sidebar/TreeState.ts
 import TestExecution from "../common/TestExecution.ts";
 import { InjectionKey } from "vue";
 
 export const treeStateKey = Symbol() as InjectionKey<TreeState>;
+
+const LARGE_TREE_NODE_THRESHOLD = 2000;
 
 export default class TreeState {
   public readonly nodes: Record<string, NodeState>;
@@ -12,30 +15,30 @@ export default class TreeState {
   public showSuccessful = true;
 
   constructor(executions: TestExecution[]) {
-    this.nodes = executions.reduce(
-      (prev, execution) => {
-        return {
-          ...prev,
-          [execution.id]: {
-            collapsed: false,
-          },
-          ...execution.nodesWithChildren().reduce((prev, node) => {
-            const statuses = execution.nodeStatuses(node);
-            const initiallyCollapsed =
-              execution.parents(node).length > 1 &&
-              statuses.indexOf("FAILED") == -1 &&
-              statuses.indexOf("ERRORED") == -1;
-            return {
-              ...prev,
-              [node.id]: {
-                collapsed: initiallyCollapsed,
-              },
-            };
-          }, {}),
+    const nodes: Record<string, NodeState> = {};
+
+    for (const execution of executions) {
+      nodes[execution.id] = {
+        collapsed: false,
+      };
+
+      const largeTree = execution.size() > LARGE_TREE_NODE_THRESHOLD;
+      for (const node of execution.nodesWithChildren()) {
+        const statuses = execution.nodeStatuses(node);
+        const parentDepth = execution.parents(node).length;
+        const initiallyCollapsed = largeTree
+          ? parentDepth > 0
+          : parentDepth > 1 &&
+            statuses.indexOf("FAILED") == -1 &&
+            statuses.indexOf("ERRORED") == -1;
+
+        nodes[node.id] = {
+          collapsed: initiallyCollapsed,
         };
-      },
-      {} as Record<string, NodeState>,
-    );
+      }
+    }
+
+    this.nodes = nodes;
   }
 
   toggleShowAborted() {

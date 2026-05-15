@@ -84,6 +84,7 @@ def generate_html_report(
             "targets": len(report.platforms),
             "resolved_platforms": report.resolved_platforms,
             "status_counts": dict(report.status_counts),
+            "logical_status_counts": dict(report.logical_status_counts),
             "root_status": report.root_status,
         }
         summary_json.parent.mkdir(parents=True, exist_ok=True)

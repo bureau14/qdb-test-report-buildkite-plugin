@@ -126,6 +126,14 @@ class Report:
         )
 
     @property
+    def logical_status_counts(self) -> Counter[str]:
+        return Counter(
+            logical_status(logical)
+            for suite in self.suites.values()
+            for logical in suite.logical_tests.values()
+        )
+
+    @property
     def root_status(self) -> str:
         return aggregate_status(list(self.status_counts.elements()))
 
@@ -266,6 +274,17 @@ def aggregate_status(statuses: List[str]) -> str:
     return "SUCCESSFUL"
 
 
+def logical_status(logical: LogicalTest) -> str:
+    statuses = [execution.status for execution in logical.executions.values()]
+    if any(status == "ERRORED" for status in statuses):
+        return "ERRORED"
+    if any(status == "FAILED" for status in statuses):
+        return "FAILED"
+    if statuses and all(status == "SKIPPED" for status in statuses):
+        return "SKIPPED"
+    return "SUCCESSFUL"
+
+
 def worse_execution(
     current: TestcaseExecution, candidate: TestcaseExecution
 ) -> TestcaseExecution:
@@ -291,7 +310,16 @@ def parse_junit_file(
 ) -> List[TestcaseExecution]:
     if source_id is None:
         source_id = path.name
-    root = ET.parse(path).getroot()
+    if path.stat().st_size == 0:
+        log_warn(f"skipping empty JUnit XML file file={path} platform={platform}")
+        return []
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError as error:
+        log_warn(
+            f"skipping malformed JUnit XML file file={path} platform={platform} error={error}"
+        )
+        return []
     executions: List[TestcaseExecution] = []
     suites = iter_junit_suites(root)
     if not suites:

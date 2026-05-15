@@ -7,7 +7,7 @@ def build_annotation_body(title: str, summary: dict, html_url: str) -> str:
     """
     Builds the markdown body for the Buildkite annotation.
     """
-    counts = summary.get("status_counts", {})
+    counts = summary.get("logical_status_counts") or summary.get("status_counts", {})
     failed = counts.get("FAILED", 0)
     errored = counts.get("ERRORED", 0)
     skipped = counts.get("SKIPPED", 0)
