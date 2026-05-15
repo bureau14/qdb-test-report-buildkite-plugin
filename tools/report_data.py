@@ -158,8 +158,18 @@ def report_to_report_ui_data(
     execution_id = builder.next_id()
 
     root_labels = ["source:junit", "view:tests-first"]
+
+    summary_content: Dict[str, Any] = {
+        "Suites": len(report.suites),
+        "Logical tests": report.logical_test_count,
+        "Platform executions": report.platform_execution_count,
+        "Status": report.root_status,
+        "Generated at": report.generated_at,
+    }
     if report.build_url:
-        root_labels.append(f"buildkite-build-url:{report.build_url}")
+        summary_content["Buildkite build"] = f"link:{report.build_url}"
+    if report.commit_url:
+        summary_content["Git commit"] = f"link:{report.commit_url}"
 
     suite_ids: List[str] = []
 
@@ -221,23 +231,7 @@ def report_to_report_ui_data(
             labels_section(root_labels),
             kvp_section(
                 "Report summary",
-                {
-                    "Raw testcases": report.raw_testcases,
-                    "Suites": len(report.suites),
-                    "Logical tests": report.logical_test_count,
-                    "Platform executions": report.platform_execution_count,
-                    "Status": report.root_status,
-                    "Generated at": report.generated_at,
-                },
-            ),
-            kvp_section(
-                "Infrastructure",
-                {
-                    "Hostname": "junit-html-report-tool",
-                    "Username": "ci",
-                    "Operating system": "mixed-platform",
-                    "CPU cores": 1,
-                },
+                summary_content,
             ),
         ],
         "roots": suite_ids,

@@ -33,6 +33,7 @@ from annotations import (
     get_annotation_style,
     create_buildkite_annotation,
 )
+from git_links import build_commit_url
 
 FULL_SCOPE_XML_STAGE_ROOT = Path(".buildkite-test-report") / "downloaded-xml"
 
@@ -94,6 +95,7 @@ def run_report_generation(config: PluginConfig, output_dir: Path) -> GenerationR
         summary_json=summary_path,
         execution_name=config.execution_name,
         build_url=config.build_url,
+        commit_url=build_commit_url(config.repo, config.commit),
         only_failures=config.only_failures,
         fail_on_test_failures=False,
     )

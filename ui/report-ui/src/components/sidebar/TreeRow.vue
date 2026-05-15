@@ -18,13 +18,31 @@ const props = defineProps<{
 
 const nodeName = computed(() => props.row.node.name);
 const isExecutionRoot = computed(() => props.row.node instanceof TestExecution);
+
+function aggregateDisplayStatus(statuses: string[]): string | undefined {
+  if (statuses.includes("ERRORED")) {
+    return "ERRORED";
+  }
+  if (statuses.includes("FAILED")) {
+    return "FAILED";
+  }
+  if (statuses.includes("SUCCESSFUL")) {
+    return "SUCCESSFUL";
+  }
+  if (statuses.includes("SKIPPED")) {
+    return "SKIPPED";
+  }
+  return undefined;
+}
+
 const rowStatus = computed(() => {
   if (isExecutionRoot.value) {
     return undefined;
   }
-  return "status" in props.row.node && props.row.node.status
-    ? props.row.node.status
-    : "ABORTED";
+  if ("status" in props.row.node && props.row.node.status) {
+    return props.row.node.status;
+  }
+  return aggregateDisplayStatus(props.row.statuses);
 });
 const paddingLeft = computed(() => `${props.row.depth * 0.75}rem`);
 
@@ -75,7 +93,7 @@ if (defaultIconProps.size != 16) {
       @click="selectAndExpandNode()"
     >
       <ExecutionIcon v-if="isExecutionRoot" />
-      <TestResultStatusIcon v-else :status="rowStatus!" />
+      <TestResultStatusIcon v-else-if="rowStatus" :status="rowStatus" />
       <span class="ml-1 whitespace-nowrap">{{ nodeName }}</span>
     </div>
   </div>

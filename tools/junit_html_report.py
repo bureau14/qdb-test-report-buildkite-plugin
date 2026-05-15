@@ -36,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Top-level report execution name; defaults to the report title",
     )
     parser.add_argument("--build-url", help="Buildkite build URL metadata")
+    parser.add_argument("--commit-url", help="Git commit URL metadata")
     parser.add_argument(
         "--only-failures",
         action="store_true",
@@ -58,6 +59,7 @@ def generate_html_report(
     template: Path = DEFAULT_TEMPLATE,
     execution_name: Optional[str] = None,
     build_url: Optional[str] = None,
+    commit_url: Optional[str] = None,
     only_failures: bool = False,
     fail_on_test_failures: bool = False,
 ) -> int:
@@ -65,6 +67,7 @@ def generate_html_report(
         title=title,
         platform_specs=platform_specs,
         build_url=build_url,
+        commit_url=commit_url,
     )
     data = report_to_report_ui_data(
         report, execution_name=execution_name, only_failures=only_failures
@@ -120,6 +123,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             template=args.template,
             execution_name=args.execution_name,
             build_url=args.build_url,
+            commit_url=args.commit_url,
             only_failures=args.only_failures,
             fail_on_test_failures=args.fail_on_test_failures,
         )

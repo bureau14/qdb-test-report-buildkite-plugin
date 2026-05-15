@@ -26,6 +26,8 @@ class PluginConfig:
     only_failures: bool
     annotate: bool
     fail_on_test_failures: bool
+    commit: Optional[str] = None
+    repo: Optional[str] = None
 
 
 def _get_env(key: str, default: Optional[str] = None) -> Optional[str]:
@@ -99,6 +101,8 @@ def load_plugin_config() -> PluginConfig:
 
     job_id = _get_env("BUILDKITE_JOB_ID")
     build_url = _get_env("BUILDKITE_BUILD_URL")
+    commit = _get_env("BUILDKITE_COMMIT")
+    repo = _get_env("BUILDKITE_REPO")
 
     git_ref = resolve_buildkite_git_ref()
 
@@ -132,4 +136,6 @@ def load_plugin_config() -> PluginConfig:
         only_failures=only_failures,
         annotate=annotate,
         fail_on_test_failures=fail_on_test_failures,
+        commit=commit,
+        repo=repo,
     )
