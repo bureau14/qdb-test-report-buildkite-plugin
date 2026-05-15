@@ -1,12 +1,10 @@
 from __future__ import annotations
 from typing import Dict, List, Optional
 import sys
-import io
 import json
 import os
 from pathlib import Path
 from dataclasses import dataclass, replace
-from contextlib import redirect_stderr
 
 # Add tools to path so we can import junit_html_report tool
 tools_path = str(Path(__file__).parent.parent / "tools")
@@ -51,7 +49,6 @@ class ObjectStoreContext:
 class GenerationResult:
     html_path: Path
     summary_path: Path
-    log_path: Path
 
 
 def full_scope_missing_variants(
@@ -78,46 +75,32 @@ def add_summary_warnings(summary_path: Path, warnings: List[str]) -> None:
     existing = list(summary.get("warnings", []))
     existing.extend(warnings)
     summary["warnings"] = existing
-    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    summary_path.write_text(json.dumps(summary, indent=2))
 
 
 def run_report_generation(config: PluginConfig, output_dir: Path) -> GenerationResult:
     """
-    Runs the HTML report generator and returns the paths to the generated files.
+    Runs the HTML report generator and returns the paths to the generated report files.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     html_path = output_dir / "index.html"
     summary_path = output_dir / "summary.json"
-    log_path = output_dir / "generation.log"
 
-    log_stream = io.StringIO()
-    with redirect_stderr(log_stream):
-        exit_code = junit_html_report.generate_html_report(
-            title=config.title,
-            platform_specs=[(p.name, p.path) for p in config.platforms],
-            output=html_path,
-            summary_json=summary_path,
-            execution_name=config.execution_name,
-            build_url=config.build_url,
-            only_failures=config.only_failures,
-            fail_on_test_failures=False,
-        )
-
-    log_content = log_stream.getvalue()
-    log_path.write_text(log_content)
-
-    if exit_code != 0:
-        # Report generation should not apply test-failure exit behavior here; the
-        # plugin decides final status after artifacts/annotations are published.
-        raise RuntimeError(
-            f"Report generation failed with exit code {exit_code}. Logs:\n{log_content}"
-        )
+    junit_html_report.generate_html_report(
+        title=config.title,
+        platform_specs=[(p.name, p.path) for p in config.platforms],
+        output=html_path,
+        summary_json=summary_path,
+        execution_name=config.execution_name,
+        build_url=config.build_url,
+        only_failures=config.only_failures,
+        fail_on_test_failures=False,
+    )
 
     return GenerationResult(
         html_path=html_path,
         summary_path=summary_path,
-        log_path=log_path,
     )
 
 
@@ -138,7 +121,7 @@ def upload_report_artifacts(
     store_context: Optional[ObjectStoreContext] = None,
 ) -> Dict[str, PublishedObject]:
     """
-    Uploads all report artifacts (HTML, summary, log, XML) to the object store.
+    Uploads report artifacts (HTML, summary, and job-scope XML) to the object store.
     """
     context = store_context or resolve_object_store_context("upload")
     store_cfg = context.store_cfg
@@ -306,7 +289,7 @@ def main():
                         body, context, style, priority=10, scope="build"
                     )
 
-        # Exit with failure code when enabled and any test failed or errored.
+        # Exit with failure code if any test failed or errored and fail_on_test_failures is true
         summary = json.loads(generation.summary_path.read_text())
         status_counts = summary.get("status_counts", {})
         failed_or_errored = int(status_counts.get("FAILED", 0)) + int(

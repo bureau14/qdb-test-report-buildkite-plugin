@@ -1,3 +1,8 @@
+"""
+Extracted and from the qdb-artifacts-buildkite-plugin repo, this module configures and interacts with an S3/R2-compatible object store.
+It supports config resolution from env vars and SSM parameters, and provides functions to list, upload, and download objects with retry logic and metadata handling.
+"""
+
 from __future__ import annotations
 
 import json

@@ -14,6 +14,11 @@ class XmlUpload:
 
 
 def collect_xml_uploads(platforms: List[PlatformConfig], scope: str) -> List[XmlUpload]:
+    """
+    Collects XML files to upload based on the provided platform configurations.
+    Handles glob patterns, directories, and single files. Validates existence and raises errors or warnings based on the scope if files are missing.
+    In job scope, missing files will raise FileNotFoundError. In build scope, missing files will log a warning and be skipped (later annotated as missing in the report).
+    """
     uploads = []
     for platform in platforms:
         path = platform.path
