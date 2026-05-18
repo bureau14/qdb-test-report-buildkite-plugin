@@ -114,10 +114,10 @@ def run_report_generation(config: PluginConfig, output_dir: Path) -> GenerationR
     )
 
 
-def resolve_object_store_context(permission: str) -> ObjectStoreContext:
+def resolve_object_store_context() -> ObjectStoreContext:
     _s3, ssm = aws_clients()
     store_cfg = load_store_config(ssm)
-    auth = resolve_object_auth(ssm, store_cfg, permission)
+    auth = resolve_object_auth(store_cfg)
     bucket, prefix = parse_s3(store_cfg.destination)
     return ObjectStoreContext(
         store_cfg=store_cfg, auth=auth, bucket=bucket, prefix=prefix
@@ -133,7 +133,7 @@ def upload_report_artifacts(
     """
     Uploads report artifacts (HTML, summary, and job-scope XML) to the object store.
     """
-    context = store_context or resolve_object_store_context("upload")
+    context = store_context or resolve_object_store_context()
     store_cfg = context.store_cfg
     auth = context.auth
     bucket = context.bucket
@@ -201,7 +201,7 @@ def main():
 
         store_context: Optional[ObjectStoreContext] = None
         if config.scope == "full":
-            store_context = resolve_object_store_context("object-read-write")
+            store_context = resolve_object_store_context()
             variants = [platform.name for platform in config.platforms]
             log(f"Downloading full-scope JUnit XML for variants: {', '.join(variants)}")
             collect_full_scope_xml(

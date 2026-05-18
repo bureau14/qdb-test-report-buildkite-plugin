@@ -287,7 +287,7 @@ def fmt_size(n: Union[int, float]) -> str:
     return f"{size:.1f} TiB"
 
 
-def resolve_object_auth(ssm, cfg: StoreConfig, permission: str) -> ObjectAuth:
+def resolve_object_auth(cfg: StoreConfig) -> ObjectAuth:
     """S3 uses ambient AWS auth; R2 uses resolved S3-compatible credentials."""
 
     if cfg.backend == "r2":
