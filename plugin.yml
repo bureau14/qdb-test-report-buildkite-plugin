@@ -38,10 +38,9 @@ configuration:
     annotate:
       type: boolean
       description: Create Buildkite annotation linking to HTML; default true
-    fail_on_status:
-      type: string
-      enum: [failed, errored, never]
-      description: Plugin final failure behavior; default never for job reports, failed for full reports
+    fail_on_test_failures:
+      type: boolean
+      description: Exit 64 when the generated report contains failed or errored tests; default true for job reports and false for full reports
     debug:
       type: boolean
       description: Enable bash debug tracing
