@@ -155,7 +155,10 @@ def load_plugin_config() -> PluginConfig:
 
         if junit_reports_path:
             raise ValueError("junit_reports_path is only valid under job")
-        if "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_FAIL_ON_TEST_FAILURES" in os.environ:
+        if (
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_FAIL_ON_TEST_FAILURES"
+            in os.environ
+        ):
             raise ValueError("fail_on_test_failures is only valid under job")
         if not variants:
             raise ValueError("aggregate requires variants")

@@ -1,6 +1,18 @@
-"""
-Extracted and from the qdb-artifacts-buildkite-plugin repo, this module configures and interacts with an S3/R2-compatible object store.
-It supports config resolution from env vars and SSM parameters, and provides functions to list, upload, and download objects with retry logic and metadata handling.
+"""Object-store backend (S3/R2) for Buildkite artifact handling.
+
+Replaces Buildkite's native artifact handling with backend choice (S3/R2),
+providing functions to list, upload, and download objects with retry logic.
+
+Backends
+--------
+Both use boto3's S3-compatible data path:
+  S3 — IAM role on the CI agent; no explicit credentials needed.
+  R2 — S3-compatible credentials stored in SSM (access key ID + secret).
+       No Cloudflare SDK needed — boto3 talks directly to the R2 S3 endpoint.
+
+Config resolution
+-----------------
+    env var (ARTIFACTS_*) → SSM parameter → default
 """
 
 from __future__ import annotations
@@ -20,12 +32,18 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 
-READ_TIMEOUT = 300
-CONNECT_TIMEOUT = 60
+# ---------------------------------------------------------------------------
+# Timeout / retry constants
+# ---------------------------------------------------------------------------
+READ_TIMEOUT = 300  # 5 minutes — fail fast instead of hanging 40+ minutes
+CONNECT_TIMEOUT = 60  # 1 minute
 MAX_RETRIES = 10
-BACKOFF_BASE = 5
-BACKOFF_CAP = 60
+BACKOFF_BASE = 5  # seconds; doubles each retry
+BACKOFF_CAP = 60  # 1 minute max sleep between retries
 
+# ---------------------------------------------------------------------------
+# SSM parameter paths
+# ---------------------------------------------------------------------------
 BACKEND_SSM_PARAM = "/services/buildkite/config/artifacts/object-store/backend"
 DESTINATION_SSM_PARAM = "/services/buildkite/config/artifacts/object-store/destination"
 ENDPOINT_URL_SSM_PARAM = (
@@ -44,12 +62,13 @@ ARTIFACTS_DOMAIN_SSM_PARAM = (
     "/services/buildkite/config/artifacts/object-store/r2/artifacts-domain"
 )
 
+# Prefixes that indicate a placeholder / unconfigured value rather than a real one.
 _PLACEHOLDER_PREFIXES = ("SET_ME", "REPLACE_", "TODO", "CHANGEME", "FIXME")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # frozen → safe to share across worker threads
 class StoreConfig:
-    """Resolved S3/R2 object-store backend configuration."""
+    """Resolved object-store backend config. Populated once by load_store_config()."""
 
     backend: str
     destination: str
@@ -62,10 +81,8 @@ class StoreConfig:
 
 @dataclass(frozen=True)
 class ObjectAuth:
-    """Per-operation object-store credentials.
-
-    Empty credentials mean the normal AWS credential/IAM role chain is used. R2
-    operations use explicit S3-compatible access keys resolved from env/SSM.
+    """Per-operation S3 credentials. All None for S3 (IAM role handles auth).
+    For R2, populated from SSM-stored credentials derived from the Cloudflare API token.
     """
 
     access_key_id: Optional[str] = None
@@ -97,7 +114,13 @@ def log(msg: str) -> None:
 
 
 def _with_retry(fn, description: str):
-    """Execute fn() with exponential backoff for transient object-store errors."""
+    """Execute fn() with exponential backoff on transient errors.
+
+    Retries up to MAX_RETRIES times. Sleep between attempts starts at BACKOFF_BASE
+    seconds and doubles each time, capped at BACKOFF_CAP.
+
+    Backoff schedule (defaults): 5 → 10 → 20 → 40 → 60 → 60 → … seconds.
+    """
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
@@ -115,7 +138,8 @@ def _with_retry(fn, description: str):
 
 
 def aws_clients():
-    """Return (s3, ssm) clients for config resolution and listing."""
+    """Return (s3, ssm) clients for config resolution and listing only.
+    Per-transfer clients are created separately in each worker thread."""
 
     session = boto3.session.Session()
     region_name = os.environ.get("AWS_DEFAULT_REGION", "eu-west-1")
@@ -134,7 +158,8 @@ def aws_clients():
 
 
 def _ssm_get_optional(ssm, name: str, with_decryption: bool = True) -> Optional[str]:
-    """Return SSM parameter value or None if absent."""
+    """Return SSM parameter value or None if absent. Re-raises non-NotFound errors
+    so IAM misconfigurations surface explicitly."""
 
     try:
         return ssm.get_parameter(Name=name, WithDecryption=with_decryption)[
@@ -150,6 +175,7 @@ def _ssm_get_optional(ssm, name: str, with_decryption: bool = True) -> Optional[
 
 
 def _check_placeholder(value: Optional[str], label: str) -> None:
+    """Die if value looks like a placeholder that was never replaced with a real one."""
     if value and any(value.startswith(prefix) for prefix in _PLACEHOLDER_PREFIXES):
         die(
             f"{label} contains placeholder value {value!r} — "
@@ -160,7 +186,7 @@ def _check_placeholder(value: Optional[str], label: str) -> None:
 def _env_or_ssm(
     ssm, env_name: str, ssm_name: str, with_decryption: bool = True
 ) -> Optional[str]:
-    """Read env var with SSM fallback. Env takes precedence for per-job overrides."""
+    """Env var with SSM fallback. Env takes precedence for per-job overrides."""
 
     return os.environ.get(env_name) or _ssm_get_optional(
         ssm, ssm_name, with_decryption=with_decryption
@@ -168,7 +194,8 @@ def _env_or_ssm(
 
 
 def load_store_config(ssm) -> StoreConfig:
-    """Resolve backend config from ARTIFACTS_* env vars, SSM, and defaults."""
+    """Resolve backend config: env vars → SSM → defaults.
+    For R2, endpoint URL defaults to https://{account_id}.r2.cloudflarestorage.com."""
 
     backend = (
         (
@@ -264,7 +291,8 @@ def load_store_config(ssm) -> StoreConfig:
 
 
 def parse_s3(uri: str) -> Tuple[str, str]:
-    """Parse s3://bucket/prefix into (bucket, prefix); plain names are buckets."""
+    """Parse s3://bucket/prefix URI into (bucket, prefix).
+    Also handles plain bucket names (legacy SSM format)."""
 
     if not uri.startswith("s3://"):
         return uri.strip("/"), ""
@@ -273,7 +301,7 @@ def parse_s3(uri: str) -> Tuple[str, str]:
 
 
 def key_join(*parts: str) -> str:
-    """Join URL/S3 key segments, dropping blanks and duplicate slashes."""
+    """Join S3 key segments, dropping blanks to avoid double slashes."""
 
     return "/".join(str(part).strip("/") for part in parts if str(part).strip("/"))
 
@@ -288,7 +316,7 @@ def fmt_size(n: Union[int, float]) -> str:
 
 
 def resolve_object_auth(cfg: StoreConfig) -> ObjectAuth:
-    """S3 uses ambient AWS auth; R2 uses resolved S3-compatible credentials."""
+    """S3 → empty auth (IAM role chain). R2 → use stored S3-compatible credentials."""
 
     if cfg.backend == "r2":
         return ObjectAuth(
@@ -299,7 +327,12 @@ def resolve_object_auth(cfg: StoreConfig) -> ObjectAuth:
 
 
 def _s3_client(cfg: StoreConfig, auth: ObjectAuth):
-    """Create an S3 client for one operation/thread."""
+    """Create a per-thread S3 client. Called inside each worker because boto3 clients
+    are not thread-safe (shared connection pool + credential state would race).
+
+    R2 needs signature_version=s3v4 and addressing_style=path (R2 endpoints are
+    account-level, not bucket-level — virtual-host style would produce invalid hostnames).
+    """
 
     client_cfg = Config(
         read_timeout=READ_TIMEOUT,
@@ -328,6 +361,7 @@ def _s3_client(cfg: StoreConfig, auth: ObjectAuth):
 
 
 def internal_url(cfg: StoreConfig, key: str) -> Optional[str]:
+    """Return a browser-accessible URL for an object, if artifacts_domain is set."""
     if not cfg.artifacts_domain:
         return None
     return key_join(f"https://{cfg.artifacts_domain}", key)

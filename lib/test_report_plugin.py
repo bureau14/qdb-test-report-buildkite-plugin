@@ -67,11 +67,7 @@ def full_scope_missing_variants(
         for upload in xml_uploads
         if "/" in upload.object_relative_path
     }
-    return [
-        variant
-        for variant in variants
-        if variant not in variants_with_xml
-    ]
+    return [variant for variant in variants if variant not in variants_with_xml]
 
 
 def add_summary_warnings(summary_path: Path, warnings: List[str]) -> None:
@@ -205,7 +201,9 @@ def main() -> int:
             if config.scope == "aggregate":
                 store_context = resolve_object_store_context()
                 variants = config.variants
-                log(f"Downloading aggregate JUnit XML for variants: {', '.join(variants)}")
+                log(
+                    f"Downloading aggregate JUnit XML for variants: {', '.join(variants)}"
+                )
                 collect_full_scope_xml(
                     cfg=store_context.store_cfg,
                     auth=store_context.auth,
@@ -230,7 +228,9 @@ def main() -> int:
                 xml_uploads = collect_xml_uploads(config.platforms, config.scope)
             else:
                 if config.junit_reports_path is None or config.variant is None:
-                    raise ValueError("scope=job requires variant and junit_reports_path")
+                    raise ValueError(
+                        "scope=job requires variant and junit_reports_path"
+                    )
                 xml_uploads = collect_job_xml_uploads(
                     config.junit_reports_path, config.variant
                 )
