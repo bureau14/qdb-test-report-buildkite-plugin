@@ -14,6 +14,14 @@ from junit_report_model import build_report, format_counts, parse_platform_arg
 from report_data import report_to_report_ui_data
 
 
+def log(message: str) -> None:
+    print(f"INFO  {message}", file=sys.stderr)
+
+
+def warn(message: str) -> None:
+    print(f"WARN  {message}", file=sys.stderr)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Generate self-contained HTML from JUnit XML files"
@@ -73,9 +81,8 @@ def generate_html_report(
         report, execution_name=execution_name, only_failures=only_failures
     )
     output_path = write_html_report(data, output, template)
-    print(
-        f"INFO  Wrote HTML report output={output_path} bytes={output_path.stat().st_size}",
-        file=sys.stderr,
+    log(
+        f"Wrote HTML report output={output_path} bytes={output_path.stat().st_size}",
     )
 
     if summary_json:
@@ -92,20 +99,18 @@ def generate_html_report(
         }
         summary_json.parent.mkdir(parents=True, exist_ok=True)
         summary_json.write_text(json.dumps(summary, indent=2))
-        print(f"INFO  Wrote summary JSON output={summary_json}", file=sys.stderr)
+        log(f"Wrote summary JSON output={summary_json}")
 
-    print(
-        f"INFO  Final summary: raw_testcases={report.raw_testcases} suites={len(report.suites)} "
+    log(
+        f"Final summary: raw_testcases={report.raw_testcases} suites={len(report.suites)} "
         f"logical_tests={report.logical_test_count} platform_executions={report.platform_execution_count} "
         f"status_counts={format_counts(report.status_counts)} root_status={report.root_status}",
-        file=sys.stderr,
     )
 
     failed_or_errored = report.status_counts["FAILED"] + report.status_counts["ERRORED"]
     if fail_on_test_failures and failed_or_errored:
-        print(
-            f"INFO  Exiting with {failed_or_errored} failed/errored test execution(s) (code 64)",
-            file=sys.stderr,
+        log(
+            f"Exiting with {failed_or_errored} failed/errored test execution(s) (code 64)",
         )
         return 64
 
@@ -128,7 +133,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             fail_on_test_failures=args.fail_on_test_failures,
         )
     except Exception as exc:  # pragma: no cover - CLI guard
-        print(f"error: {exc}", file=sys.stderr)
+        warn(f"error: {exc}")
         return 1
 
 

@@ -52,6 +52,14 @@ class GenerationResult:
     summary_path: Path
 
 
+def log(message: str) -> None:
+    print(f"INFO  {message}", file=sys.stderr)
+
+
+def warn(message: str) -> None:
+    print(f"WARN  {message}", file=sys.stderr)
+
+
 def full_scope_missing_variants(
     platforms: List[PlatformConfig], xml_uploads: List[XmlUpload]
 ) -> List[str]:
@@ -144,10 +152,7 @@ def upload_report_artifacts(
     results = {}
 
     # HTML
-    print(
-        f"INFO  Uploading HTML report to s3://{bucket}/{location.html_key}",
-        file=sys.stderr,
-    )
+    log(f"Uploading HTML report to s3://{bucket}/{location.html_key}")
     results["html"] = upload_file(
         store_cfg,
         auth,
@@ -159,10 +164,7 @@ def upload_report_artifacts(
     )
 
     # Summary JSON
-    print(
-        f"INFO  Uploading summary JSON to s3://{bucket}/{location.summary_key}",
-        file=sys.stderr,
-    )
+    log(f"Uploading summary JSON to s3://{bucket}/{location.summary_key}")
     results["summary"] = upload_file(
         store_cfg,
         auth,
@@ -177,9 +179,8 @@ def upload_report_artifacts(
     if config.scope == "job":
         for xml in xml_uploads:
             key = key_join(location.xml_prefix, xml.object_relative_path)
-            print(
-                f"INFO  Uploading JUnit XML {xml.object_relative_path} to s3://{bucket}/{key}",
-                file=sys.stderr,
+            log(
+                f"Uploading JUnit XML {xml.object_relative_path} to s3://{bucket}/{key}"
             )
             results[f"xml:{xml.object_relative_path}"] = upload_file(
                 store_cfg,
@@ -202,10 +203,7 @@ def main():
         if config.scope == "full":
             store_context = resolve_object_store_context("object-read-write")
             variants = [platform.name for platform in config.platforms]
-            print(
-                f"INFO  Downloading full-scope JUnit XML for variants: {', '.join(variants)}",
-                file=sys.stderr,
-            )
+            log(f"Downloading full-scope JUnit XML for variants: {', '.join(variants)}")
             collect_full_scope_xml(
                 cfg=store_context.store_cfg,
                 auth=store_context.auth,
@@ -242,7 +240,7 @@ def main():
                     f"Missing full-scope report variants: {variant_list}. "
                     "This usually means a job failed before publishing test XML."
                 )
-                print(f"WARN  {warning}", file=sys.stderr)
+                warn(warning)
                 summary_warnings.append(warning)
 
         # Create temp dir for HTML report generation output. For job scope or full scope with variant, we can use a stable path to allow in-place updates; otherwise we use a unique temp dir.
@@ -254,7 +252,10 @@ def main():
         tmp_base = Path(".buildkite-test-report") / config.scope / variant_or_full
 
         # Generate report
-        print(f"INFO  Generating {config.scope} report", file=sys.stderr)
+        log(
+            f"Generating {config.scope} report"
+            + (f" for variant {config.variant}" if config.variant else "")
+        )
         generation = run_report_generation(config, tmp_base)
         add_summary_warnings(generation.summary_path, summary_warnings)
 
@@ -267,9 +268,8 @@ def main():
         if config.annotate:
             html_url = uploads["html"].url
             if not html_url:
-                print(
-                    "WARNING: HTML public URL unavailable (ARTIFACTS_DOMAIN not set); skipping annotation",
-                    file=sys.stderr,
+                warn(
+                    "HTML public URL unavailable (ARTIFACTS_DOMAIN not set); skipping annotation"
                 )
             else:
                 summary = json.loads(generation.summary_path.read_text())
@@ -298,9 +298,8 @@ def main():
             status_counts.get("ERRORED", 0)
         )
         if config.fail_on_test_failures and failed_or_errored:
-            print(
-                f"INFO  Report has {failed_or_errored} failed/errored test execution(s) and fail_on_test_failures=true. Exiting 64.",
-                file=sys.stderr,
+            log(
+                f"Report has {failed_or_errored} failed/errored test execution(s) and fail_on_test_failures=true. Exiting 64."
             )
             return 64
 
