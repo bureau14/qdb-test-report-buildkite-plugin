@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 import sys
 import json
-import os
+import tempfile
 from pathlib import Path
 from dataclasses import dataclass, replace
 
@@ -34,8 +34,6 @@ from annotations import (
     create_buildkite_annotation,
 )
 from git_links import build_commit_url
-
-FULL_SCOPE_XML_STAGE_ROOT = Path(".buildkite-test-report") / "downloaded-xml"
 
 
 @dataclass(frozen=True)
@@ -195,119 +193,118 @@ def upload_report_artifacts(
     return results
 
 
-def main():
+def main() -> int:
     try:
         config = load_plugin_config()
 
-        store_context: Optional[ObjectStoreContext] = None
-        if config.scope == "aggregate":
-            store_context = resolve_object_store_context()
-            variants = config.variants
-            log(f"Downloading aggregate JUnit XML for variants: {', '.join(variants)}")
-            collect_full_scope_xml(
-                cfg=store_context.store_cfg,
-                auth=store_context.auth,
-                bucket=store_context.bucket,
-                destination_prefix=store_context.prefix,
-                project_id=config.project_id,
-                git_ref=config.git_ref,
-                build_id=config.build_id,
-                variants=variants,
-                output_dir=FULL_SCOPE_XML_STAGE_ROOT,
-            )
-            config = replace(
-                config,
-                platforms=[
-                    PlatformConfig(
-                        name=variant,
-                        path=FULL_SCOPE_XML_STAGE_ROOT / variant,
-                    )
-                    for variant in variants
-                ],
-            )
-            xml_uploads = collect_xml_uploads(config.platforms, config.scope)
-        else:
-            if config.junit_reports_path is None or config.variant is None:
-                raise ValueError("scope=job requires variant and junit_reports_path")
-            xml_uploads = collect_job_xml_uploads(
-                config.junit_reports_path, config.variant
-            )
+        with tempfile.TemporaryDirectory(prefix="test-report-") as tmp_dir_str:
+            staging_root = Path(tmp_dir_str)
+            full_scope_xml_stage_root = staging_root / "downloaded-xml"
 
-        summary_warnings: List[str] = []
-        if config.scope == "aggregate":
-            missing_variants = full_scope_missing_variants(
-                config.variants, xml_uploads
-            )
-            if missing_variants:
-                variant_list = ", ".join(missing_variants)
-                warning = (
-                    f"Missing full-scope report variants: {variant_list}. "
-                    "This usually means a job failed before publishing test XML."
+            store_context: Optional[ObjectStoreContext] = None
+            if config.scope == "aggregate":
+                store_context = resolve_object_store_context()
+                variants = config.variants
+                log(f"Downloading aggregate JUnit XML for variants: {', '.join(variants)}")
+                collect_full_scope_xml(
+                    cfg=store_context.store_cfg,
+                    auth=store_context.auth,
+                    bucket=store_context.bucket,
+                    destination_prefix=store_context.prefix,
+                    project_id=config.project_id,
+                    git_ref=config.git_ref,
+                    build_id=config.build_id,
+                    variants=variants,
+                    output_dir=full_scope_xml_stage_root,
                 )
-                warn(warning)
-                summary_warnings.append(warning)
-
-        # Create temp dir for HTML report generation output. For job mode or aggregate mode with variant, we can use a stable path to allow in-place updates; otherwise we use a unique temp dir.
-        variant_or_full = (
-            config.variant
-            if (config.scope == "job" or (config.scope == "aggregate" and config.variant))
-            else "full"
-        )
-        tmp_base = Path(".buildkite-test-report") / config.scope / variant_or_full
-
-        # Generate report
-        log(
-            f"Generating {config.scope} report"
-            + (f" for variant {config.variant}" if config.variant else "")
-        )
-        generation = run_report_generation(config, tmp_base)
-        add_summary_warnings(generation.summary_path, summary_warnings)
-
-        # Upload JUNIT reports, HTML report, summary
-        uploads = upload_report_artifacts(
-            config, generation, xml_uploads, store_context=store_context
-        )
-
-        # Create annotation if enabled and HTML URL is available
-        if config.annotate:
-            html_url = uploads["html"].url
-            if not html_url:
-                warn(
-                    "HTML public URL unavailable (ARTIFACTS_DOMAIN not set); skipping annotation"
+                config = replace(
+                    config,
+                    platforms=[
+                        PlatformConfig(
+                            name=variant,
+                            path=full_scope_xml_stage_root / variant,
+                        )
+                        for variant in variants
+                    ],
                 )
+                xml_uploads = collect_xml_uploads(config.platforms, config.scope)
             else:
-                summary = json.loads(generation.summary_path.read_text())
-                body = build_annotation_body(config.title, summary, html_url)
-                style = get_annotation_style(summary)
+                if config.junit_reports_path is None or config.variant is None:
+                    raise ValueError("scope=job requires variant and junit_reports_path")
+                xml_uploads = collect_job_xml_uploads(
+                    config.junit_reports_path, config.variant
+                )
 
-                if config.scope == "job":
-                    context = f"test-report:{config.variant}:{config.job_id}"
-                    create_buildkite_annotation(
-                        body, context, style, priority=10, scope="job"
+            summary_warnings: List[str] = []
+            if config.scope == "aggregate":
+                missing_variants = full_scope_missing_variants(
+                    config.variants, xml_uploads
+                )
+                if missing_variants:
+                    variant_list = ", ".join(missing_variants)
+                    warning = (
+                        f"Missing full-scope report variants: {variant_list}. "
+                        "This usually means a job failed before publishing test XML."
+                    )
+                    warn(warning)
+                    summary_warnings.append(warning)
+
+            # Create temp dir for HTML report generation output
+            tmp_base = staging_root / "report"
+
+            # Generate report
+            log(
+                f"Generating {config.scope} report"
+                + (f" for variant {config.variant}" if config.variant else "")
+            )
+            generation = run_report_generation(config, tmp_base)
+            add_summary_warnings(generation.summary_path, summary_warnings)
+
+            # Upload JUNIT reports, HTML report, summary
+            uploads = upload_report_artifacts(
+                config, generation, xml_uploads, store_context=store_context
+            )
+
+            # Create annotation if enabled and HTML URL is available
+            if config.annotate:
+                html_url = uploads["html"].url
+                if not html_url:
+                    warn(
+                        "HTML public URL unavailable (ARTIFACTS_DOMAIN not set); skipping annotation"
                     )
                 else:
-                    context = (
-                        f"test-report:{config.variant}:full"
-                        if config.variant
-                        else "test-report:full"
-                    )
-                    create_buildkite_annotation(
-                        body, context, style, priority=10, scope="build"
-                    )
+                    summary = json.loads(generation.summary_path.read_text())
+                    body = build_annotation_body(config.title, summary, html_url)
+                    style = get_annotation_style(summary)
 
-        # Exit with failure code if any test failed or errored and fail_on_test_failures is true
-        summary = json.loads(generation.summary_path.read_text())
-        status_counts = summary.get("status_counts", {})
-        failed_or_errored = int(status_counts.get("FAILED", 0)) + int(
-            status_counts.get("ERRORED", 0)
-        )
-        if config.fail_on_test_failures and failed_or_errored:
-            log(
-                f"Report has {failed_or_errored} failed/errored test execution(s) and fail_on_test_failures=true. Exiting 64."
+                    if config.scope == "job":
+                        context = f"test-report:{config.variant}:{config.job_id}"
+                        create_buildkite_annotation(
+                            body, context, style, priority=10, scope="job"
+                        )
+                    else:
+                        context = (
+                            f"test-report:{config.variant}:full"
+                            if config.variant
+                            else "test-report:full"
+                        )
+                        create_buildkite_annotation(
+                            body, context, style, priority=10, scope="build"
+                        )
+
+            # Exit with failure code if any test failed or errored and fail_on_test_failures is true
+            summary = json.loads(generation.summary_path.read_text())
+            status_counts = summary.get("status_counts", {})
+            failed_or_errored = int(status_counts.get("FAILED", 0)) + int(
+                status_counts.get("ERRORED", 0)
             )
-            return 64
+            if config.fail_on_test_failures and failed_or_errored:
+                log(
+                    f"Report has {failed_or_errored} failed/errored test execution(s) and fail_on_test_failures=true. Exiting 64."
+                )
+                return 64
 
-        return 0
+            return 0
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
