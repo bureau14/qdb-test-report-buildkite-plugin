@@ -13,7 +13,7 @@ class ReportLocation:
 
 
 def report_scope_key(scope: str, job_id: Optional[str]) -> str:
-    if scope == "full":
+    if scope in ("full", "aggregate"):
         return "full"
     if scope == "job":
         if not job_id:

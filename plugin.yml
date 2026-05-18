@@ -5,44 +5,60 @@ requirements:
   - python3
 configuration:
   properties:
-    scope:
-      type: string
-      enum: [job, full]
-      description: Whether this is a fast per-job report or aggregate full report
     title:
       type: string
-      description: Report title shown in the HTML UI
-    variant:
-      type: string
-      description: Platform/configuration key. Required for scope=job; optional for per-variant full reports.
+      description: Report title shown in the HTML UI and Buildkite annotation.
     execution_name:
       type: string
-      description: Optional top-level execution name
+      description: Optional top-level execution name.
     project_id:
       type: string
-      description: Object-store project namespace; defaults to BUILDKITE_PIPELINE_SLUG
-    platforms:
-      type: array
-      minItems: 1
-      items:
-        type: object
-        properties:
-          name:
-            type: string
-          path:
-            type: string
-        required: [name, path]
+      description: Object-store project namespace; defaults to BUILDKITE_PIPELINE_SLUG.
     only_failures:
       type: boolean
-      description: Generate a faster large-report HTML tree containing only failures/errors while keeping full summary counts
+      description: Generate an HTML tree containing only failures/errors while keeping full summary counts. Default false.
     annotate:
       type: boolean
-      description: Create Buildkite annotation linking to HTML; default true
-    fail_on_test_failures:
-      type: boolean
-      description: Exit 64 when the generated report contains failed or errored tests; default true for job reports and false for full reports
+      description: Create Buildkite annotation linking to HTML; default true.
     debug:
       type: boolean
-      description: Enable bash debug tracing
-  required: [scope, title, platforms]
+      description: Enable bash debug tracing.
+    job:
+      type: object
+      description: Per-job report and raw JUnit XML upload configuration.
+      properties:
+        variant:
+          type: string
+          description: Test variant name and raw XML upload prefix.
+        junit_reports_path:
+          type: string
+          description: Local JUnit XML file, directory, or glob.
+        fail_on_test_failures:
+          type: boolean
+          description: Exit 64 when the generated job report contains failed or errored tests; default true.
+      required: [variant, junit_reports_path]
+      additionalProperties: false
+    aggregate:
+      type: object
+      description: Aggregate report configuration that downloads raw XML uploaded by job reports.
+      properties:
+        variant:
+          type: string
+          description: Optional variant grouping for the aggregate report upload path.
+        variants:
+          type: array
+          minItems: 1
+          items:
+            type: string
+          description: Variant names to aggregate from object storage.
+      required: [variants]
+      additionalProperties: false
+  required: [title]
   additionalProperties: false
+  oneOf:
+    - required: [job]
+      not:
+        required: [aggregate]
+    - required: [aggregate]
+      not:
+        required: [job]

@@ -27,7 +27,7 @@ from object_store import (
     PublishedObject,
 )
 from report_downloads import collect_full_scope_xml, build_job_xml_prefix
-from xml_inputs import collect_xml_uploads, XmlUpload
+from xml_inputs import collect_job_xml_uploads, collect_xml_uploads, XmlUpload
 from annotations import (
     build_annotation_body,
     get_annotation_style,
@@ -61,7 +61,7 @@ def warn(message: str) -> None:
 
 
 def full_scope_missing_variants(
-    platforms: List[PlatformConfig], xml_uploads: List[XmlUpload]
+    variants: List[str], xml_uploads: List[XmlUpload]
 ) -> List[str]:
     """Return configured full-scope variants that have no collected XML files."""
     variants_with_xml = {
@@ -70,9 +70,9 @@ def full_scope_missing_variants(
         if "/" in upload.object_relative_path
     }
     return [
-        platform.name
-        for platform in platforms
-        if platform.name not in variants_with_xml
+        variant
+        for variant in variants
+        if variant not in variants_with_xml
     ]
 
 
@@ -200,10 +200,10 @@ def main():
         config = load_plugin_config()
 
         store_context: Optional[ObjectStoreContext] = None
-        if config.scope == "full":
+        if config.scope == "aggregate":
             store_context = resolve_object_store_context()
-            variants = [platform.name for platform in config.platforms]
-            log(f"Downloading full-scope JUnit XML for variants: {', '.join(variants)}")
+            variants = config.variants
+            log(f"Downloading aggregate JUnit XML for variants: {', '.join(variants)}")
             collect_full_scope_xml(
                 cfg=store_context.store_cfg,
                 auth=store_context.auth,
@@ -219,20 +219,24 @@ def main():
                 config,
                 platforms=[
                     PlatformConfig(
-                        name=platform.name,
-                        path=FULL_SCOPE_XML_STAGE_ROOT / platform.name,
+                        name=variant,
+                        path=FULL_SCOPE_XML_STAGE_ROOT / variant,
                     )
-                    for platform in config.platforms
+                    for variant in variants
                 ],
             )
+            xml_uploads = collect_xml_uploads(config.platforms, config.scope)
+        else:
+            if config.junit_reports_path is None or config.variant is None:
+                raise ValueError("scope=job requires variant and junit_reports_path")
+            xml_uploads = collect_job_xml_uploads(
+                config.junit_reports_path, config.variant
+            )
 
-        # Collect XMLs first to ensure they exist. For full runs this reads
-        # the object-store staging directory populated above.
-        xml_uploads = collect_xml_uploads(config.platforms, config.scope)
         summary_warnings: List[str] = []
-        if config.scope == "full":
+        if config.scope == "aggregate":
             missing_variants = full_scope_missing_variants(
-                config.platforms, xml_uploads
+                config.variants, xml_uploads
             )
             if missing_variants:
                 variant_list = ", ".join(missing_variants)
@@ -243,10 +247,10 @@ def main():
                 warn(warning)
                 summary_warnings.append(warning)
 
-        # Create temp dir for HTML report generation output. For job scope or full scope with variant, we can use a stable path to allow in-place updates; otherwise we use a unique temp dir.
+        # Create temp dir for HTML report generation output. For job mode or aggregate mode with variant, we can use a stable path to allow in-place updates; otherwise we use a unique temp dir.
         variant_or_full = (
             config.variant
-            if (config.scope == "job" or (config.scope == "full" and config.variant))
+            if (config.scope == "job" or (config.scope == "aggregate" and config.variant))
             else "full"
         )
         tmp_base = Path(".buildkite-test-report") / config.scope / variant_or_full

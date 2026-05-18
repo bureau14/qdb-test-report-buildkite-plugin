@@ -1,81 +1,34 @@
 # Buildkite Test Report Plugin
 
-This plugin generates self-contained JUnit HTML reports, publishes them to S3/R2-compatible object storage, and creates small Buildkite annotations that link to the uploaded HTML report.
+A [Buildkite plugin](https://buildkite.com/docs/plugins) for generating self-contained JUnit HTML reports, publishing them to S3/R2-compatible object storage, and adding Buildkite annotations that link to the uploaded reports.
 
-## Runtime model
+## What it does
 
-```text
-test job
-  -> writes JUnit XML locally
-  -> qdb-test-report scope=job generates job HTML and summary JSON
-  -> plugin uploads job HTML, summary JSON, and raw XML
+- **Job** — after each test step finishes, reads that job's local JUnit XML, generates a per-job HTML report, uploads the HTML/summary/raw XML, and optionally fails the step when tests failed.
+- **Aggregate** — in a later reporting step, downloads XML uploaded by earlier job steps for a list of variants, generates one aggregate HTML report, and uploads the aggregate HTML/summary.
 
-full report job
-  -> qdb-test-report scope=full lists job XML objects for the current build
-  -> plugin downloads XML into .buildkite-test-report/downloaded-xml/
-  -> plugin generates aggregate HTML and summary JSON
-  -> plugin uploads full HTML and summary JSON
-```
+The two modes use separate top-level configuration blocks:
 
-The plugin runs from the Buildkite `post-command` hook. It will publish reports even after command fails.
+- `job` uses one local `junit_reports_path` and one `variant`.
+- `aggregate` uses a list of `variants` and does not read local test output paths.
 
-Plugin exits `64` when `fail_on_test_failures` is true and any test fails/errors, exits `1` for internal plugin errors, and otherwise exits `0` so Buildkite can preserve the original command status.
+Common report options such as `title`, `only_failures`, `annotate`, and `project_id` stay at the plugin top level.
 
-## Object-store configuration
+The plugin runs from the Buildkite `post-command` hook, so reports are still published after the step command exits with a failure.
 
-The plugin reuses the same object-store configuration path as the `qdb-artifacts` plugin. Configuration is resolved from `ARTIFACTS_*` environment variables or SSM parameters by `lib/object_store.py`.
+The plugin exits `64` when `job.fail_on_test_failures` is true and the generated job report contains failed or errored tests. It exits `1` for internal plugin errors and otherwise exits `0` so Buildkite can preserve the original command status.
 
-Important full-scope rules:
+## Requirements
 
-- Full reports only aggregate XML from the current `project_id`, `git_ref`, and `build_id`.
-- There is no `LATEST_SUCCESSFUL` lookup.
-- There is no main/master branch fallback.
-- Full-scope aggregation looks for XML uploaded by earlier `scope: job` runs under `reports/variants/<variant>/builds/<build_id>/jobs`.
-- The full step uses `platforms[].name` as the list of variants to search in object storage.
-- If no XML is found for a configured variant, the plugin warns and adds a warning to the summary/annotation. This usually means a job failed before publishing XML. Full reports do not fall back to another build.
+- **Python 3** must be available on the host agent (`python3` in `PATH`).
+- The agent must have IAM permissions (S3) or SSM-stored R2 credentials configured. See [Backend configuration](#backend-configuration).
+- Test jobs must write JUnit XML before the `post-command` hook runs.
 
-## Uploaded object layout
+## Usage
 
-Given destination `s3://bucket/prefix`, project `project`, git ref `refs/heads/main`, build `build-1`, variant `linux`, and job `job-1`, job-scope uploads are written under:
+### Job report, one test step
 
-```text
-prefix/project/refs/heads/main/reports/variants/linux/builds/build-1/jobs/job-1/index.html
-prefix/project/refs/heads/main/reports/variants/linux/builds/build-1/jobs/job-1/summary.json
-prefix/project/refs/heads/main/reports/variants/linux/builds/build-1/jobs/job-1/xml/<platform>/<relative-junit-path>.xml
-```
-
-A full report without `variant` is written under:
-
-```text
-prefix/project/refs/heads/main/reports/builds/build-1/full/index.html
-prefix/project/refs/heads/main/reports/builds/build-1/full/summary.json
-```
-
-A per-variant full report with `variant: linux` is written under:
-
-```text
-prefix/project/refs/heads/main/reports/variants/linux/builds/build-1/full/index.html
-prefix/project/refs/heads/main/reports/variants/linux/builds/build-1/full/summary.json
-```
-
-## Plugin parameters
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `scope` | string | Required. Either `job` or `full`. |
-| `title` | string | Required. Report title shown in the HTML UI and annotation. |
-| `platforms` | array | Required. List of `{name, path}` objects. For `scope: job`, `path` is a local XML file, XML directory, or glob. For `scope: full`, `name` selects object-store variants to download; configured `path` values are replaced with the full-scope staging paths after download. |
-| `variant` | string | Required for `scope: job`. Optional for a per-variant full report and for per-variant annotation/upload paths. |
-| `execution_name` | string | Optional top-level execution name in the report. Defaults to the report title in the standalone generator. |
-| `project_id` | string | Object-store project namespace. Defaults to `BUILDKITE_PIPELINE_SLUG`. |
-| `only_failures` | boolean | Generate an HTML tree containing only failures/errors while keeping full summary counts. Default `false`. |
-| `annotate` | boolean | Create Buildkite annotation when a report URL can be built from `ARTIFACTS_DOMAIN`. Default `true`. |
-| `fail_on_test_failures` | boolean | Exit `64` when the generated report contains any failed or errored tests. Defaults to `true` for job reports and `false` for full reports. |
-| `debug` | boolean | Enable bash debug tracing in plugin hooks. Default `false`. |
-
-## Job-scope example
-
-Use `scope: job` in each test job that produces JUnit XML. The job report is available as soon as that job finishes. In job scope, missing platform paths or paths with no XML files will result in errors.
+Configure a `job` block in each test job that produces JUnit XML. The `variant` identifies the platform/configuration and becomes the object-store prefix used by later aggregate reports.
 
 ```yaml
 steps:
@@ -83,44 +36,182 @@ steps:
     key: test-linux-haswell
     command: ./run-tests.sh
     plugins:
-      - bureau14/qdb-test-report#v0.1.0:
-          scope: job
-          variant: linux-haswell-release
+      - bureau14/qdb-test-report#master:
           title: "Unit tests - linux haswell"
-          platforms:
-            - name: linux-haswell-release
-              path: reports/junit
+          job:
+            variant: linux-haswell-release
+            junit_reports_path: reports/junit
 ```
 
-## Full-scope aggregate example
+`job.junit_reports_path` can be:
 
-Use `scope: full` after the test jobs. The plugin downloads XML uploaded by the earlier `scope: job` steps from object storage.
+- a directory, searched recursively for `*.xml`;
+- a single XML file;
+- a glob, such as `reports/**/*.xml`.
+
+If the path does not exist or no XML files are found, the job report fails with a plugin error.
+
+By default, job mode exits `64` when the report contains failed or errored tests. Disable that if your pipeline already handles test failures another way:
+
+```yaml
+plugins:
+  - bureau14/qdb-test-report#master:
+      title: "Unit tests - linux haswell"
+      job:
+        variant: linux-haswell-release
+        junit_reports_path: reports/junit
+        fail_on_test_failures: false
+```
+
+### Aggregate report, multiple variants
+
+Configure an `aggregate` block after the test jobs. The plugin downloads XML uploaded by earlier `job` steps for each configured variant and generates one aggregate report.
 
 ```yaml
 steps:
-  - label: ":bar_chart: Full test report"
-    key: full-test-report
-    depends_on: # Tests that contribute to the full report.
+  - label: ":bar_chart: Aggregate test report"
+    key: aggregate-test-report
+    depends_on:
       - test-linux-haswell
       - test-linux-core2
-    allow_dependency_failure: true  # Don't fail the full report step if test jobs fail
-    command: "true" # No-op since the plugin runs in the post-command hook
+    allow_dependency_failure: true
+    command: "true" # No-op; the plugin runs in the post-command hook.
     plugins:
-      - bureau14/qdb-test-report#v0.1.0:
-          scope: full
-          title: "Full unit test report"
-          platforms:
-            - name: linux-haswell-release
-              path: reports/linux-haswell-release
-            - name: linux-core2-release
-              path: reports/linux-core2-release
+      - bureau14/qdb-test-report#master:
+          title: "Aggregate unit test report"
+          aggregate:
+            variants:
+              - linux-haswell-release
+              - linux-core2-release
 ```
 
-For a full run, the `path` values are not used as the source of truth for aggregation. The plugin stages downloaded XML under:
+Aggregate mode does not accept `junit_reports_path` or `fail_on_test_failures`: it is a reporting step, not a test-execution step. If no XML is found for a configured variant, the plugin warns and adds that warning to the summary/annotation. Aggregate reports only use XML from the current build.
+
+### Per-variant aggregate report
+
+Usually an aggregate report is uploaded under the build-level aggregate path. If you want the report URL grouped under a specific variant, set `aggregate.variant`:
+
+```yaml
+plugins:
+  - bureau14/qdb-test-report#master:
+      title: "Linux aggregate test report"
+      aggregate:
+        variant: linux
+        variants:
+          - linux-haswell-release
+          - linux-core2-release
+```
+
+This only changes where the aggregate HTML/summary are uploaded; the variants to aggregate still come from `aggregate.variants`.
+
+### Generate a smaller failures-only report
+
+Set `only_failures: true` in either mode to generate an HTML tree containing only failed/errored tests while keeping full summary counts:
+
+```yaml
+plugins:
+  - bureau14/qdb-test-report#master:
+      title: "Failures only"
+      only_failures: true
+      aggregate:
+        variants:
+          - linux-haswell-release
+          - linux-core2-release
+```
+
+### Disable Buildkite annotation
+
+Set `annotate: false` to skip creating the Buildkite annotation:
+
+```yaml
+plugins:
+  - bureau14/qdb-test-report#master:
+      title: "Unit tests - linux haswell"
+      annotate: false
+      job:
+        variant: linux-haswell-release
+        junit_reports_path: reports/junit
+```
+
+## Configuration reference
+
+### Top-level keys
+
+| Key | Type | Required | Description |
+| --- | --- | :---: | --- |
+| `title` | string | ✓ | Report title shown in the HTML UI and annotation. |
+| `job` | object | job or aggregate | Per-job report/XML upload configuration. Configure exactly one of `job` or `aggregate`. |
+| `aggregate` | object | job or aggregate | Aggregate report configuration. Configure exactly one of `job` or `aggregate`. |
+| `execution_name` | string |  | Optional top-level execution name in the report. Defaults to the report title in the standalone generator. |
+| `project_id` | string |  | Object-store project namespace. Defaults to `BUILDKITE_PIPELINE_SLUG`. |
+| `only_failures` | boolean |  | Generate an HTML tree containing only failures/errors while keeping full summary counts. Default: `false`. |
+| `annotate` | boolean |  | Create Buildkite annotation when a report URL can be built from `ARTIFACTS_DOMAIN`. Default: `true`. |
+| `debug` | boolean |  | Enable bash debug tracing in plugin hooks. Default: `false`. |
+
+### `job` object keys
+
+| Key | Type | Required | Description |
+| --- | --- | :---: | --- |
+| `variant` | string | ✓ | Test variant name and XML upload prefix, for example `linux-haswell-release`. |
+| `junit_reports_path` | string | ✓ | Local JUnit XML file, directory, or glob to read from the test job. |
+| `fail_on_test_failures` | boolean |  | Exit `64` when the generated job report contains failed or errored tests. Default: `true`. |
+
+### `aggregate` object keys
+
+| Key | Type | Required | Description |
+| --- | --- | :---: | --- |
+| `variants` | array of strings | ✓ | Variant names to search in object storage for XML uploaded by job-mode runs. |
+| `variant` | string |  | Optional variant grouping for the aggregate report upload/annotation URL. Does not change which XML is aggregated. |
+
+## Object-store layout
+
+The plugin reuses the same object-store configuration path as the `qdb-artifacts` plugin. Configuration is resolved from `ARTIFACTS_*` environment variables or SSM parameters by `lib/object_store.py`.
+
+Given destination `s3://bucket/prefix`, project `project`, git ref `refs/heads/main`, build `build-1`, variant `linux`, and job `job-1`, job-mode uploads are written under:
 
 ```text
-.buildkite-test-report/downloaded-xml/<variant>/<job_id>/<relative-junit-path>.xml
+prefix/project/refs/heads/main/reports/variants/linux/builds/build-1/jobs/job-1/index.html
+prefix/project/refs/heads/main/reports/variants/linux/builds/build-1/jobs/job-1/summary.json
+prefix/project/refs/heads/main/reports/variants/linux/builds/build-1/jobs/job-1/xml/linux/<relative-junit-path>.xml
 ```
+
+Aggregate mode looks for XML uploaded by earlier job-mode runs under:
+
+```text
+prefix/project/refs/heads/main/reports/variants/<variant>/builds/<build_id>/jobs/*/xml/<variant>/**/*.xml
+```
+
+An aggregate report without `aggregate.variant` is written under:
+
+```text
+prefix/project/refs/heads/main/reports/builds/build-1/full/index.html
+prefix/project/refs/heads/main/reports/builds/build-1/full/summary.json
+```
+
+A per-variant aggregate report with `aggregate.variant: linux` is written under:
+
+```text
+prefix/project/refs/heads/main/reports/variants/linux/builds/build-1/full/index.html
+prefix/project/refs/heads/main/reports/variants/linux/builds/build-1/full/summary.json
+```
+
+## Backend configuration
+
+Config is resolved in order: **environment variable → SSM parameter → default**.
+
+| Setting | Env var | SSM parameter | Default |
+| --- | --- | --- | --- |
+| Backend | `ARTIFACTS_BACKEND` | `/services/buildkite/config/artifacts/object-store/backend` | `s3` |
+| Destination | `ARTIFACTS_DESTINATION` | `/services/buildkite/config/artifacts/object-store/destination` | _(required)_ |
+| Endpoint URL | `ARTIFACTS_ENDPOINT_URL` | `/services/buildkite/config/artifacts/object-store/endpoint-url` | _(none)_ |
+| R2 Account ID | `ARTIFACTS_R2_ACCOUNT_ID` | `/services/buildkite/config/artifacts/object-store/r2/account-id` | _(R2 only)_ |
+| R2 Access Key ID | `ARTIFACTS_R2_ACCESS_KEY_ID` | `/services/buildkite/config/artifacts/object-store/r2/access-key-id` | _(R2 only)_ |
+| R2 Secret Access Key | `ARTIFACTS_R2_SECRET_ACCESS_KEY` | `/services/buildkite/credentials/artifacts/r2/secret-access-key` | _(R2 only)_ |
+| Artifacts domain | `ARTIFACTS_DOMAIN` | `/services/buildkite/config/artifacts/object-store/r2/artifacts-domain` | _(optional)_ |
+
+For **AWS S3**, the agent's IAM role is used — no explicit credentials needed.
+
+For **Cloudflare R2**, set `ARTIFACTS_BACKEND=r2` and provide the R2 credentials above.
 
 ## JUnit to HTML converter
 
@@ -165,7 +256,7 @@ python3 tools/junit_html_report.py \
 | `--only-failures` | No | `false` | Filter report to only show `FAILED`/`ERRORED` tests in the tree while keeping full summary counts. |
 | `--fail-on-test-failures` | No | `false` | Exit code `64` if any test has status `FAILED` or `ERRORED`. |
 
-The standalone converter writes progress and summary details to stderr. Malformed or empty XML files are skipped with warnings. If no XML files are discovered across all platforms, it still writes an empty report and logs a warning.
+The standalone converter writes progress and summary details to stderr. Malformed or empty XML files are skipped with warnings. If no XML files are discovered across all configured inputs, it still writes an empty report and logs a warning.
 
 ## Licensing and Attribution
 

@@ -26,6 +26,8 @@ class PluginConfig:
     only_failures: bool
     annotate: bool
     fail_on_test_failures: bool
+    junit_reports_path: Optional[Path] = None
+    variants: List[str] = field(default_factory=list)
     commit: Optional[str] = None
     repo: Optional[str] = None
 
@@ -34,11 +36,29 @@ def _get_env(key: str, default: Optional[str] = None) -> Optional[str]:
     return os.environ.get(key, default)
 
 
+def _has_env_with_prefix(prefix: str) -> bool:
+    env_prefix = f"{prefix}_"
+    return any(key.startswith(env_prefix) for key in os.environ)
+
+
 def _get_bool_env(key: str, default: bool) -> bool:
     val = os.environ.get(key)
     if val is None:
         return default
     return val.lower() in ("true", "on", "1")
+
+
+def _get_list_env(prefix: str) -> List[str]:
+    values: List[str] = []
+    idx = 0
+    while True:
+        value = _get_env(f"{prefix}_{idx}")
+        if value is None:
+            break
+        if value:
+            values.append(value)
+        idx += 1
+    return values
 
 
 def resolve_buildkite_git_ref() -> str:
@@ -54,35 +74,19 @@ def resolve_buildkite_git_ref() -> str:
 
 
 def load_plugin_config() -> PluginConfig:
-    # Required properties
-    scope = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_SCOPE")
-    if not scope:
-        raise ValueError("missing required config: scope")
-    if scope not in ("job", "full"):
-        raise ValueError(f"scope must be 'job' or 'full', got {scope!r}")
-
     title = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE")
     if not title:
         raise ValueError("missing required config: title")
 
-    # Platforms
-    platforms = []
-    idx = 0
-    while True:
-        name = _get_env(f"BUILDKITE_PLUGIN_QDB_TEST_REPORT_PLATFORMS_{idx}_NAME")
-        path = _get_env(f"BUILDKITE_PLUGIN_QDB_TEST_REPORT_PLATFORMS_{idx}_PATH")
-        if not name or not path:
-            break
-        platforms.append(PlatformConfig(name=name, path=Path(path)))
-        idx += 1
+    job_prefix = "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB"
+    aggregate_prefix = "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE"
+    has_job = _has_env_with_prefix(job_prefix)
+    has_aggregate = _has_env_with_prefix(aggregate_prefix)
+    if has_job == has_aggregate:
+        raise ValueError("exactly one of job or aggregate must be configured")
 
-    if not platforms:
-        raise ValueError(
-            "missing required config: platforms (at least one platform is required)"
-        )
+    scope = "job" if has_job else "aggregate"
 
-    # Optional/Defaulted properties
-    variant = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_VARIANT")
     execution_name = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_EXECUTION_NAME")
 
     project_id = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_PROJECT_ID") or _get_env(
@@ -111,16 +115,53 @@ def load_plugin_config() -> PluginConfig:
     )
     annotate = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_ANNOTATE", True)
 
-    fail_on_test_failures = _get_bool_env(
-        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_FAIL_ON_TEST_FAILURES", scope == "job"
-    )
+    variant: Optional[str]
+    variants: List[str]
+    junit_reports_path: Optional[Path]
+    fail_on_test_failures: bool
 
-    # Validation
     if scope == "job":
+        variant = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT")
+        variants = _get_list_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANTS")
+        junit_reports_path_raw = _get_env(
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_JUNIT_REPORTS_PATH"
+        )
+        junit_reports_path = (
+            Path(junit_reports_path_raw) if junit_reports_path_raw else None
+        )
+
+        if variants:
+            raise ValueError("variants is only valid under aggregate")
         if not variant:
-            raise ValueError("scope=job requires variant")
+            raise ValueError("job requires variant")
+        if not junit_reports_path:
+            raise ValueError("job requires junit_reports_path")
         if not job_id:
-            raise ValueError("scope=job requires BUILDKITE_JOB_ID")
+            raise ValueError("job requires BUILDKITE_JOB_ID")
+
+        fail_on_test_failures = _get_bool_env(
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_FAIL_ON_TEST_FAILURES", True
+        )
+        platforms = [PlatformConfig(name=variant, path=junit_reports_path)]
+    else:
+        variant = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_VARIANT")
+        variants = _get_list_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_VARIANTS")
+        junit_reports_path_raw = _get_env(
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_JUNIT_REPORTS_PATH"
+        )
+        junit_reports_path = (
+            Path(junit_reports_path_raw) if junit_reports_path_raw else None
+        )
+
+        if junit_reports_path:
+            raise ValueError("junit_reports_path is only valid under job")
+        if "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_FAIL_ON_TEST_FAILURES" in os.environ:
+            raise ValueError("fail_on_test_failures is only valid under job")
+        if not variants:
+            raise ValueError("aggregate requires variants")
+
+        fail_on_test_failures = False
+        platforms = [PlatformConfig(name=name, path=Path(name)) for name in variants]
 
     return PluginConfig(
         scope=scope,
@@ -136,6 +177,8 @@ def load_plugin_config() -> PluginConfig:
         only_failures=only_failures,
         annotate=annotate,
         fail_on_test_failures=fail_on_test_failures,
+        junit_reports_path=junit_reports_path,
+        variants=variants,
         commit=commit,
         repo=repo,
     )
