@@ -38,18 +38,18 @@ function statusCount(status: string): number | undefined {
 }
 
 const summaryMessage = computed(() => {
-  const platformExecutionCount = summaryCount("platformExecutions");
+  const logicalTestCount = summaryCount("logicalTests");
   const targetCount = summaryCount("targets");
   const fallbackNodeCount = executions
     .map((e) => e.size())
     .reduce((sum, current) => sum + current, 0);
 
   return [
-    platformExecutionCount !== undefined
+    logicalTestCount !== undefined
       ? t(
-          "executionSummary.testsPerTargetCount",
-          { count: platformExecutionCount },
-          platformExecutionCount,
+          "executionSummary.testCount",
+          { count: logicalTestCount },
+          logicalTestCount,
         )
       : t(
           "executionSummary.testCount",

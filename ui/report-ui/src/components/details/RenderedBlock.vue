@@ -1,3 +1,4 @@
+<!-- Modified from original source: https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/components/details/RenderedBlock.vue -->
 <script setup lang="ts">
 import CodeBlock from "./CodeBlock.vue";
 import RenderedSection from "./RenderedSection.vue";
@@ -33,6 +34,8 @@ const showImage = inject(imageHandler, () => {
           <a
             v-if="(pair[1] as string).startsWith('link:')"
             :href="(pair[1] as string).substring(5)"
+            target="_blank"
+            rel="noopener noreferrer"
             class="text-blue-600 dark:text-blue-500 hover:underline"
           >
             <pre class="text-sm whitespace-pre-wrap break-all">{{

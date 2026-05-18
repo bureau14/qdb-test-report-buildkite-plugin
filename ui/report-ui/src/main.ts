@@ -18,7 +18,7 @@ app.use(
     messages: {
       en: {
         executionSummary: {
-          testCount: "No nodes | 1 node | {count} nodes",
+          testCount: "No tests | 1 test | {count} tests",
           testsPerTargetCount:
             "No tests per target | 1 test per target | {count} tests per target",
           targetCount: "No targets | 1 target | {count} targets",

@@ -15,8 +15,10 @@ export declare global {
     logicalTests: number;
     platformExecutions: number;
     targets: number;
+    resolvedPlatforms: string[];
     structuralContainers: number;
     statusCounts: Record<string, number>;
+    logicalStatusCounts: Record<string, number>;
     rootStatus: string;
   }
 

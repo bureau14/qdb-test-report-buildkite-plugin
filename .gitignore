@@ -14,7 +14,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -203,6 +202,9 @@ cython_debug/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
+# VS Code
+.vscode/
+
 # Ruff stuff:
 .ruff_cache/
 
@@ -220,3 +222,5 @@ __marimo__/
 
 # Repo specific ignores
 reports/
+.buildkite-test-report/
+report-generation.log
