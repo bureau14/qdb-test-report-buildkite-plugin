@@ -2,6 +2,7 @@
 """Generate a self-contained HTML report directly from JUnit XML."""
 
 from __future__ import annotations
+from typing import List, Optional, Tuple, Union
 
 import argparse
 import json
@@ -11,6 +12,14 @@ import sys
 from html_report_writer import DEFAULT_TEMPLATE, write_html_report
 from junit_report_model import build_report, format_counts, parse_platform_arg
 from report_data import report_to_report_ui_data
+
+
+def log(message: str) -> None:
+    print(f"INFO  {message}", file=sys.stderr)
+
+
+def warn(message: str) -> None:
+    print(f"WARN  {message}", file=sys.stderr)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,67 +44,97 @@ def build_parser() -> argparse.ArgumentParser:
         help="Top-level report execution name; defaults to the report title",
     )
     parser.add_argument("--build-url", help="Buildkite build URL metadata")
-    parser.add_argument("--commit", help="Commit SHA metadata")
-    parser.add_argument("--branch", help="Branch metadata")
+    parser.add_argument("--commit-url", help="Git commit URL metadata")
     parser.add_argument(
         "--only-failures",
         action="store_true",
         help="Skip SUCCESSFUL and SKIPPED tests in the report tree; summary still shows full counts",
     )
     parser.add_argument(
-        "--fail-on-status",
-        choices=["failed", "errored", "never"],
-        default="failed",
-        help="Exit with code 64 if the report status matches these criteria (default: failed). Use 'never' to disable.",
+        "--fail-on-test-failures",
+        action="store_true",
+        help="Exit with code 64 if any test failed or errored.",
     )
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def generate_html_report(
+    *,
+    title: str,
+    platform_specs: List[Tuple[str, Union[Path, str]]],
+    output: Path,
+    summary_json: Optional[Path] = None,
+    template: Path = DEFAULT_TEMPLATE,
+    execution_name: Optional[str] = None,
+    build_url: Optional[str] = None,
+    commit_url: Optional[str] = None,
+    only_failures: bool = False,
+    fail_on_test_failures: bool = False,
+) -> int:
+    report = build_report(
+        title=title,
+        platform_specs=platform_specs,
+        build_url=build_url,
+        commit_url=commit_url,
+    )
+    data = report_to_report_ui_data(
+        report, execution_name=execution_name, only_failures=only_failures
+    )
+    output_path = write_html_report(data, output, template)
+    log(
+        f"Wrote HTML report output={output_path} bytes={output_path.stat().st_size}",
+    )
+
+    if summary_json:
+        summary = {
+            "raw_testcases": report.raw_testcases,
+            "suites": len(report.suites),
+            "logical_tests": report.logical_test_count,
+            "platform_executions": report.platform_execution_count,
+            "targets": len(report.platforms),
+            "resolved_platforms": report.resolved_platforms,
+            "status_counts": dict(report.status_counts),
+            "logical_status_counts": dict(report.logical_status_counts),
+            "root_status": report.root_status,
+        }
+        summary_json.parent.mkdir(parents=True, exist_ok=True)
+        summary_json.write_text(json.dumps(summary, indent=2))
+        log(f"Wrote summary JSON output={summary_json}")
+
+    log(
+        f"Final summary: raw_testcases={report.raw_testcases} suites={len(report.suites)} "
+        f"logical_tests={report.logical_test_count} platform_executions={report.platform_execution_count} "
+        f"status_counts={format_counts(report.status_counts)} root_status={report.root_status}",
+    )
+
+    failed_or_errored = report.status_counts["FAILED"] + report.status_counts["ERRORED"]
+    if fail_on_test_failures and failed_or_errored:
+        log(
+            f"Exiting with {failed_or_errored} failed/errored test execution(s) (code 64)",
+        )
+        return 64
+
+    return 0
+
+
+def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        report = build_report(
+        return generate_html_report(
             title=args.title,
             platform_specs=args.platform,
+            output=args.output,
+            summary_json=args.summary_json,
+            template=args.template,
+            execution_name=args.execution_name,
             build_url=args.build_url,
-            commit=args.commit,
-            branch=args.branch,
+            commit_url=args.commit_url,
+            only_failures=args.only_failures,
+            fail_on_test_failures=args.fail_on_test_failures,
         )
-        data = report_to_report_ui_data(
-            report, execution_name=args.execution_name, only_failures=args.only_failures
-        )
-        output = write_html_report(data, args.output, args.template)
-        print(f"INFO  Wrote HTML report output={output} bytes={output.stat().st_size}", file=sys.stderr)
-
-        if args.summary_json:
-            summary = {
-                "raw_testcases": report.raw_testcases,
-                "suites": len(report.suites),
-                "logical_tests": report.logical_test_count,
-                "platform_executions": report.platform_execution_count,
-                "targets": len(report.platforms),
-                "status_counts": dict(report.status_counts),
-                "root_status": report.root_status,
-            }
-            args.summary_json.parent.mkdir(parents=True, exist_ok=True)
-            args.summary_json.write_text(json.dumps(summary, indent=2))
-            print(f"INFO  Wrote summary JSON output={args.summary_json}", file=sys.stderr)
-
-        print(
-            f"INFO  Final summary: raw_testcases={report.raw_testcases} suites={len(report.suites)} "
-            f"logical_tests={report.logical_test_count} platform_executions={report.platform_execution_count} "
-            f"status_counts={format_counts(report.status_counts)} root_status={report.root_status}",
-            file=sys.stderr,
-        )
-
-        if args.fail_on_status != "never" and report.root_status == args.fail_on_status.upper():
-            print(f"INFO  Exiting with status {report.root_status} (code 64)", file=sys.stderr)
-            return 64
-
     except Exception as exc:  # pragma: no cover - CLI guard
-        print(f"error: {exc}", file=sys.stderr)
+        warn(f"error: {exc}")
         return 1
-    return 0
 
 
 if __name__ == "__main__":

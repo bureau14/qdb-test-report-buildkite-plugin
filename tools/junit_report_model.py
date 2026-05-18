@@ -2,17 +2,25 @@
 """Parse JUnit XML files into a neutral report model."""
 
 from __future__ import annotations
-
+from typing import Dict, List, Optional, Tuple, Union, Counter, OrderedDict
 import argparse
-from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+import glob
+import re
 import sys
 import xml.etree.ElementTree as ET
 
 STATUS_ORDER = ["SUCCESSFUL", "SKIPPED", "FAILED", "ERRORED"]
 STATUS_SEVERITY = {"SUCCESSFUL": 0, "SKIPPED": 1, "FAILED": 2, "ERRORED": 3}
+
+# Pattern to match Buildkite Job IDs (UUIDs). We strip these from test identities
+# to support Buildkite parallelism: multiple jobs for the same variant can each
+# upload their own JUnit XML without being treated as distinct tests in the report.
+UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I
+)
 
 
 def log_info(message: str) -> None:
@@ -37,14 +45,15 @@ def format_counts(counter: Counter[str]) -> str:
 class TestcaseExecution:
     platform: str
     source_file: Path
+    source_id: str
     suite_name: str
     classname: str
     name: str
     logical_id: str
     status: str
     duration_seconds: float
-    reason: str | None = None
-    output: str | None = None
+    reason: Optional[str] = None
+    output: Optional[str] = None
 
 
 @dataclass
@@ -67,16 +76,25 @@ class TestSuite:
 @dataclass
 class Report:
     title: str
-    platforms: list[str]
+    platforms: List[str]
     suites: "OrderedDict[str, TestSuite]"
-    build_url: str | None = None
-    commit: str | None = None
-    branch: str | None = None
+    build_url: Optional[str] = None
+    commit_url: Optional[str] = None
     generated_at: str = ""
     total_files: int = 0
     raw_testcases: int = 0
     duplicates_seen: int = 0
     duplicates_replaced: int = 0
+
+    @property
+    def resolved_platforms(self) -> List[str]:
+        """Returns the list of platforms that actually had at least one test execution."""
+        seen = set()
+        for suite in self.suites.values():
+            for logical in suite.logical_tests.values():
+                for platform in logical.executions:
+                    seen.add(platform)
+        return [p for p in self.platforms if p in seen]
 
     @property
     def logical_test_count(self) -> int:
@@ -109,6 +127,14 @@ class Report:
         )
 
     @property
+    def logical_status_counts(self) -> Counter[str]:
+        return Counter(
+            logical_status(logical)
+            for suite in self.suites.values()
+            for logical in suite.logical_tests.values()
+        )
+
+    @property
     def root_status(self) -> str:
         return aggregate_status(list(self.status_counts.elements()))
 
@@ -122,9 +148,22 @@ def utc_now_iso() -> str:
     )
 
 
-def discover_xml_files(path: Path | str) -> list[Path]:
-    """Return XML files for a file or directory, sorted by deterministic relative path."""
+def has_glob_magic(path: Union[Path, str]) -> bool:
+    return any(char in str(path) for char in "*?[]")
+
+
+def discover_xml_files(path: Union[Path, str]) -> List[Path]:
+    """Return XML files for a file, directory, or glob, sorted deterministically."""
     input_path = Path(path)
+    if has_glob_magic(input_path):
+        return sorted(
+            {
+                Path(match).resolve()
+                for match in glob.glob(str(input_path), recursive=True)
+                if Path(match).is_file() and Path(match).suffix == ".xml"
+            },
+            key=lambda p: p.as_posix(),
+        )
     if input_path.is_file():
         return [input_path]
     if input_path.is_dir():
@@ -132,10 +171,11 @@ def discover_xml_files(path: Path | str) -> list[Path]:
             (p for p in input_path.rglob("*.xml") if p.is_file()),
             key=lambda p: p.relative_to(input_path).as_posix(),
         )
-    raise FileNotFoundError(f"JUnit path does not exist: {input_path}")
+    log_warn(f"JUnit path does not exist: {input_path}")
+    return []
 
 
-def parse_platform_arg(value: str) -> tuple[str, Path]:
+def parse_platform_arg(value: str) -> Tuple[str, Path]:
     if "=" not in value:
         raise argparse.ArgumentTypeError("platform must use name=path format")
     name, raw_path = value.split("=", 1)
@@ -146,11 +186,11 @@ def parse_platform_arg(value: str) -> tuple[str, Path]:
     return name.strip(), Path(raw_path)
 
 
-def logical_test_identity(testcase: ET.Element, source_id: str) -> tuple[str, str, str]:
+def logical_test_identity(testcase: ET.Element, source_id: str) -> Tuple[str, str, str]:
     name = testcase.attrib.get("name", "").strip() or "<unnamed>"
     classname = testcase.attrib.get("classname", "").strip()
     test_id = f"{classname}::{name}" if classname else name
-    return f"{source_id}::{test_id}", classname, name
+    return test_id, classname, name
 
 
 def testcase_status(testcase: ET.Element) -> str:
@@ -163,7 +203,7 @@ def testcase_status(testcase: ET.Element) -> str:
     return "SUCCESSFUL"
 
 
-def specific_reason_from_text(text: str | None) -> str | None:
+def specific_reason_from_text(text: Optional[str]) -> Optional[str]:
     if not text:
         return None
     lines = [line.strip() for line in text.splitlines() if line.strip()]
@@ -178,7 +218,7 @@ def specific_reason_from_text(text: str | None) -> str | None:
 
 def testcase_reason_and_output(
     testcase: ET.Element, status: str
-) -> tuple[str | None, str | None]:
+) -> Tuple[Optional[str], Optional[str]]:
     if status == "ERRORED":
         node = testcase.find("error")
     elif status == "FAILED":
@@ -189,7 +229,7 @@ def testcase_reason_and_output(
         node = None
 
     reason = None
-    output_parts: list[str] = []
+    output_parts: List[str] = []
     if node is not None:
         raw_message = node.attrib.get("message")
         node_text = node.text.strip() if node.text and node.text.strip() else None
@@ -226,7 +266,17 @@ def duration_seconds(testcase: ET.Element) -> float:
     return max(value, 0.0)
 
 
-def aggregate_status(statuses: list[str]) -> str:
+def aggregate_status(statuses: List[str]) -> str:
+    if any(status == "ERRORED" for status in statuses):
+        return "ERRORED"
+    if any(status == "FAILED" for status in statuses):
+        return "FAILED"
+    # Skips are treated as success for the purpose of the overall report status.
+    return "SUCCESSFUL"
+
+
+def logical_status(logical: LogicalTest) -> str:
+    statuses = [execution.status for execution in logical.executions.values()]
     if any(status == "ERRORED" for status in statuses):
         return "ERRORED"
     if any(status == "FAILED" for status in statuses):
@@ -248,19 +298,30 @@ def local_name(element: ET.Element) -> str:
     return element.tag.rsplit("}", 1)[-1]
 
 
-def iter_junit_suites(root: ET.Element) -> list[ET.Element]:
+def iter_junit_suites(root: ET.Element) -> List[ET.Element]:
     if local_name(root) == "testsuite":
         return [root]
     return [element for element in root.iter() if local_name(element) == "testsuite"]
 
 
 def parse_junit_file(
-    path: Path, platform: str, source_id: str | None = None
-) -> list[TestcaseExecution]:
+    path: Path,
+    platform: str,
+    source_id: Optional[str] = None,
+) -> List[TestcaseExecution]:
     if source_id is None:
         source_id = path.name
-    root = ET.parse(path).getroot()
-    executions: list[TestcaseExecution] = []
+    if path.stat().st_size == 0:
+        log_warn(f"skipping empty JUnit XML file file={path} platform={platform}")
+        return []
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError as error:
+        log_warn(
+            f"skipping malformed JUnit XML file file={path} platform={platform} error={error}"
+        )
+        return []
+    executions: List[TestcaseExecution] = []
     suites = iter_junit_suites(root)
     if not suites:
         log_warn(f"no testsuite elements found file={path} platform={platform}")
@@ -282,6 +343,7 @@ def parse_junit_file(
                 TestcaseExecution(
                     platform=platform,
                     source_file=path,
+                    source_id=source_id,
                     suite_name=suite_name,
                     classname=classname,
                     name=name,
@@ -309,10 +371,9 @@ def parse_junit_file(
 
 def build_report(
     title: str,
-    platform_specs: list[tuple[str, Path | str]],
-    build_url: str | None = None,
-    commit: str | None = None,
-    branch: str | None = None,
+    platform_specs: List[Tuple[str, Union[Path, str]]],
+    build_url: Optional[str] = None,
+    commit_url: Optional[str] = None,
 ) -> Report:
     log_info(
         f"Start JUnit report model build title={title!r} platforms={len(platform_specs)}"
@@ -320,70 +381,88 @@ def build_report(
     suites: "OrderedDict[str, TestSuite]" = OrderedDict()
     total_files = 0
     total_raw_executions = 0
+    all_files_to_process = []
     duplicates_seen = 0
     duplicates_replaced = 0
 
     for platform, raw_path in platform_specs:
         input_path = Path(raw_path)
         log_info(f"Inspect platform={platform} path={input_path}")
-        xml_files = discover_xml_files(input_path)
-        total_files += len(xml_files)
+        platform_xml_files = discover_xml_files(input_path)
+        total_files += len(platform_xml_files)
         log_info(
-            f"platform={platform} path={input_path} discovered {len(xml_files)} XML file(s)"
+            f"platform={platform} discovered {len(platform_xml_files)} XML file(s)"
         )
-        if not xml_files:
-            log_warn(f"platform={platform} path={input_path} produced no XML files")
-        for xml_file in xml_files:
-            source_id = (
-                xml_file.relative_to(input_path).as_posix()
+        for xml_file in platform_xml_files:
+            rel_path = (
+                xml_file.relative_to(
+                    input_path.parent if input_path.is_file() else input_path
+                ).as_posix()
                 if input_path.is_dir()
                 else xml_file.name
             )
-            file_executions = parse_junit_file(xml_file, platform, source_id)
-            total_raw_executions += len(file_executions)
-            for execution in file_executions:
-                suite = suites.get(execution.suite_name)
-                if suite is None:
-                    suite = TestSuite(name=execution.suite_name)
-                    suites[execution.suite_name] = suite
-                    log_info(f"created testsuite suite={execution.suite_name}")
-                logical = suite.logical_tests.get(execution.logical_id)
-                if logical is None:
-                    logical = LogicalTest(
-                        suite_name=execution.suite_name,
-                        logical_id=execution.logical_id,
-                        classname=execution.classname,
-                        name=execution.name,
+            # Strip UUIDs and the platform name from the source_id components.
+            # We keep UUIDs in the physical path to avoid file collisions when
+            # multiple parallel Buildkite jobs upload the same filename, but
+            # we strip them from the logical identity so the report correctly
+            # aggregates results from all parallel jobs into a single row.
+            parts = rel_path.split("/")
+            source_id = (
+                "/".join(p for p in parts if not UUID_RE.match(p) and p != platform)
+                or rel_path
+            )
+            all_files_to_process.append((platform, xml_file, source_id))
+
+    if not all_files_to_process:
+        log_warn("No JUnit XML files discovered across all platforms")
+
+    log_info("Omitting filename prefix from all test identities")
+
+    for platform, xml_file, source_id in all_files_to_process:
+        file_executions = parse_junit_file(xml_file, platform, source_id)
+        total_raw_executions += len(file_executions)
+        for execution in file_executions:
+            suite = suites.get(execution.suite_name)
+            if suite is None:
+                suite = TestSuite(name=execution.suite_name)
+                suites[execution.suite_name] = suite
+                log_info(f"created testsuite suite={execution.suite_name}")
+            logical = suite.logical_tests.get(execution.logical_id)
+            if logical is None:
+                logical = LogicalTest(
+                    suite_name=execution.suite_name,
+                    logical_id=execution.logical_id,
+                    classname=execution.classname,
+                    name=execution.name,
+                )
+                suite.logical_tests[execution.logical_id] = logical
+            existing = logical.executions.get(platform)
+            if existing is None:
+                logical.executions[platform] = execution
+            else:
+                duplicates_seen += 1
+                chosen = worse_execution(existing, execution)
+                if chosen is execution:
+                    duplicates_replaced += 1
+                    log_warn(
+                        f"duplicate replaced test={execution.logical_id} platform={platform} "
+                        f"suite={execution.suite_name} old_status={existing.status} "
+                        f"new_status={execution.status} old_file={existing.source_file} new_file={execution.source_file}"
                     )
-                    suite.logical_tests[execution.logical_id] = logical
-                existing = logical.executions.get(platform)
-                if existing is None:
-                    logical.executions[platform] = execution
                 else:
-                    duplicates_seen += 1
-                    chosen = worse_execution(existing, execution)
-                    if chosen is execution:
-                        duplicates_replaced += 1
-                        log_warn(
-                            f"duplicate replaced test={execution.logical_id} platform={platform} "
-                            f"suite={execution.suite_name} old_status={existing.status} "
-                            f"new_status={execution.status} old_file={existing.source_file} new_file={execution.source_file}"
-                        )
-                    else:
-                        log_warn(
-                            f"duplicate kept-existing test={execution.logical_id} platform={platform} "
-                            f"suite={execution.suite_name} existing_status={existing.status} "
-                            f"duplicate_status={execution.status} existing_file={existing.source_file} duplicate_file={execution.source_file}"
-                        )
-                    logical.executions[platform] = chosen
+                    log_warn(
+                        f"duplicate kept-existing test={execution.logical_id} platform={platform} "
+                        f"suite={execution.suite_name} existing_status={existing.status} "
+                        f"duplicate_status={execution.status} existing_file={existing.source_file} duplicate_file={execution.source_file}"
+                    )
+                logical.executions[platform] = chosen
 
     report = Report(
         title=title,
         platforms=[platform for platform, _ in platform_specs],
         suites=suites,
         build_url=build_url,
-        commit=commit,
-        branch=branch,
+        commit_url=commit_url,
         generated_at=utc_now_iso(),
         total_files=total_files,
         raw_testcases=total_raw_executions,
