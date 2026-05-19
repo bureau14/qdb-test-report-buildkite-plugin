@@ -99,7 +99,7 @@ steps:
     command: "true" # No-op; the plugin runs in the post-command hook.
     plugins:
       - bureau14/qdb-test-report#master:
-          title: "Aggregate unit test report"
+          title: "Full test report"
           aggregate: {}
 ```
 
