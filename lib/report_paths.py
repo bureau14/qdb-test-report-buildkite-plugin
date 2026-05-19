@@ -12,16 +12,6 @@ class ReportLocation:
     xml_prefix: str
 
 
-def report_scope_key(scope: str, job_id: Optional[str]) -> str:
-    if scope in ("full", "aggregate"):
-        return "full"
-    if scope == "job":
-        if not job_id:
-            raise ValueError("job scope requires BUILDKITE_JOB_ID")
-        return key_join("jobs", job_id)
-    raise ValueError(f"unsupported report scope: {scope}")
-
-
 def build_report_location(
     *,
     destination_prefix: str,
@@ -32,19 +22,17 @@ def build_report_location(
     job_id: Optional[str],
     variant: Optional[str] = None,
 ) -> ReportLocation:
-    if scope == "job" and not variant:
-        raise ValueError("job scope requires variant")
+    # Base parts: <prefix>/<project_id>/<git_ref>/reports/builds/<build_id>
+    parts = [destination_prefix, project_id, git_ref, "reports", "builds", build_id]
 
-    # Base parts: <prefix>/<project_id>/<git_ref>/reports
-    parts = [destination_prefix, project_id, git_ref, "reports"]
-
-    if variant:
-        parts.extend(["variants", variant])
-
-    parts.extend(["builds", build_id])
-
-    scope_key = report_scope_key(scope, job_id)
-    parts.append(scope_key)
+    if scope == "job":
+        if not variant:
+            raise ValueError("job scope requires variant")
+        if not job_id:
+            raise ValueError("job scope requires BUILDKITE_JOB_ID")
+        parts.extend(["variants", variant, "jobs", job_id])
+    else:
+        parts.append("full")
 
     base_prefix = key_join(*parts)
 

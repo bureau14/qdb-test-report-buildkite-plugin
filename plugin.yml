@@ -29,29 +29,19 @@ configuration:
       properties:
         variant:
           type: string
-          description: Test variant name and raw XML upload prefix.
-        junit_reports_path:
+          description: Test variant name and report grouping.
+        junit_input_path:
           type: string
           description: Local JUnit XML file, directory, or glob.
         fail_on_test_failures:
           type: boolean
           description: Exit 64 when the generated job report contains failed or errored tests; default true.
-      required: [variant, junit_reports_path]
+      required: [variant, junit_input_path]
       additionalProperties: false
     aggregate:
       type: object
-      description: Aggregate report configuration that downloads raw XML uploaded by job reports.
-      properties:
-        variant:
-          type: string
-          description: Optional variant grouping for the aggregate report upload path.
-        variants:
-          type: array
-          minItems: 1
-          items:
-            type: string
-          description: Variant names to aggregate from object storage.
-      required: [variants]
+      description: Aggregate report configuration that discovers raw XML uploaded by job reports for the current build.
+      properties: {}
       additionalProperties: false
   required: [title]
   additionalProperties: false

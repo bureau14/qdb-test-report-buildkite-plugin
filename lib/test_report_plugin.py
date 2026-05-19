@@ -26,8 +26,8 @@ from object_store import (
     key_join,
     PublishedObject,
 )
-from report_downloads import collect_full_scope_xml, build_job_xml_prefix
-from xml_inputs import collect_job_xml_uploads, collect_xml_uploads, XmlUpload
+from report_downloads import DownloadedJobXml, collect_full_scope_xml
+from xml_inputs import collect_job_xml_uploads, XmlUpload
 from annotations import (
     build_annotation_body,
     get_annotation_style,
@@ -58,27 +58,29 @@ def warn(message: str) -> None:
     print(f"WARN  {message}", file=sys.stderr)
 
 
-def full_scope_missing_variants(
-    variants: List[str], xml_uploads: List[XmlUpload]
-) -> List[str]:
-    """Return configured full-scope variants that have no collected XML files."""
-    variants_with_xml = {
-        upload.object_relative_path.split("/", 1)[0]
-        for upload in xml_uploads
-        if "/" in upload.object_relative_path
-    }
-    return [variant for variant in variants if variant not in variants_with_xml]
+def aggregate_discovery_counts(
+    downloaded_xml: List[DownloadedJobXml],
+) -> Dict[str, int]:
+    variants = {item.variant for item in downloaded_xml}
+    jobs = {(item.variant, item.job_id) for item in downloaded_xml}
+    return {"variants": len(variants), "jobs": len(jobs), "files": len(downloaded_xml)}
 
 
-def add_summary_warnings(summary_path: Path, warnings: List[str]) -> None:
-    if not warnings:
-        return
-
+def add_summary_metadata(
+    summary_path: Path, *, discovered_xml: Optional[Dict[str, int]] = None
+) -> None:
     summary = json.loads(summary_path.read_text())
-    existing = list(summary.get("warnings", []))
-    existing.extend(warnings)
-    summary["warnings"] = existing
+    if discovered_xml is not None:
+        summary["discovered_xml"] = discovered_xml
     summary_path.write_text(json.dumps(summary, indent=2))
+
+
+def build_zero_xml_annotation_body(title: str) -> str:
+    return (
+        f"## {title}\n\n"
+        "No JUnit XML was found for this aggregate test report.\n\n"
+        "Make sure this aggregate step depends on the test jobs that publish job reports."
+    )
 
 
 def run_report_generation(config: PluginConfig, output_dir: Path) -> GenerationResult:
@@ -198,13 +200,11 @@ def main() -> int:
             full_scope_xml_stage_root = staging_root / "downloaded-xml"
 
             store_context: Optional[ObjectStoreContext] = None
+            aggregate_counts: Optional[Dict[str, int]] = None
             if config.scope == "aggregate":
                 store_context = resolve_object_store_context()
-                variants = config.variants
-                log(
-                    f"Downloading aggregate JUnit XML for variants: {', '.join(variants)}"
-                )
-                collect_full_scope_xml(
+                log("Discovering aggregate JUnit XML from object storage")
+                downloaded_xml = collect_full_scope_xml(
                     cfg=store_context.store_cfg,
                     auth=store_context.auth,
                     bucket=store_context.bucket,
@@ -212,9 +212,29 @@ def main() -> int:
                     project_id=config.project_id,
                     git_ref=config.git_ref,
                     build_id=config.build_id,
-                    variants=variants,
                     output_dir=full_scope_xml_stage_root,
                 )
+
+                if not downloaded_xml:
+                    log("No JUnit XML was found for this aggregate test report.")
+                    if config.annotate:
+                        create_buildkite_annotation(
+                            build_zero_xml_annotation_body(config.title),
+                            "test-report:full",
+                            "error",
+                            priority=10,
+                            scope="build",
+                        )
+                    return 0
+
+                aggregate_counts = aggregate_discovery_counts(downloaded_xml)
+                log(
+                    "Discovered JUnit XML for aggregate report: "
+                    f"{aggregate_counts['variants']} variants, "
+                    f"{aggregate_counts['jobs']} jobs, "
+                    f"{aggregate_counts['files']} XML files."
+                )
+                variant_names = sorted({item.variant for item in downloaded_xml})
                 config = replace(
                     config,
                     platforms=[
@@ -222,32 +242,22 @@ def main() -> int:
                             name=variant,
                             path=full_scope_xml_stage_root / variant,
                         )
-                        for variant in variants
+                        for variant in variant_names
                     ],
                 )
-                xml_uploads = collect_xml_uploads(config.platforms, config.scope)
+                xml_uploads = [
+                    XmlUpload(
+                        local_path=item.local_path,
+                        object_relative_path=item.object_relative_path,
+                    )
+                    for item in downloaded_xml
+                ]
             else:
-                if config.junit_reports_path is None or config.variant is None:
-                    raise ValueError(
-                        "scope=job requires variant and junit_reports_path"
-                    )
+                if config.junit_input_path is None or config.variant is None:
+                    raise ValueError("scope=job requires variant and junit_input_path")
                 xml_uploads = collect_job_xml_uploads(
-                    config.junit_reports_path, config.variant
+                    config.junit_input_path, config.variant
                 )
-
-            summary_warnings: List[str] = []
-            if config.scope == "aggregate":
-                missing_variants = full_scope_missing_variants(
-                    config.variants, xml_uploads
-                )
-                if missing_variants:
-                    variant_list = ", ".join(missing_variants)
-                    warning = (
-                        f"Missing full-scope report variants: {variant_list}. "
-                        "This usually means a job failed before publishing test XML."
-                    )
-                    warn(warning)
-                    summary_warnings.append(warning)
 
             # Create temp dir for HTML report generation output
             tmp_base = staging_root / "report"
@@ -258,7 +268,10 @@ def main() -> int:
                 + (f" for variant {config.variant}" if config.variant else "")
             )
             generation = run_report_generation(config, tmp_base)
-            add_summary_warnings(generation.summary_path, summary_warnings)
+            if config.scope == "aggregate":
+                add_summary_metadata(
+                    generation.summary_path, discovered_xml=aggregate_counts
+                )
 
             # Upload JUNIT reports, HTML report, summary
             uploads = upload_report_artifacts(
@@ -283,11 +296,7 @@ def main() -> int:
                             body, context, style, priority=10, scope="job"
                         )
                     else:
-                        context = (
-                            f"test-report:{config.variant}:full"
-                            if config.variant
-                            else "test-report:full"
-                        )
+                        context = "test-report:full"
                         create_buildkite_annotation(
                             body, context, style, priority=10, scope="build"
                         )

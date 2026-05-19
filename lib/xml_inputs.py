@@ -13,7 +13,7 @@ class XmlUpload:
     object_relative_path: str
 
 
-def _collect_uploads_for_path(path: Path, prefix: str) -> List[XmlUpload]:
+def _collect_uploads_for_path(path: Path, prefix: str = "") -> List[XmlUpload]:
     uploads: List[XmlUpload] = []
     path_str = str(path)
     is_glob = any(c in path_str for c in "*?[]")
@@ -29,15 +29,20 @@ def _collect_uploads_for_path(path: Path, prefix: str) -> List[XmlUpload]:
         )
         for xml_file in xml_files:
             rel_path = xml_file.relative_to(cwd).as_posix()
+            object_relative_path = (
+                f"{prefix}/{rel_path}".lstrip("/") if prefix else rel_path
+            )
             uploads.append(
                 XmlUpload(
-                    local_path=xml_file,
-                    object_relative_path=f"{prefix}/{rel_path}",
+                    local_path=xml_file, object_relative_path=object_relative_path
                 )
             )
     elif path.is_file():
+        object_relative_path = (
+            f"{prefix}/{path.name}".lstrip("/") if prefix else path.name
+        )
         uploads.append(
-            XmlUpload(local_path=path, object_relative_path=f"{prefix}/{path.name}")
+            XmlUpload(local_path=path, object_relative_path=object_relative_path)
         )
     elif path.is_dir():
         xml_files = sorted(
@@ -46,30 +51,32 @@ def _collect_uploads_for_path(path: Path, prefix: str) -> List[XmlUpload]:
         )
         for xml_file in xml_files:
             rel_path = xml_file.relative_to(path).as_posix()
+            object_relative_path = (
+                f"{prefix}/{rel_path}".lstrip("/") if prefix else rel_path
+            )
             uploads.append(
                 XmlUpload(
-                    local_path=xml_file,
-                    object_relative_path=f"{prefix}/{rel_path}",
+                    local_path=xml_file, object_relative_path=object_relative_path
                 )
             )
 
     return uploads
 
 
-def collect_job_xml_uploads(junit_reports_path: Path, variant: str) -> List[XmlUpload]:
-    """Collect job-scope JUnit XML files using variant as the upload prefix."""
+def collect_job_xml_uploads(junit_input_path: Path, variant: str) -> List[XmlUpload]:
+    """Collect job-scope JUnit XML files relative to the configured input path."""
 
-    path_str = str(junit_reports_path)
+    path_str = str(junit_input_path)
     is_glob = any(c in path_str for c in "*?[]")
-    if not is_glob and not junit_reports_path.exists():
+    if not is_glob and not junit_input_path.exists():
         raise FileNotFoundError(
-            f"junit_reports_path does not exist: {junit_reports_path} (variant: {variant})"
+            f"junit_input_path does not exist: {junit_input_path} (variant: {variant})"
         )
 
-    uploads = _collect_uploads_for_path(junit_reports_path, variant)
+    uploads = _collect_uploads_for_path(junit_input_path)
     if not uploads:
         raise FileNotFoundError(
-            f"no JUnit XML files found at junit_reports_path: {junit_reports_path} (variant: {variant})"
+            f"no JUnit XML files found at junit_input_path: {junit_input_path} (variant: {variant})"
         )
     return uploads
 
