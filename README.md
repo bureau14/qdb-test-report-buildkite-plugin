@@ -96,7 +96,6 @@ plugins:
   - bureau14/qdb-test-report#master:
       title: "Linux aggregate test report"
       aggregate:
-        variant: linux
         variants:
           - linux-haswell-release
           - linux-core2-release
