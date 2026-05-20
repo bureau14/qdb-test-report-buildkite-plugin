@@ -35,7 +35,9 @@ def build_annotation_body(title: str, summary: dict, html_url: str) -> str:
     if warnings:
         warning_lines = "\n".join(f"- {warning}" for warning in warnings)
         body += f"\n\n⚠️ Warnings\n\n{warning_lines}"
-    body += f'\n\n<a href="{html_url}" target="_blank" rel="noopener noreferrer">Open full report</a>'
+    body += (
+        f'\n\n<a href="{html_url}" target="_blank" rel="noopener noreferrer">Open full report</a>'
+    )
     return body
 
 

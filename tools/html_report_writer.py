@@ -8,9 +8,7 @@ from pathlib import Path
 from typing import Any, Union
 
 PLACEHOLDER = "<!-- TEST_REPORT_DATA -->"
-DEFAULT_TEMPLATE = (
-    Path(__file__).resolve().parent / "templates" / "report-template.html"
-)
+DEFAULT_TEMPLATE = Path(__file__).resolve().parent / "templates" / "report-template.html"
 
 
 def safe_json_for_script(data: Any) -> str:

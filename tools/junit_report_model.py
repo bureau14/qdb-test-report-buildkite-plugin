@@ -2,7 +2,7 @@
 """Parse JUnit XML files into a neutral report model."""
 
 from __future__ import annotations
-from typing import Dict, List, Optional, Tuple, Union, Counter, OrderedDict
+from typing import List, Optional, Tuple, Union, Counter, OrderedDict
 import argparse
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -18,9 +18,7 @@ STATUS_SEVERITY = {"SUCCESSFUL": 0, "SKIPPED": 1, "FAILED": 2, "ERRORED": 3}
 # Pattern to match Buildkite Job IDs (UUIDs). We strip these from test identities
 # to support Buildkite parallelism: multiple jobs for the same variant can each
 # upload their own JUnit XML without being treated as distinct tests in the report.
-UUID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I
-)
+UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 
 
 def log_info(message: str) -> None:
@@ -32,9 +30,7 @@ def log_warn(message: str) -> None:
 
 
 def format_counts(counter: Counter[str]) -> str:
-    parts = [
-        f"{status}={counter[status]}" for status in STATUS_ORDER if counter[status]
-    ]
+    parts = [f"{status}={counter[status]}" for status in STATUS_ORDER if counter[status]]
     for key in sorted(counter):
         if key not in STATUS_ORDER and counter[key]:
             parts.append(f"{key}={counter[key]}")
@@ -62,9 +58,7 @@ class LogicalTest:
     logical_id: str
     classname: str
     name: str
-    executions: "OrderedDict[str, TestcaseExecution]" = field(
-        default_factory=OrderedDict
-    )
+    executions: "OrderedDict[str, TestcaseExecution]" = field(default_factory=OrderedDict)
 
 
 @dataclass
@@ -140,12 +134,7 @@ class Report:
 
 
 def utc_now_iso() -> str:
-    return (
-        datetime.now(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def has_glob_magic(path: Union[Path, str]) -> bool:
@@ -240,11 +229,7 @@ def testcase_reason_and_output(
         elif raw_message and raw_message.lower() not in {"failure", "error"}:
             reason = raw_message
         else:
-            reason = (
-                specific_reason_from_text(node_text)
-                or raw_message
-                or node.attrib.get("type")
-            )
+            reason = specific_reason_from_text(node_text) or raw_message or node.attrib.get("type")
 
     for output_name in ("system-out", "system-err"):
         output_node = testcase.find(output_name)
@@ -286,9 +271,7 @@ def logical_status(logical: LogicalTest) -> str:
     return "SUCCESSFUL"
 
 
-def worse_execution(
-    current: TestcaseExecution, candidate: TestcaseExecution
-) -> TestcaseExecution:
+def worse_execution(current: TestcaseExecution, candidate: TestcaseExecution) -> TestcaseExecution:
     if STATUS_SEVERITY[candidate.status] > STATUS_SEVERITY[current.status]:
         return candidate
     return current
@@ -317,9 +300,7 @@ def parse_junit_file(
     try:
         root = ET.parse(path).getroot()
     except ET.ParseError as error:
-        log_warn(
-            f"skipping malformed JUnit XML file file={path} platform={platform} error={error}"
-        )
+        log_warn(f"skipping malformed JUnit XML file file={path} platform={platform} error={error}")
         return []
     executions: List[TestcaseExecution] = []
     suites = iter_junit_suites(root)
@@ -328,13 +309,9 @@ def parse_junit_file(
         return executions
     for suite in suites:
         suite_name = suite.attrib.get("name") or path.stem
-        suite_testcases = [
-            child for child in list(suite) if local_name(child) == "testcase"
-        ]
+        suite_testcases = [child for child in list(suite) if local_name(child) == "testcase"]
         if not suite_testcases:
-            log_warn(
-                f"empty testsuite file={path} platform={platform} suite={suite_name}"
-            )
+            log_warn(f"empty testsuite file={path} platform={platform} suite={suite_name}")
         for testcase in suite_testcases:
             logical_id, classname, name = logical_test_identity(testcase, source_id)
             status = testcase_status(testcase)
@@ -375,9 +352,7 @@ def build_report(
     build_url: Optional[str] = None,
     commit_url: Optional[str] = None,
 ) -> Report:
-    log_info(
-        f"Start JUnit report model build title={title!r} platforms={len(platform_specs)}"
-    )
+    log_info(f"Start JUnit report model build title={title!r} platforms={len(platform_specs)}")
     suites: "OrderedDict[str, TestSuite]" = OrderedDict()
     total_files = 0
     total_raw_executions = 0
@@ -390,9 +365,7 @@ def build_report(
         log_info(f"Inspect platform={platform} path={input_path}")
         platform_xml_files = discover_xml_files(input_path)
         total_files += len(platform_xml_files)
-        log_info(
-            f"platform={platform} discovered {len(platform_xml_files)} XML file(s)"
-        )
+        log_info(f"platform={platform} discovered {len(platform_xml_files)} XML file(s)")
         for xml_file in platform_xml_files:
             rel_path = (
                 xml_file.relative_to(
@@ -408,8 +381,7 @@ def build_report(
             # aggregates results from all parallel jobs into a single row.
             parts = rel_path.split("/")
             source_id = (
-                "/".join(p for p in parts if not UUID_RE.match(p) and p != platform)
-                or rel_path
+                "/".join(p for p in parts if not UUID_RE.match(p) and p != platform) or rel_path
             )
             all_files_to_process.append((platform, xml_file, source_id))
 

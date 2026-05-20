@@ -36,9 +36,7 @@ def refresh_template() -> Path:
 
     count = html.count(PLACEHOLDER)
     if count != 1:
-        raise RuntimeError(
-            f"Expected exactly one {PLACEHOLDER} placeholder, found {count}"
-        )
+        raise RuntimeError(f"Expected exactly one {PLACEHOLDER} placeholder, found {count}")
 
     TEMPLATE.parent.mkdir(parents=True, exist_ok=True)
     TEMPLATE.write_text(html, encoding="utf-8")

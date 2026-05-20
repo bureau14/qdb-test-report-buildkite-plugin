@@ -21,29 +21,17 @@ def _collect_uploads_for_path(path: Path, prefix: str = "") -> List[XmlUpload]:
     if is_glob:
         cwd = Path.cwd().resolve()
         xml_files = sorted(
-            {
-                Path(f).resolve()
-                for f in glob.glob(path_str, recursive=True)
-                if Path(f).is_file()
-            }
+            {Path(f).resolve() for f in glob.glob(path_str, recursive=True) if Path(f).is_file()}
         )
         for xml_file in xml_files:
             rel_path = xml_file.relative_to(cwd).as_posix()
-            object_relative_path = (
-                f"{prefix}/{rel_path}".lstrip("/") if prefix else rel_path
-            )
+            object_relative_path = f"{prefix}/{rel_path}".lstrip("/") if prefix else rel_path
             uploads.append(
-                XmlUpload(
-                    local_path=xml_file, object_relative_path=object_relative_path
-                )
+                XmlUpload(local_path=xml_file, object_relative_path=object_relative_path)
             )
     elif path.is_file():
-        object_relative_path = (
-            f"{prefix}/{path.name}".lstrip("/") if prefix else path.name
-        )
-        uploads.append(
-            XmlUpload(local_path=path, object_relative_path=object_relative_path)
-        )
+        object_relative_path = f"{prefix}/{path.name}".lstrip("/") if prefix else path.name
+        uploads.append(XmlUpload(local_path=path, object_relative_path=object_relative_path))
     elif path.is_dir():
         xml_files = sorted(
             (p for p in path.rglob("*.xml") if p.is_file()),
@@ -51,13 +39,9 @@ def _collect_uploads_for_path(path: Path, prefix: str = "") -> List[XmlUpload]:
         )
         for xml_file in xml_files:
             rel_path = xml_file.relative_to(path).as_posix()
-            object_relative_path = (
-                f"{prefix}/{rel_path}".lstrip("/") if prefix else rel_path
-            )
+            object_relative_path = f"{prefix}/{rel_path}".lstrip("/") if prefix else rel_path
             uploads.append(
-                XmlUpload(
-                    local_path=xml_file, object_relative_path=object_relative_path
-                )
+                XmlUpload(local_path=xml_file, object_relative_path=object_relative_path)
             )
 
     return uploads

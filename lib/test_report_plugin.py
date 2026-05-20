@@ -14,7 +14,7 @@ if tools_path not in sys.path:
 import junit_html_report
 
 from plugin_config import PluginConfig, PlatformConfig, load_plugin_config
-from report_paths import build_report_location, ReportLocation
+from report_paths import build_report_location
 from object_store import (
     ObjectAuth,
     StoreConfig,
@@ -115,9 +115,7 @@ def resolve_object_store_context() -> ObjectStoreContext:
     store_cfg = load_store_config(ssm)
     auth = resolve_object_auth(store_cfg)
     bucket, prefix = parse_s3(store_cfg.destination)
-    return ObjectStoreContext(
-        store_cfg=store_cfg, auth=auth, bucket=bucket, prefix=prefix
-    )
+    return ObjectStoreContext(store_cfg=store_cfg, auth=auth, bucket=bucket, prefix=prefix)
 
 
 def upload_report_artifacts(
@@ -175,9 +173,7 @@ def upload_report_artifacts(
     if config.scope == "job":
         for xml in xml_uploads:
             key = key_join(location.xml_prefix, xml.object_relative_path)
-            log(
-                f"Uploading JUnit XML {xml.object_relative_path} to s3://{bucket}/{key}"
-            )
+            log(f"Uploading JUnit XML {xml.object_relative_path} to s3://{bucket}/{key}")
             results[f"xml:{xml.object_relative_path}"] = upload_file(
                 store_cfg,
                 auth,
@@ -255,9 +251,7 @@ def main() -> int:
             else:
                 if config.junit_input_path is None or config.variant is None:
                     raise ValueError("scope=job requires variant and junit_input_path")
-                xml_uploads = collect_job_xml_uploads(
-                    config.junit_input_path, config.variant
-                )
+                xml_uploads = collect_job_xml_uploads(config.junit_input_path, config.variant)
 
             # Create temp dir for HTML report generation output
             tmp_base = staging_root / "report"
@@ -269,9 +263,7 @@ def main() -> int:
             )
             generation = run_report_generation(config, tmp_base)
             if config.scope == "aggregate":
-                add_summary_metadata(
-                    generation.summary_path, discovered_xml=aggregate_counts
-                )
+                add_summary_metadata(generation.summary_path, discovered_xml=aggregate_counts)
 
             # Upload JUNIT reports, HTML report, summary
             uploads = upload_report_artifacts(
@@ -292,9 +284,7 @@ def main() -> int:
 
                     if config.scope == "job":
                         context = f"test-report:{config.variant}:{config.job_id}"
-                        create_buildkite_annotation(
-                            body, context, style, priority=10, scope="job"
-                        )
+                        create_buildkite_annotation(body, context, style, priority=10, scope="job")
                     else:
                         context = "test-report:full"
                         create_buildkite_annotation(

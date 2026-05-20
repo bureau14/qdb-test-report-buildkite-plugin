@@ -46,21 +46,11 @@ BACKOFF_CAP = 60  # 1 minute max sleep between retries
 # ---------------------------------------------------------------------------
 BACKEND_SSM_PARAM = "/services/buildkite/config/artifacts/object-store/backend"
 DESTINATION_SSM_PARAM = "/services/buildkite/config/artifacts/object-store/destination"
-ENDPOINT_URL_SSM_PARAM = (
-    "/services/buildkite/config/artifacts/object-store/endpoint-url"
-)
-R2_ACCOUNT_ID_SSM_PARAM = (
-    "/services/buildkite/config/artifacts/object-store/r2/account-id"
-)
-R2_ACCESS_KEY_ID_SSM_PARAM = (
-    "/services/buildkite/config/artifacts/object-store/r2/access-key-id"
-)
-R2_SECRET_ACCESS_KEY_SSM_PARAM = (
-    "/services/buildkite/credentials/artifacts/r2/secret-access-key"
-)
-ARTIFACTS_DOMAIN_SSM_PARAM = (
-    "/services/buildkite/config/artifacts/object-store/r2/artifacts-domain"
-)
+ENDPOINT_URL_SSM_PARAM = "/services/buildkite/config/artifacts/object-store/endpoint-url"
+R2_ACCOUNT_ID_SSM_PARAM = "/services/buildkite/config/artifacts/object-store/r2/account-id"
+R2_ACCESS_KEY_ID_SSM_PARAM = "/services/buildkite/config/artifacts/object-store/r2/access-key-id"
+R2_SECRET_ACCESS_KEY_SSM_PARAM = "/services/buildkite/credentials/artifacts/r2/secret-access-key"
+ARTIFACTS_DOMAIN_SSM_PARAM = "/services/buildkite/config/artifacts/object-store/r2/artifacts-domain"
 
 # Prefixes that indicate a placeholder / unconfigured value rather than a real one.
 _PLACEHOLDER_PREFIXES = ("SET_ME", "REPLACE_", "TODO", "CHANGEME", "FIXME")
@@ -144,9 +134,7 @@ def aws_clients():
     session = boto3.session.Session()
     region_name = os.environ.get("AWS_DEFAULT_REGION", "eu-west-1")
     return (
-        session.client(
-            "s3", config=Config(retries={"mode": "standard", "max_attempts": 10})
-        ),
+        session.client("s3", config=Config(retries={"mode": "standard", "max_attempts": 10})),
         session.client(
             "ssm",
             config=Config(
@@ -162,9 +150,7 @@ def _ssm_get_optional(ssm, name: str, with_decryption: bool = True) -> Optional[
     so IAM misconfigurations surface explicitly."""
 
     try:
-        return ssm.get_parameter(Name=name, WithDecryption=with_decryption)[
-            "Parameter"
-        ]["Value"]
+        return ssm.get_parameter(Name=name, WithDecryption=with_decryption)["Parameter"]["Value"]
     except ClientError as exc:
         response = getattr(exc, "response", {})
         code = response.get("Error", {}).get("Code")
@@ -183,9 +169,7 @@ def _check_placeholder(value: Optional[str], label: str) -> None:
         )
 
 
-def _env_or_ssm(
-    ssm, env_name: str, ssm_name: str, with_decryption: bool = True
-) -> Optional[str]:
+def _env_or_ssm(ssm, env_name: str, ssm_name: str, with_decryption: bool = True) -> Optional[str]:
     """Env var with SSM fallback. Env takes precedence for per-job overrides."""
 
     return os.environ.get(env_name) or _ssm_get_optional(
@@ -198,11 +182,7 @@ def load_store_config(ssm) -> StoreConfig:
     For R2, endpoint URL defaults to https://{account_id}.r2.cloudflarestorage.com."""
 
     backend = (
-        (
-            os.environ.get("ARTIFACTS_BACKEND")
-            or _ssm_get_optional(ssm, BACKEND_SSM_PARAM)
-            or "s3"
-        )
+        (os.environ.get("ARTIFACTS_BACKEND") or _ssm_get_optional(ssm, BACKEND_SSM_PARAM) or "s3")
         .strip()
         .lower()
     )
@@ -229,17 +209,13 @@ def load_store_config(ssm) -> StoreConfig:
     if backend == "r2":
         endpoint_url = endpoint_url or _ssm_get_optional(ssm, ENDPOINT_URL_SSM_PARAM)
 
-        r2_account_id = _env_or_ssm(
-            ssm, "ARTIFACTS_R2_ACCOUNT_ID", R2_ACCOUNT_ID_SSM_PARAM
-        )
+        r2_account_id = _env_or_ssm(ssm, "ARTIFACTS_R2_ACCOUNT_ID", R2_ACCOUNT_ID_SSM_PARAM)
         if not r2_account_id:
             die(
                 "R2 backend requires Cloudflare account ID. "
                 f"Set env var ARTIFACTS_R2_ACCOUNT_ID or SSM parameter {R2_ACCOUNT_ID_SSM_PARAM}"
             )
-        _check_placeholder(
-            r2_account_id, f"R2 account ID (SSM {R2_ACCOUNT_ID_SSM_PARAM})"
-        )
+        _check_placeholder(r2_account_id, f"R2 account ID (SSM {R2_ACCOUNT_ID_SSM_PARAM})")
 
         r2_access_key_id = _env_or_ssm(
             ssm, "ARTIFACTS_R2_ACCESS_KEY_ID", R2_ACCESS_KEY_ID_SSM_PARAM
@@ -249,9 +225,7 @@ def load_store_config(ssm) -> StoreConfig:
                 "R2 backend requires access key ID. "
                 f"Set env var ARTIFACTS_R2_ACCESS_KEY_ID or SSM parameter {R2_ACCESS_KEY_ID_SSM_PARAM}"
             )
-        _check_placeholder(
-            r2_access_key_id, f"R2 access key ID (SSM {R2_ACCESS_KEY_ID_SSM_PARAM})"
-        )
+        _check_placeholder(r2_access_key_id, f"R2 access key ID (SSM {R2_ACCESS_KEY_ID_SSM_PARAM})")
 
         r2_secret_access_key = _env_or_ssm(
             ssm,
@@ -413,9 +387,7 @@ def download_file(
 
     def _do():
         transfer_config = TransferConfig(max_concurrency=concurrency)
-        return _s3_client(cfg, auth).download_file(
-            bucket, key, str(path), Config=transfer_config
-        )
+        return _s3_client(cfg, auth).download_file(bucket, key, str(path), Config=transfer_config)
 
     _with_retry(_do, key)
 

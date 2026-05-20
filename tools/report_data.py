@@ -11,7 +11,6 @@ from junit_report_model import (
     Report,
     TestSuite,
     TestcaseExecution,
-    aggregate_status,
 )
 
 STATUS_SORT = {"ERRORED": 0, "FAILED": 1, "ABORTED": 2, "SKIPPED": 3, "SUCCESSFUL": 4}
@@ -131,9 +130,7 @@ def logical_sections(logical: LogicalTest) -> List[Dict[str, Any]]:
     return [labels_section(labels)]
 
 
-def execution_sections(
-    execution: TestcaseExecution, generated_at: str
-) -> List[Dict[str, Any]]:
+def execution_sections(execution: TestcaseExecution, generated_at: str) -> List[Dict[str, Any]]:
     sections = [
         labels_section(
             [

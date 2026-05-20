@@ -67,9 +67,7 @@ def resolve_buildkite_git_ref() -> str:
     branch = _get_env("BUILDKITE_BRANCH")
     if branch:
         return f"refs/heads/{branch}"
-    raise ValueError(
-        "missing Buildkite git ref: expected BUILDKITE_TAG or BUILDKITE_BRANCH"
-    )
+    raise ValueError("missing Buildkite git ref: expected BUILDKITE_TAG or BUILDKITE_BRANCH")
 
 
 def load_plugin_config() -> PluginConfig:
@@ -88,15 +86,11 @@ def load_plugin_config() -> PluginConfig:
         "BUILDKITE_PIPELINE_SLUG"
     )
     if not project_id:
-        raise ValueError(
-            "missing required config: project_id (BUILDKITE_PIPELINE_SLUG not set)"
-        )
+        raise ValueError("missing required config: project_id (BUILDKITE_PIPELINE_SLUG not set)")
 
     build_id = _get_env("BUILDKITE_BUILD_ID")
     if not build_id:
-        raise ValueError(
-            "missing required config: build_id (BUILDKITE_BUILD_ID not set)"
-        )
+        raise ValueError("missing required config: build_id (BUILDKITE_BUILD_ID not set)")
 
     job_id = _get_env("BUILDKITE_JOB_ID")
     build_url = _get_env("BUILDKITE_BUILD_URL")
@@ -105,9 +99,7 @@ def load_plugin_config() -> PluginConfig:
 
     git_ref = resolve_buildkite_git_ref()
 
-    only_failures = _get_bool_env(
-        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_ONLY_FAILURES", False
-    )
+    only_failures = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_ONLY_FAILURES", False)
     annotate = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_ANNOTATE", True)
 
     variant: Optional[str]
@@ -116,9 +108,7 @@ def load_plugin_config() -> PluginConfig:
 
     if scope == "job":
         variant = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT")
-        junit_input_path_raw = _get_env(
-            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_JUNIT_INPUT_PATH"
-        )
+        junit_input_path_raw = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_JUNIT_INPUT_PATH")
         junit_input_path = Path(junit_input_path_raw) if junit_input_path_raw else None
         if not variant:
             raise ValueError("job requires variant")

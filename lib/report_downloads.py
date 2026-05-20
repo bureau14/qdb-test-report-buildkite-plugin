@@ -61,14 +61,10 @@ def build_aggregate_xml_discovery_prefix(
     )
 
 
-def _xml_metadata_from_key(
-    *, prefix: str, key: str, size_bytes: int
-) -> Optional[JobXmlObject]:
+def _xml_metadata_from_key(*, prefix: str, key: str, size_bytes: int) -> Optional[JobXmlObject]:
     if not key.endswith(".xml"):
         return None
-    relative_to_variants = (
-        key[len(prefix) :].lstrip("/") if key.startswith(prefix) else key
-    )
+    relative_to_variants = key[len(prefix) :].lstrip("/") if key.startswith(prefix) else key
     parts = relative_to_variants.split("/", 4)
     if len(parts) != 5:
         return None
