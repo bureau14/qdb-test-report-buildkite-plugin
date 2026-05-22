@@ -31,6 +31,7 @@ from xml_inputs import collect_job_xml_uploads, XmlUpload
 from annotations import (
     build_annotation_body,
     get_annotation_style,
+    get_job_annotation_style,
     create_buildkite_annotation,
 )
 from git_links import build_commit_url
@@ -279,8 +280,13 @@ def main() -> int:
                     )
                 else:
                     summary = json.loads(generation.summary_path.read_text())
-                    body = build_annotation_body(config.title, summary, html_url)
-                    style = get_annotation_style(summary)
+                    body = build_annotation_body(
+                        config.title, summary, html_url, scope=config.scope
+                    )
+                    if config.scope == "job":
+                        style = get_job_annotation_style(summary)
+                    else:
+                        style = get_annotation_style(summary)
 
                     if config.scope == "job":
                         context = f"test-report:{config.variant}:{config.job_id}"

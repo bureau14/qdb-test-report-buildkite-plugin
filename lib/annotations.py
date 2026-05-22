@@ -3,7 +3,41 @@ import subprocess
 import sys
 
 
-def build_annotation_body(title: str, summary: dict, html_url: str) -> str:
+def get_annotation_warnings(summary: dict, scope: str = "build") -> list[str]:
+    warnings = list(summary.get("warnings", []))
+
+    targets = int(summary.get("targets", 0))
+    platforms = summary.get("platforms") or []
+    resolved_platforms = summary.get("resolved_platforms")
+    if scope != "job" and resolved_platforms is not None and len(resolved_platforms) < targets:
+        missing = targets - len(resolved_platforms)
+        missing_platforms = [
+            platform for platform in platforms if platform not in set(resolved_platforms)
+        ]
+        if missing_platforms:
+            target_label = "target" if missing == 1 else "targets"
+            warnings.append(
+                f"No test executions for {missing} configured {target_label}: "
+                f"{', '.join(missing_platforms)}."
+            )
+        else:
+            warnings.append(
+                f"{missing} of {targets} configured targets produced no test executions."
+            )
+
+    if scope == "job":
+        counts = summary.get("logical_status_counts") or summary.get("status_counts", {})
+        passed = int(counts.get("SUCCESSFUL", 0))
+        logical_tests = int(summary.get("logical_tests", 0))
+        if logical_tests == 0:
+            warnings.append("This job report is empty: 0 tests produced no test executions.")
+        elif passed == 0:
+            warnings.append("This job report has 0 passing tests.")
+
+    return warnings
+
+
+def build_annotation_body(title: str, summary: dict, html_url: str, scope: str = "build") -> str:
     """
     Builds the markdown body for the Buildkite annotation.
     """
@@ -29,7 +63,7 @@ def build_annotation_body(title: str, summary: dict, html_url: str) -> str:
     parts.append(f"{skipped} skipped")
 
     stats_line = ", ".join(parts)
-    warnings = summary.get("warnings", [])
+    warnings = get_annotation_warnings(summary, scope=scope)
 
     body = f"## {title}\n\n{stats_line}"
     if warnings:
@@ -53,7 +87,7 @@ def get_annotation_style(summary: dict) -> str:
     if failed > 0 or errored > 0 or root_status in ("FAILED", "ERRORED"):
         return "error"
 
-    if summary.get("warnings"):
+    if get_annotation_warnings(summary):
         return "warning"
 
     # Skips are treated as success.
@@ -61,6 +95,23 @@ def get_annotation_style(summary: dict) -> str:
         return "success"
 
     return "info"
+
+
+def get_job_annotation_style(summary: dict) -> str:
+    """
+    Determines the annotation style for job-scoped reports.
+    """
+    style = get_annotation_style(summary)
+    if style == "error":
+        return style
+
+    counts = summary.get("logical_status_counts") or summary.get("status_counts", {})
+    passed = int(counts.get("SUCCESSFUL", 0))
+    logical_tests = int(summary.get("logical_tests", 0))
+    if logical_tests == 0 or passed == 0:
+        return "warning"
+
+    return style
 
 
 def create_buildkite_annotation(

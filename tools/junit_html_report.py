@@ -92,6 +92,7 @@ def generate_html_report(
             "logical_tests": report.logical_test_count,
             "platform_executions": report.platform_execution_count,
             "targets": len(report.platforms),
+            "platforms": report.platforms,
             "resolved_platforms": report.resolved_platforms,
             "status_counts": dict(report.status_counts),
             "logical_status_counts": dict(report.logical_status_counts),
