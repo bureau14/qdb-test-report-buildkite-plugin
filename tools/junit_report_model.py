@@ -396,15 +396,25 @@ def build_report(
             path_source_job_id = next((p for p in parts if UUID_RE.match(p)), None)
             effective_source_job_id = path_source_job_id or source_job_id
             source_job_url = buildkite_job_url(build_url, effective_source_job_id)
-            source_id = "/".join(p for p in parts if p != path_source_job_id and p != platform) or rel_path
-            all_files_to_process.append((platform, xml_file, source_id, effective_source_job_id, source_job_url))
+            source_id = (
+                "/".join(p for p in parts if p != path_source_job_id and p != platform) or rel_path
+            )
+            all_files_to_process.append(
+                (platform, xml_file, source_id, effective_source_job_id, source_job_url)
+            )
 
     if not all_files_to_process:
         log_warn("No JUnit XML files discovered across all platforms")
 
     log_info("Omitting filename prefix from all test identities")
 
-    for platform, xml_file, source_id, effective_source_job_id, source_job_url in all_files_to_process:
+    for (
+        platform,
+        xml_file,
+        source_id,
+        effective_source_job_id,
+        source_job_url,
+    ) in all_files_to_process:
         file_executions = parse_junit_file(
             xml_file,
             platform,
