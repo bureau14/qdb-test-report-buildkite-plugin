@@ -1,3 +1,4 @@
+<!--  Modified from original source: https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/components/sidebar/ToolBar.vue -->
 <script setup lang="ts">
 import { ChevronsDownUp, ChevronsUpDown } from "@lucide/vue";
 import ToolBarIcon from "./ToolBarIcon.vue";

@@ -9,10 +9,10 @@ const LARGE_TREE_NODE_THRESHOLD = 2000;
 export default class TreeState {
   public readonly nodes: Record<string, NodeState>;
 
-  public showAborted = true;
-  public showFailedAndErrored = true;
-  public showSkipped = true;
-  public showSuccessful = true;
+  public showAborted = false;
+  public showFailedAndErrored = false;
+  public showSkipped = false;
+  public showSuccessful = false;
 
   constructor(executions: TestExecution[]) {
     const nodes: Record<string, NodeState> = {};
@@ -73,7 +73,20 @@ export default class TreeState {
     this.nodes[id].collapsed = !this.nodes[id].collapsed;
   }
 
+  hasActiveStatusFilter(): boolean {
+    return (
+      this.showAborted ||
+      this.showFailedAndErrored ||
+      this.showSkipped ||
+      this.showSuccessful
+    );
+  }
+
   isVisible(statuses: string[]): boolean {
+    if (!this.hasActiveStatusFilter()) {
+      return true;
+    }
+
     return (
       statuses.length == 0 ||
       statuses.filter((status) => {
