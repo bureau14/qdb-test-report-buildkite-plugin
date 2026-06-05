@@ -141,6 +141,12 @@ def execution_sections(execution: TestcaseExecution, generated_at: str) -> List[
             ]
         )
     ]
+    if execution.source_job_url:
+        source_content = {"Buildkite job": f"link:{execution.source_job_url}"}
+        if execution.source_job_id:
+            source_content["Job ID"] = execution.source_job_id
+        source_content["JUnit XML"] = execution.source_id
+        sections.append(kvp_section("Source", source_content))
     if execution.reason:
         sections.append(reason_section(execution.reason))
     if execution.output:

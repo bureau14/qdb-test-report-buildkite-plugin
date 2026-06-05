@@ -68,6 +68,7 @@ def generate_html_report(
     execution_name: Optional[str] = None,
     build_url: Optional[str] = None,
     commit_url: Optional[str] = None,
+    source_job_id: Optional[str] = None,
     only_failures: bool = False,
     fail_on_test_failures: bool = False,
 ) -> int:
@@ -76,6 +77,7 @@ def generate_html_report(
         platform_specs=platform_specs,
         build_url=build_url,
         commit_url=commit_url,
+        source_job_id=source_job_id,
     )
     data = report_to_report_ui_data(
         report, execution_name=execution_name, only_failures=only_failures

@@ -42,6 +42,8 @@ class TestcaseExecution:
     platform: str
     source_file: Path
     source_id: str
+    source_job_id: Optional[str]
+    source_job_url: Optional[str]
     suite_name: str
     classname: str
     name: str
@@ -260,6 +262,12 @@ def aggregate_status(statuses: List[str]) -> str:
     return "SUCCESSFUL"
 
 
+def buildkite_job_url(build_url: Optional[str], job_id: Optional[str]) -> Optional[str]:
+    if not build_url or not job_id:
+        return None
+    return f"{build_url.split('#', 1)[0]}#{job_id}"
+
+
 def logical_status(logical: LogicalTest) -> str:
     statuses = [execution.status for execution in logical.executions.values()]
     if any(status == "ERRORED" for status in statuses):
@@ -291,6 +299,8 @@ def parse_junit_file(
     path: Path,
     platform: str,
     source_id: Optional[str] = None,
+    source_job_id: Optional[str] = None,
+    source_job_url: Optional[str] = None,
 ) -> List[TestcaseExecution]:
     if source_id is None:
         source_id = path.name
@@ -321,6 +331,8 @@ def parse_junit_file(
                     platform=platform,
                     source_file=path,
                     source_id=source_id,
+                    source_job_id=source_job_id,
+                    source_job_url=source_job_url,
                     suite_name=suite_name,
                     classname=classname,
                     name=name,
@@ -351,6 +363,7 @@ def build_report(
     platform_specs: List[Tuple[str, Union[Path, str]]],
     build_url: Optional[str] = None,
     commit_url: Optional[str] = None,
+    source_job_id: Optional[str] = None,
 ) -> Report:
     log_info(f"Start JUnit report model build title={title!r} platforms={len(platform_specs)}")
     suites: "OrderedDict[str, TestSuite]" = OrderedDict()
@@ -380,18 +393,25 @@ def build_report(
             # we strip them from the logical identity so the report correctly
             # aggregates results from all parallel jobs into a single row.
             parts = rel_path.split("/")
-            source_id = (
-                "/".join(p for p in parts if not UUID_RE.match(p) and p != platform) or rel_path
-            )
-            all_files_to_process.append((platform, xml_file, source_id))
+            path_source_job_id = next((p for p in parts if UUID_RE.match(p)), None)
+            effective_source_job_id = path_source_job_id or source_job_id
+            source_job_url = buildkite_job_url(build_url, effective_source_job_id)
+            source_id = "/".join(p for p in parts if p != path_source_job_id and p != platform) or rel_path
+            all_files_to_process.append((platform, xml_file, source_id, effective_source_job_id, source_job_url))
 
     if not all_files_to_process:
         log_warn("No JUnit XML files discovered across all platforms")
 
     log_info("Omitting filename prefix from all test identities")
 
-    for platform, xml_file, source_id in all_files_to_process:
-        file_executions = parse_junit_file(xml_file, platform, source_id)
+    for platform, xml_file, source_id, effective_source_job_id, source_job_url in all_files_to_process:
+        file_executions = parse_junit_file(
+            xml_file,
+            platform,
+            source_id,
+            source_job_id=effective_source_job_id,
+            source_job_url=source_job_url,
+        )
         total_raw_executions += len(file_executions)
         for execution in file_executions:
             suite = suites.get(execution.suite_name)

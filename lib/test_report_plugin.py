@@ -101,6 +101,7 @@ def run_report_generation(config: PluginConfig, output_dir: Path) -> GenerationR
         execution_name=config.execution_name,
         build_url=config.build_url,
         commit_url=build_commit_url(config.repo, config.commit),
+        source_job_id=config.job_id,
         only_failures=config.only_failures,
         fail_on_test_failures=False,
     )
@@ -270,10 +271,16 @@ def main() -> int:
             uploads = upload_report_artifacts(
                 config, generation, xml_uploads, store_context=store_context
             )
+            html_upload = uploads.get("html")
+            if html_upload is not None:
+                if html_upload.url:
+                    log(f"HTML report: {html_upload.url}")
+                else:
+                    log(f"HTML report uploaded to s3://{html_upload.bucket}/{html_upload.key}")
 
             # Create annotation if enabled and HTML URL is available
             if config.annotate:
-                html_url = uploads["html"].url
+                html_url = html_upload.url if html_upload is not None else None
                 if not html_url:
                     warn(
                         "HTML public URL unavailable (ARTIFACTS_DOMAIN not set); skipping annotation"
