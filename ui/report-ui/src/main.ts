@@ -9,8 +9,31 @@ import App from "./App.vue";
 import TestExecution from "./components/common/TestExecution.ts";
 import VueEasyLightbox from "vue-easy-lightbox";
 
+function readEmbeddedReportData(): ExecutionData[] {
+  const el = document.getElementById("report-data");
+  if (!el) {
+    if (globalThis.testExecutions) {
+      return globalThis.testExecutions;
+    }
+    throw new Error("Missing embedded report data: #report-data");
+  }
+
+  performance.mark("report-json-parse-start");
+  const data = JSON.parse(el.textContent || "null") as ExecutionData[];
+  performance.mark("report-json-parse-end");
+  performance.measure(
+    "report-json-parse",
+    "report-json-parse-start",
+    "report-json-parse-end",
+  );
+
+  el.remove();
+  return data;
+}
+
+const reportData = readEmbeddedReportData();
 const app = createApp(App, {
-  executions: globalThis.testExecutions.map((it) => new TestExecution(it)),
+  executions: reportData.map((it) => new TestExecution(it)),
 });
 
 app.use(
@@ -52,4 +75,11 @@ app.use(
 
 app.use(VueEasyLightbox);
 
+performance.mark("report-app-mount-start");
 app.mount("#app");
+performance.mark("report-app-mount-end");
+performance.measure(
+  "report-app-mount",
+  "report-app-mount-start",
+  "report-app-mount-end",
+);

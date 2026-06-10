@@ -11,15 +11,11 @@ PLACEHOLDER = "<!-- TEST_REPORT_DATA -->"
 DEFAULT_TEMPLATE = Path(__file__).resolve().parent / "templates" / "report-template.html"
 
 
-def safe_json_for_script(data: Any) -> str:
+def dumps_embedded_json(data: Any) -> str:
+    """Serialize JSON for safe embedding in <script type=application/json>."""
     text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     # Prevent embedded data from terminating the script tag or creating HTML parsing hazards.
-    return (
-        text.replace("</", "<\\/")
-        .replace("<!--", "<\\!--")
-        .replace("\u2028", "\\u2028")
-        .replace("\u2029", "\\u2029")
-    )
+    return text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
 def render_html(data: Any, template_path: Union[Path, str] = DEFAULT_TEMPLATE) -> str:
@@ -29,7 +25,9 @@ def render_html(data: Any, template_path: Union[Path, str] = DEFAULT_TEMPLATE) -
         raise ValueError(
             f"Expected exactly one {PLACEHOLDER} placeholder, found {placeholder_count}"
         )
-    script = f"<script>\nglobalThis.testExecutions = {safe_json_for_script(data)};\n</script>"
+    script = (
+        f'<script id="report-data" type="application/json">{dumps_embedded_json(data)}</script>'
+    )
     return template.replace(PLACEHOLDER, script)
 
 
