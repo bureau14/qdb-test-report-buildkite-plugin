@@ -1,6 +1,5 @@
 // Modified from original source: https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/components/sidebar/VisibleTree.ts
 import TestExecution from "../common/TestExecution.ts";
-import Selection from "../common/Selection.ts";
 import TreeState from "./TreeState.ts";
 
 export type VisibleTreeRow = {
@@ -11,13 +10,11 @@ export type VisibleTreeRow = {
   children: TestNodeData[];
   statuses: string[];
   hasChildren: boolean;
-  selected: boolean;
 };
 
 export function visibleRows(
   executions: TestExecution[],
   treeState: TreeState,
-  selection: Selection | undefined,
 ): VisibleTreeRow[] {
   const rows: VisibleTreeRow[] = [];
 
@@ -47,7 +44,6 @@ export function visibleRows(
       children,
       statuses,
       hasChildren: children.length > 0,
-      selected: selection?.item !== undefined && selection.item.id === node.id,
     });
 
     if (children.length > 0 && !treeState.nodes[node.id]?.collapsed) {

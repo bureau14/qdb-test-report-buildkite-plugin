@@ -58,11 +58,80 @@ class UiDataBuilder:
         self._next_id = 1
         self.test_nodes: List[Dict[str, Any]] = []
         self.children: "OrderedDict[str, Dict[str, List[str]]]" = OrderedDict()
+        self.source_tables: Dict[str, List[str]] = {
+            "targets": [],
+            "suites": [],
+            "xmls": [],
+            "buildUrls": [],
+            "jobUrls": [],
+            "jobIds": [],
+        }
+        self._source_indexes: Dict[str, Dict[str, int]] = {
+            key: {} for key in self.source_tables
+        }
+        self.tag_tables: Dict[str, List[str]] = {
+            "suites": [],
+            "platforms": [],
+        }
+        self._tag_indexes: Dict[str, Dict[str, int]] = {key: {} for key in self.tag_tables}
 
     def next_id(self) -> str:
         value = str(self._next_id)
         self._next_id += 1
         return value
+
+    def _source_index(self, table: str, value: str) -> int:
+        indexes = self._source_indexes[table]
+        if value not in indexes:
+            indexes[value] = len(self.source_tables[table])
+            self.source_tables[table].append(value)
+        return indexes[value]
+
+    def source(self, execution: TestcaseExecution, build_url: Optional[str]) -> List[int]:
+        source = [
+            self._source_index("targets", execution.platform),
+            self._source_index("suites", execution.suite_name),
+            self._source_index("xmls", execution.source_id),
+        ]
+        if execution.source_job_url:
+            source.append(self._source_index("jobUrls", execution.source_job_url))
+            if execution.source_job_id:
+                source.append(self._source_index("jobIds", execution.source_job_id))
+        if build_url:
+            while len(source) < 5:
+                source.append(-1)
+            source.append(self._source_index("buildUrls", build_url))
+        return source
+
+    def _tag_index(self, table: str, value: str) -> int:
+        indexes = self._tag_indexes[table]
+        if value not in indexes:
+            indexes[value] = len(self.tag_tables[table])
+            self.tag_tables[table].append(value)
+        return indexes[value]
+
+    def suite_tags(self, suite: TestSuite) -> List[Any]:
+        return [0, self._tag_index("suites", suite.name)]
+
+    def logical_tags(self, logical: LogicalTest) -> List[Any]:
+        failed_platforms: List[int] = []
+        errored_platforms: List[int] = []
+        skipped_platforms: List[int] = []
+        for execution in logical.executions.values():
+            platform_index = self._tag_index("platforms", execution.platform)
+            if execution.status == "FAILED":
+                failed_platforms.append(platform_index)
+            elif execution.status == "ERRORED":
+                errored_platforms.append(platform_index)
+            elif execution.status == "SKIPPED":
+                skipped_platforms.append(platform_index)
+        return [
+            1,
+            self._tag_index("suites", logical.suite_name),
+            failed_platforms,
+            errored_platforms,
+            skipped_platforms,
+        ]
 
     def node(
         self,
@@ -70,6 +139,8 @@ class UiDataBuilder:
         duration_seconds_value: float,
         sections: List[Dict[str, Optional[Any]]] = None,
         status: Optional[str] = None,
+        source: Optional[List[int]] = None,
+        tags: Optional[List[Any]] = None,
     ) -> Dict[str, Any]:
         result: Dict[str, Any] = {
             "id": self.next_id(),
@@ -80,6 +151,10 @@ class UiDataBuilder:
         # Match the report renderer's behavior for structural containers: omit status entirely.
         if status is not None:
             result["status"] = status
+        if source is not None:
+            result["source"] = source
+        if tags is not None:
+            result["tags"] = tags
         self.test_nodes.append(result)
         return result
 
@@ -113,40 +188,8 @@ def suite_duration(suite: TestSuite) -> float:
     return sum(logical_duration(logical) for logical in suite.logical_tests.values())
 
 
-def logical_sections(logical: LogicalTest) -> List[Dict[str, Any]]:
-    labels = [
-        f"logical-test-id:{logical.logical_id}",
-        f"testsuite:{logical.suite_name}",
-        f"classname:{logical.classname}" if logical.classname else "classname:",
-        f"test-name:{logical.name}",
-    ]
-    for execution in logical.executions.values():
-        if execution.status == "FAILED":
-            labels.append(f"failed-platform:{execution.platform}")
-        elif execution.status == "ERRORED":
-            labels.append(f"errored-platform:{execution.platform}")
-        elif execution.status == "SKIPPED":
-            labels.append(f"skipped-platform:{execution.platform}")
-    return [labels_section(labels)]
-
-
 def execution_sections(execution: TestcaseExecution, generated_at: str) -> List[Dict[str, Any]]:
-    sections = [
-        labels_section(
-            [
-                f"platform:{execution.platform}",
-                f"testsuite:{execution.suite_name}",
-                "source:junit",
-                f"source-file:{execution.source_id}",
-            ]
-        )
-    ]
-    if execution.source_job_url:
-        source_content = {"Buildkite job": f"link:{execution.source_job_url}"}
-        if execution.source_job_id:
-            source_content["Job ID"] = execution.source_job_id
-        source_content["JUnit XML"] = execution.source_id
-        sections.append(kvp_section("Source", source_content))
+    sections: List[Dict[str, Any]] = []
     if execution.reason:
         sections.append(reason_section(execution.reason))
     if execution.output:
@@ -160,7 +203,7 @@ def report_to_report_ui_data(
     builder = UiDataBuilder()
     execution_id = builder.next_id()
 
-    root_labels = ["source:junit", "view:tests-first"]
+    root_labels = ["view:tests-first"]
 
     summary_content: Dict[str, Any] = {
         "Suites": len(report.suites),
@@ -191,6 +234,7 @@ def report_to_report_ui_data(
                     execution.duration_seconds,
                     execution_sections(execution, report.generated_at),
                     execution.status,
+                    builder.source(execution, report.build_url),
                 )
                 execution_child_ids.append(platform_node["id"])
 
@@ -198,7 +242,7 @@ def report_to_report_ui_data(
                 logical_node = builder.node(
                     logical.logical_id,
                     logical_duration(logical),
-                    logical_sections(logical),
+                    tags=builder.logical_tags(logical),
                 )
                 suite_child_ids.append(logical_node["id"])
                 builder.add_children(logical_node["id"], execution_child_ids)
@@ -207,7 +251,7 @@ def report_to_report_ui_data(
             suite_node = builder.node(
                 suite.name,
                 suite_duration(suite),
-                [labels_section([f"testsuite:{suite.name}", "source:junit"])],
+                tags=builder.suite_tags(suite),
             )
             suite_ids.append(suite_node["id"])
             builder.add_children(suite_node["id"], suite_child_ids)
@@ -230,6 +274,8 @@ def report_to_report_ui_data(
             "logicalStatusCounts": dict(report.logical_status_counts),
             "rootStatus": report.root_status,
         },
+        "sourceTables": builder.source_tables,
+        "tagTables": builder.tag_tables,
         "sections": [
             labels_section(root_labels),
             kvp_section(

@@ -24,6 +24,8 @@ export declare global {
 
   interface ExecutionData extends Data {
     summary: ExecutionSummaryData | undefined;
+    sourceTables: SourceTables | undefined;
+    tagTables: TagTables | undefined;
     roots: string[];
     children: Record<string, ChildMetadata>;
     testNodes: TestNodeData[] | undefined;
@@ -31,6 +33,33 @@ export declare global {
 
   interface TestNodeData extends Data {
     status: string;
+    source: number[] | undefined;
+    tags: TagData | undefined;
+  }
+
+  type TagData = Array<number | number[]>;
+
+  interface SourceData {
+    target: string;
+    suite: string;
+    xml: string;
+    buildUrl: string | undefined;
+    jobUrl: string | undefined;
+    jobId: string | undefined;
+  }
+
+  interface SourceTables {
+    targets: string[];
+    suites: string[];
+    xmls: string[];
+    buildUrls: string[];
+    jobUrls: string[];
+    jobIds: string[];
+  }
+
+  interface TagTables {
+    suites: string[];
+    platforms: string[];
   }
 
   interface ChildMetadata {

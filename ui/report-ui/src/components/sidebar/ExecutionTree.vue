@@ -18,7 +18,7 @@ const scrollTop = ref(0);
 const viewportHeight = ref(600);
 let resizeObserver: ResizeObserver | undefined;
 
-const rows = computed(() => visibleRows(props.executions, treeState, selection.value));
+const rows = computed(() => visibleRows(props.executions, treeState));
 const startIndex = computed(() =>
   Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - OVERSCAN_ROWS),
 );

@@ -1,3 +1,4 @@
+<!-- Modified from original source: https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/components/details/TestNodeDetails.vue -->
 <script setup lang="ts">
 import { computed } from "vue";
 import TestResultStatusIcon from "../common/TestResultStatusIcon.vue";
@@ -20,6 +21,44 @@ function selectNode(node: TestNodeData | TestExecution) {
 }
 
 const parents = computed(() => props.execution.parents(props.node));
+const sections = computed(() => {
+  const result = props.node.sections ? [...props.node.sections] : [];
+  const tagLabels = props.execution.tagLabels(props.node);
+  if (tagLabels) {
+    result.unshift({
+      title: "Tags",
+      blocks: [{ type: "labels", content: tagLabels }],
+    } as SectionData);
+  }
+
+  const source = props.execution.sourceData(props.node);
+  if (!source) {
+    return result;
+  }
+
+  const sourceContent: Record<string, string> = {
+    Target: source.target,
+    "Test suite": source.suite,
+    "JUnit XML": source.xml,
+  };
+  if (source.buildUrl) {
+    sourceContent["Buildkite build"] = `link:${source.buildUrl}`;
+  }
+  if (source.jobUrl) {
+    sourceContent["Buildkite job"] = `link:${source.jobUrl}`;
+  }
+  if (source.jobId) {
+    sourceContent["Job ID"] = source.jobId;
+  }
+
+  return [
+    {
+      title: "Source",
+      blocks: [{ type: "kvp", content: sourceContent }],
+    } as SectionData,
+    ...result,
+  ];
+});
 </script>
 
 <template>
@@ -64,5 +103,5 @@ const parents = computed(() => props.execution.parents(props.node));
       </div>
     </template>
   </DetailsHeader>
-  <DetailsSections :sections="node.sections" />
+  <DetailsSections :sections="sections" />
 </template>

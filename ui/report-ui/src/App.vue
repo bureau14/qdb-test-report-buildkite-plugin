@@ -1,3 +1,4 @@
+<!-- Modified from original source: https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/App.vue -->
 <script setup lang="ts">
 import { ref } from "vue";
 import ExecutionDetails from "./components/details/ExecutionDetails.vue";
@@ -9,7 +10,14 @@ import SideBar from "./components/sidebar/SideBar.vue";
 
 const props = defineProps<{ executions: TestExecution[] }>();
 const selection = ref<Selection | undefined>();
+performance.mark("report-initial-selection-start");
 selection.value = TestExecution.initialSelection(props.executions);
+performance.mark("report-initial-selection-end");
+performance.measure(
+  "report-initial-selection",
+  "report-initial-selection-start",
+  "report-initial-selection-end",
+);
 </script>
 
 <template>

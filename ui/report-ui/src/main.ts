@@ -9,6 +9,14 @@ import App from "./App.vue";
 import TestExecution from "./components/common/TestExecution.ts";
 import VueEasyLightbox from "vue-easy-lightbox";
 
+function measureStartup<T>(name: string, callback: () => T): T {
+  performance.mark(`${name}-start`);
+  const result = callback();
+  performance.mark(`${name}-end`);
+  performance.measure(name, `${name}-start`, `${name}-end`);
+  return result;
+}
+
 function readEmbeddedReportData(): ExecutionData[] {
   const el = document.getElementById("report-data");
   if (!el) {
@@ -32,8 +40,11 @@ function readEmbeddedReportData(): ExecutionData[] {
 }
 
 const reportData = readEmbeddedReportData();
+const executions = measureStartup("report-model-create", () =>
+  reportData.map((it) => new TestExecution(it)),
+);
 const app = createApp(App, {
-  executions: reportData.map((it) => new TestExecution(it)),
+  executions,
 });
 
 app.use(

@@ -25,7 +25,7 @@ export default class TreeState {
       const largeTree = execution.size() > LARGE_TREE_NODE_THRESHOLD;
       for (const node of execution.nodesWithChildren()) {
         const statuses = execution.nodeStatuses(node);
-        const parentDepth = execution.parents(node).length;
+        const parentDepth = execution.parentDepth(node);
         const initiallyCollapsed = largeTree
           ? parentDepth > 0
           : parentDepth > 1 &&

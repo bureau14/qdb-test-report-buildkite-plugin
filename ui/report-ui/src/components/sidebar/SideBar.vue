@@ -1,3 +1,4 @@
+<!-- Modified from original source: https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/components/sidebar/SideBar.vue -->
 <script setup lang="ts">
 import { ResizableConfig, vResizable } from "vue-resizables";
 import ExecutionTree from "./ExecutionTree.vue";
@@ -10,7 +11,15 @@ import TreeState, { treeStateKey } from "./TreeState.ts";
 const selection = defineModel<Selection | undefined>("selection");
 const props = defineProps<{ executions: TestExecution[] }>();
 
-provide(treeStateKey, reactive(new TreeState(props.executions)));
+performance.mark("report-tree-state-create-start");
+const treeState = reactive(new TreeState(props.executions));
+performance.mark("report-tree-state-create-end");
+performance.measure(
+  "report-tree-state-create",
+  "report-tree-state-create-start",
+  "report-tree-state-create-end",
+);
+provide(treeStateKey, treeState);
 
 const resizeConfig: ResizableConfig = {
   edge: {

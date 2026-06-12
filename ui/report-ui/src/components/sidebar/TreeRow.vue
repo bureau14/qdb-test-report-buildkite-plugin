@@ -18,6 +18,11 @@ const props = defineProps<{
 
 const nodeName = computed(() => props.row.node.name);
 const isExecutionRoot = computed(() => props.row.node instanceof TestExecution);
+const isSelected = computed(
+  () =>
+    selection.value?.item !== undefined &&
+    selection.value.item.id === props.row.node.id,
+);
 
 function aggregateDisplayStatus(statuses: string[]): string | undefined {
   if (statuses.includes("ERRORED")) {
@@ -84,8 +89,8 @@ if (defaultIconProps.size != 16) {
     <div
       class="cursor-pointer rounded-sm p-px px-1 inline-flex"
       :class="{
-        'bg-neutral-300 dark:bg-neutral-600 font-bold': row.selected,
-        'hover:bg-neutral-200 dark:hover:bg-neutral-700': !row.selected,
+        'bg-neutral-300 dark:bg-neutral-600 font-bold': isSelected,
+        'hover:bg-neutral-200 dark:hover:bg-neutral-700': !isSelected,
         'ml-[16px]': !row.hasChildren,
       }"
       role="link"

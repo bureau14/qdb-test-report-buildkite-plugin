@@ -17,9 +17,7 @@ export default class TestExecution {
       this.isFailedOrErrored(e.overallStatus()),
     );
     if (failedExecution) {
-      const failedNode = Array.from(failedExecution.testNodes.values()).find(
-        (n) => this.isFailedOrErrored(n.status),
-      );
+      const failedNode = failedExecution.firstFailedOrErroredNode;
       if (failedNode) {
         return new Selection(failedExecution, failedNode);
       }
@@ -35,12 +33,14 @@ export default class TestExecution {
   }
 
   static overallStatus(executions: TestExecution[]): string {
-    const statuses = executions
-      .map((e) => TestExecution.STATUSES.indexOf(e.overallStatus()))
-      .sort();
-    return statuses.length > 0
-      ? TestExecution.STATUSES[statuses[statuses.length - 1]]
-      : TestExecution.STATUSES[0];
+    let maxStatusIndex = 0;
+    executions.forEach((e) => {
+      maxStatusIndex = Math.max(
+        maxStatusIndex,
+        TestExecution.STATUSES.indexOf(e.overallStatus()),
+      );
+    });
+    return TestExecution.STATUSES[maxStatusIndex];
   }
 
   static statusCount(executions: TestExecution[]): Map<string, number> {
@@ -61,9 +61,17 @@ export default class TestExecution {
   public readonly summary: ExecutionSummaryData | undefined;
 
   private readonly rootIds: string[];
+  private readonly rootNodes: TestNodeData[];
   private readonly childrenMetadata: Map<string, ChildMetadata>;
   private readonly parentIds: Map<string, string>;
+  private readonly parentDepths: Map<string, number>;
   private readonly testNodes: Map<string, TestNodeData>;
+  private readonly nodesWithChildrenValue: TestNodeData[];
+  private readonly overallStatusValue: string;
+  private readonly statusCounts: Map<string, number>;
+  private readonly firstFailedOrErroredNode: TestNodeData | undefined;
+  private readonly sourceTables: SourceTables | undefined;
+  private readonly tagTables: TagTables | undefined;
 
   constructor(execution: ExecutionData) {
     this.id = execution.id;
@@ -71,6 +79,8 @@ export default class TestExecution {
     this.durationMillis = execution.durationMillis;
     this.sections = execution.sections || [];
     this.summary = execution.summary;
+    this.sourceTables = execution.sourceTables;
+    this.tagTables = execution.tagTables;
     this.rootIds = execution.roots || [];
     this.childrenMetadata = new Map(
       Object.entries(execution.children ? execution.children : []),
@@ -80,6 +90,26 @@ export default class TestExecution {
       children.ids?.forEach((c) => this.parentIds.set(c, p));
     });
     this.testNodes = new Map(execution.testNodes?.map((n) => [n.id, n]));
+    this.rootNodes = this.rootIds.map((id) => this.testNodes.get(id)!);
+    this.nodesWithChildrenValue = Array.from(this.childrenMetadata.keys()).map(
+      (id) => this.testNodes.get(id)!,
+    );
+    this.parentDepths = new Map<string, number>();
+    this.statusCounts = new Map<string, number>();
+    TestExecution.STATUSES.forEach((s) => this.statusCounts.set(s, 0));
+
+    let maxStatusIndex = 0;
+    let firstFailedOrErroredNode: TestNodeData | undefined;
+    for (const node of this.testNodes.values()) {
+      const statusIndex = TestExecution.STATUSES.indexOf(node.status);
+      maxStatusIndex = Math.max(maxStatusIndex, statusIndex);
+      this.statusCounts.set(node.status, this.statusCounts.get(node.status)! + 1);
+      if (!firstFailedOrErroredNode && TestExecution.isFailedOrErrored(node.status)) {
+        firstFailedOrErroredNode = node;
+      }
+    }
+    this.overallStatusValue = TestExecution.STATUSES[maxStatusIndex];
+    this.firstFailedOrErroredNode = firstFailedOrErroredNode;
   }
 
   size(): number {
@@ -87,13 +117,11 @@ export default class TestExecution {
   }
 
   nodesWithChildren(): TestNodeData[] {
-    return Array.from(this.childrenMetadata.keys()).map(
-      (id) => this.testNodes.get(id)!,
-    );
+    return this.nodesWithChildrenValue;
   }
 
   roots(): TestNodeData[] {
-    return this.rootIds.map((id) => this.testNodes.get(id)!);
+    return this.rootNodes;
   }
 
   children(node: TestNodeData): TestNodeData[] {
@@ -114,6 +142,21 @@ export default class TestExecution {
     return [this];
   }
 
+  parentDepth(node: TestNodeData): number {
+    if (this.parentDepths.has(node.id)) {
+      return this.parentDepths.get(node.id)!;
+    }
+    const parentId = this.parentIds.get(node.id);
+    if (!parentId) {
+      this.parentDepths.set(node.id, 1);
+      return 1;
+    }
+    const parent = this.testNodes.get(parentId)!;
+    const depth = this.parentDepth(parent) + 1;
+    this.parentDepths.set(node.id, depth);
+    return depth;
+  }
+
   nodeStatuses(node: TestNodeData): string[] {
     if (this.childrenMetadata.has(node.id)) {
       return this.childrenMetadata.get(node.id)!.childStatuses!;
@@ -122,20 +165,59 @@ export default class TestExecution {
   }
 
   overallStatus(): string {
-    const statuses = Array.from(this.testNodes.values())
-      .map((node) => TestExecution.STATUSES.indexOf(node.status))
-      .sort();
-    return statuses.length > 0
-      ? TestExecution.STATUSES[statuses[statuses.length - 1]]
-      : TestExecution.STATUSES[0];
+    return this.overallStatusValue;
   }
 
   statusCount(): Map<string, number> {
-    const result = new Map<string, number>();
-    TestExecution.STATUSES.forEach((s) => result.set(s, 0));
-    Array.from(this.testNodes.values()).forEach((n) =>
-      result.set(n.status, result.get(n.status)! + 1),
-    );
-    return result;
+    return this.statusCounts;
+  }
+
+  sourceData(node: TestNodeData): SourceData | undefined {
+    if (!node.source || !this.sourceTables) {
+      return undefined;
+    }
+    return {
+      target: this.sourceTables.targets[node.source[0]],
+      suite: this.sourceTables.suites[node.source[1]],
+      xml: this.sourceTables.xmls[node.source[2]],
+      jobUrl:
+        node.source.length > 3 && node.source[3] >= 0
+          ? this.sourceTables.jobUrls[node.source[3]]
+          : undefined,
+      jobId:
+        node.source.length > 4 && node.source[4] >= 0
+          ? this.sourceTables.jobIds[node.source[4]]
+          : undefined,
+      buildUrl:
+        node.source.length > 5 && node.source[5] >= 0
+          ? this.sourceTables.buildUrls[node.source[5]]
+          : undefined,
+    };
+  }
+
+  tagLabels(node: TestNodeData): string[] | undefined {
+    if (!node.tags || !this.tagTables) {
+      return undefined;
+    }
+    if (node.tags[0] === 0) {
+      return [`testsuite:${this.tagTables.suites[node.tags[1] as number]}`];
+    }
+
+    const logicalId = node.name;
+    const separatorIndex = logicalId.indexOf("::");
+    const classname = separatorIndex >= 0 ? logicalId.slice(0, separatorIndex) : "";
+    const testName = separatorIndex >= 0 ? logicalId.slice(separatorIndex + 2) : logicalId;
+    const failedPlatforms = node.tags[2] as number[];
+    const erroredPlatforms = node.tags[3] as number[];
+    const skippedPlatforms = node.tags[4] as number[];
+    return [
+      `logical-test-id:${logicalId}`,
+      `testsuite:${this.tagTables.suites[node.tags[1] as number]}`,
+      `classname:${classname}`,
+      `test-name:${testName}`,
+      ...failedPlatforms.map((index) => `failed-platform:${this.tagTables!.platforms[index]}`),
+      ...erroredPlatforms.map((index) => `errored-platform:${this.tagTables!.platforms[index]}`),
+      ...skippedPlatforms.map((index) => `skipped-platform:${this.tagTables!.platforms[index]}`),
+    ].sort();
   }
 }
