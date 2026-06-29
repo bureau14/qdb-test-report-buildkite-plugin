@@ -29,6 +29,8 @@ class PluginConfig:
     junit_input_path: Optional[Path] = None
     commit: Optional[str] = None
     repo: Optional[str] = None
+    aggregate_download_parallel: int = 32
+    aggregate_download_concurrency: int = 4
 
 
 def _get_env(key: str, default: Optional[str] = None) -> Optional[str]:
@@ -45,6 +47,19 @@ def _get_bool_env(key: str, default: bool) -> bool:
     if val is None:
         return default
     return val.lower() in ("true", "on", "1")
+
+
+def _get_int_env(key: str, default: int) -> int:
+    val = os.environ.get(key)
+    if val is None or val == "":
+        return default
+    try:
+        parsed = int(val)
+    except ValueError as exc:
+        raise ValueError(f"{key} must be an integer") from exc
+    if parsed < 1:
+        raise ValueError(f"{key} must be greater than 0")
+    return parsed
 
 
 def _get_list_env(prefix: str) -> List[str]:
@@ -101,6 +116,12 @@ def load_plugin_config() -> PluginConfig:
 
     only_failures = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_ONLY_FAILURES", False)
     annotate = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_ANNOTATE", True)
+    aggregate_download_parallel = _get_int_env(
+        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_DOWNLOAD_PARALLEL", 32
+    )
+    aggregate_download_concurrency = _get_int_env(
+        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_DOWNLOAD_CONCURRENCY", 4
+    )
 
     variant: Optional[str]
     junit_input_path: Optional[Path]
@@ -144,4 +165,6 @@ def load_plugin_config() -> PluginConfig:
         junit_input_path=junit_input_path,
         commit=commit,
         repo=repo,
+        aggregate_download_parallel=aggregate_download_parallel,
+        aggregate_download_concurrency=aggregate_download_concurrency,
     )

@@ -201,7 +201,7 @@ def main() -> int:
             aggregate_counts: Optional[Dict[str, int]] = None
             if config.scope == "aggregate":
                 store_context = resolve_object_store_context()
-                log("Discovering aggregate JUnit XML from object storage")
+                log("Discovering aggregate JUnit XML object keys from object storage")
                 downloaded_xml = collect_full_scope_xml(
                     cfg=store_context.store_cfg,
                     auth=store_context.auth,
@@ -211,6 +211,9 @@ def main() -> int:
                     git_ref=config.git_ref,
                     build_id=config.build_id,
                     output_dir=full_scope_xml_stage_root,
+                    download_parallel=config.aggregate_download_parallel,
+                    download_concurrency=config.aggregate_download_concurrency,
+                    log_fn=log,
                 )
 
                 if not downloaded_xml:

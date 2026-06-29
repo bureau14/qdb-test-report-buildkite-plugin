@@ -371,6 +371,12 @@ def list_objects(
     return _with_retry(_do, f"list s3://{bucket}/{prefix}")
 
 
+def create_s3_client(cfg: StoreConfig, auth: ObjectAuth) -> Any:
+    """Create an S3/R2 client for callers that need to reuse one across operations."""
+
+    return _s3_client(cfg, auth)
+
+
 def download_file(
     cfg: StoreConfig,
     auth: ObjectAuth,
@@ -379,6 +385,8 @@ def download_file(
     local_path: Path,
     *,
     concurrency: int = 32,
+    client: Optional[Any] = None,
+    transfer_config: Optional[TransferConfig] = None,
 ) -> None:
     """Download one object to a local path, creating parent directories first."""
 
@@ -386,8 +394,9 @@ def download_file(
     path.parent.mkdir(parents=True, exist_ok=True)
 
     def _do():
-        transfer_config = TransferConfig(max_concurrency=concurrency)
-        return _s3_client(cfg, auth).download_file(bucket, key, str(path), Config=transfer_config)
+        s3_client = client or _s3_client(cfg, auth)
+        config = transfer_config or TransferConfig(max_concurrency=concurrency)
+        return s3_client.download_file(bucket, key, str(path), Config=config)
 
     _with_retry(_do, key)
 

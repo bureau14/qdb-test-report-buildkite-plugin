@@ -66,9 +66,7 @@ class UiDataBuilder:
             "jobUrls": [],
             "jobIds": [],
         }
-        self._source_indexes: Dict[str, Dict[str, int]] = {
-            key: {} for key in self.source_tables
-        }
+        self._source_indexes: Dict[str, Dict[str, int]] = {key: {} for key in self.source_tables}
         self.tag_tables: Dict[str, List[str]] = {
             "suites": [],
             "platforms": [],

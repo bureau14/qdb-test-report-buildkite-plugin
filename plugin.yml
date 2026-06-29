@@ -41,7 +41,13 @@ configuration:
     aggregate:
       type: object
       description: Aggregate report configuration that discovers raw XML uploaded by job reports for the current build.
-      properties: {}
+      properties:
+        download_parallel:
+          type: integer
+          description: Number of XML files to download in parallel during aggregate discovery. Default 32.
+        download_concurrency:
+          type: integer
+          description: Per-file boto3 transfer concurrency for aggregate XML downloads. Default 4.
       additionalProperties: false
   required: [title]
   additionalProperties: false

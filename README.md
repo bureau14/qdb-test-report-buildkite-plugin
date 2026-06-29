@@ -10,7 +10,7 @@ A [Buildkite plugin](https://buildkite.com/docs/plugins) for generating self-con
 Configure exactly one mode per plugin invocation:
 
 - `job` requires `variant` and `junit_input_path`.
-- `aggregate` is intentionally empty: `aggregate: {}`.
+- `aggregate` enables full-build report mode; optional download settings tune aggregate XML fetch concurrency.
 
 Common report options such as `title`, `only_failures`, `annotate`, and `project_id` stay at the plugin top level.
 
@@ -146,7 +146,7 @@ plugins:
 | --- | --- | :---: | --- |
 | `title` | string | ✓ | Report title shown in the HTML UI and annotation. |
 | `job` | object | job or aggregate | Per-job report/XML upload configuration. Configure exactly one of `job` or `aggregate`. |
-| `aggregate` | object | job or aggregate | Empty object that enables aggregate report mode. Configure exactly one of `job` or `aggregate`. |
+| `aggregate` | object | job or aggregate | Enables aggregate report mode. Configure exactly one of `job` or `aggregate`. |
 | `execution_name` | string |  | Optional top-level execution name in the report. Defaults to the report title in the standalone generator. |
 | `project_id` | string |  | Object-store project namespace. Defaults to `BUILDKITE_PIPELINE_SLUG`. |
 | `only_failures` | boolean |  | Generate an HTML tree containing only failures/errors while keeping full summary counts. Default: `false`. |
@@ -163,7 +163,12 @@ plugins:
 
 ### `aggregate` object keys
 
-`aggregate` has no child keys. Use `aggregate: {}`.
+| Key | Type | Required | Description |
+| --- | --- | :---: | --- |
+| `download_parallel` | integer |  | Number of XML files to download in parallel after S3/R2 listing. Default: `32`. |
+| `download_concurrency` | integer |  | Per-file boto3 transfer concurrency for XML downloads. Default: `4`. |
+
+The aggregate step logs listing and download durations separately so slow object-store listing can be distinguished from many-small-file download time.
 
 ## Object-store layout
 
