@@ -50,14 +50,35 @@ const sections = computed(() => {
   if (source.jobId) {
     sourceContent["Job ID"] = source.jobId;
   }
-
-  return [
+  const synthesizedSections: SectionData[] = [
     {
       title: "Source",
       blocks: [{ type: "kvp", content: sourceContent }],
     } as SectionData,
-    ...result,
   ];
+  if (props.node.sourceArtifacts) {
+    const artifactContent: Record<string, string> = {};
+    const duplicateArtifactNames = props.node.sourceArtifacts.reduce(
+      (counts, artifact) => {
+        counts[artifact.name] = (counts[artifact.name] || 0) + 1;
+        return counts;
+      },
+      {} as Record<string, number>,
+    );
+    for (const artifact of props.node.sourceArtifacts) {
+      const label =
+        duplicateArtifactNames[artifact.name] > 1
+          ? `${artifact.name} / ${artifact.relativePath}`
+          : artifact.name;
+      artifactContent[label] = artifact.url ? `link:${artifact.url}` : artifact.key;
+    }
+    synthesizedSections.push({
+      title: "Artifacts",
+      blocks: [{ type: "kvp", content: artifactContent }],
+    } as SectionData);
+  }
+
+  return [...synthesizedSections, ...result];
 });
 </script>
 

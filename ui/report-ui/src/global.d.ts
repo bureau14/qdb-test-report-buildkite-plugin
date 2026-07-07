@@ -34,7 +34,16 @@ export declare global {
   interface TestNodeData extends Data {
     status: string;
     source: number[] | undefined;
+    sourceArtifacts: SourceArtifactData[] | undefined;
     tags: TagData | undefined;
+  }
+
+  interface SourceArtifactData {
+    name: string;
+    relativePath: string;
+    key: string;
+    url: string | undefined;
+    sizeBytes: number;
   }
 
   type TagData = Array<number | number[]>;
@@ -60,6 +69,9 @@ export declare global {
   interface TagTables {
     suites: string[];
     platforms: string[];
+    classnames: string[];
+    testNames: string[];
+    logicalIds: string[];
   }
 
   interface ChildMetadata {

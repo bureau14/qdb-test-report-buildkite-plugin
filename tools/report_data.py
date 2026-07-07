@@ -7,8 +7,10 @@ from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Set
 
 from junit_report_model import (
+    ArtifactLink,
     LogicalTest,
     Report,
+    TestFile,
     TestSuite,
     TestcaseExecution,
 )
@@ -53,6 +55,31 @@ def output_section(output: str, generated_at: str) -> Dict[str, Any]:
     }
 
 
+def artifact_link_data(artifact: ArtifactLink) -> Dict[str, Any]:
+    data: Dict[str, Any] = {
+        "name": artifact.name,
+        "relativePath": artifact.relative_path,
+        "key": artifact.key,
+        "sizeBytes": artifact.size_bytes,
+    }
+    if artifact.url:
+        data["url"] = artifact.url
+    return data
+
+
+def artifact_display_label(artifact: ArtifactLink, siblings: List[ArtifactLink]) -> str:
+    same_name_count = sum(1 for item in siblings if item.name == artifact.name)
+    if same_name_count > 1:
+        return f"{artifact.name} / {artifact.relative_path}"
+    return artifact.name
+
+
+def artifact_value(artifact: ArtifactLink) -> str:
+    if artifact.url:
+        return f"link:{artifact.url}"
+    return artifact.key
+
+
 class UiDataBuilder:
     def __init__(self) -> None:
         self._next_id = 1
@@ -70,6 +97,9 @@ class UiDataBuilder:
         self.tag_tables: Dict[str, List[str]] = {
             "suites": [],
             "platforms": [],
+            "classnames": [],
+            "testNames": [],
+            "logicalIds": [],
         }
         self._tag_indexes: Dict[str, Dict[str, int]] = {key: {} for key in self.tag_tables}
 
@@ -126,6 +156,9 @@ class UiDataBuilder:
         return [
             1,
             self._tag_index("suites", logical.suite_name),
+            self._tag_index("classnames", logical.classname),
+            self._tag_index("testNames", logical.name),
+            self._tag_index("logicalIds", logical.logical_id),
             failed_platforms,
             errored_platforms,
             skipped_platforms,
@@ -139,6 +172,7 @@ class UiDataBuilder:
         status: Optional[str] = None,
         source: Optional[List[int]] = None,
         tags: Optional[List[Any]] = None,
+        source_artifacts: Optional[List[ArtifactLink]] = None,
     ) -> Dict[str, Any]:
         result: Dict[str, Any] = {
             "id": self.next_id(),
@@ -153,6 +187,8 @@ class UiDataBuilder:
             result["source"] = source
         if tags is not None:
             result["tags"] = tags
+        if source_artifacts:
+            result["sourceArtifacts"] = [artifact_link_data(item) for item in source_artifacts]
         self.test_nodes.append(result)
         return result
 
@@ -182,8 +218,16 @@ def logical_duration(logical: LogicalTest) -> float:
     return sum(execution.duration_seconds for execution in logical.executions.values())
 
 
+def test_file_duration(test_file: TestFile) -> float:
+    return sum(logical_duration(logical) for logical in test_file.logical_tests.values())
+
+
+def class_duration(logicals: List[LogicalTest]) -> float:
+    return sum(logical_duration(logical) for logical in logicals)
+
+
 def suite_duration(suite: TestSuite) -> float:
-    return sum(logical_duration(logical) for logical in suite.logical_tests.values())
+    return sum(test_file_duration(test_file) for test_file in suite.test_files.values())
 
 
 def execution_sections(execution: TestcaseExecution, generated_at: str) -> List[Dict[str, Any]]:
@@ -220,30 +264,57 @@ def report_to_report_ui_data(
     for suite in report.suites.values():
         suite_child_ids: List[str] = []
 
-        for logical in suite.logical_tests.values():
-            execution_child_ids: List[str] = []
+        for test_file in suite.test_files.values():
+            test_file_child_ids: List[str] = []
+            logicals_by_classname: "OrderedDict[str, List[LogicalTest]]" = OrderedDict()
 
-            for execution in logical.executions.values():
-                if only_failures and execution.status not in {"FAILED", "ERRORED"}:
-                    continue
+            for logical in test_file.logical_tests.values():
+                logicals_by_classname.setdefault(logical.classname, []).append(logical)
 
-                platform_node = builder.node(
-                    execution.platform,
-                    execution.duration_seconds,
-                    execution_sections(execution, report.generated_at),
-                    execution.status,
-                    builder.source(execution, report.build_url),
+            for classname, logicals in logicals_by_classname.items():
+                classname_child_ids: List[str] = []
+
+                for logical in logicals:
+                    execution_child_ids: List[str] = []
+
+                    for execution in logical.executions.values():
+                        if only_failures and execution.status not in {"FAILED", "ERRORED"}:
+                            continue
+
+                        platform_node = builder.node(
+                            execution.platform,
+                            execution.duration_seconds,
+                            execution_sections(execution, report.generated_at),
+                            execution.status,
+                            builder.source(execution, report.build_url),
+                            source_artifacts=execution.source_artifacts,
+                        )
+                        execution_child_ids.append(platform_node["id"])
+
+                    if execution_child_ids:
+                        logical_node = builder.node(
+                            logical.name,
+                            logical_duration(logical),
+                            tags=builder.logical_tags(logical),
+                        )
+                        classname_child_ids.append(logical_node["id"])
+                        builder.add_children(logical_node["id"], execution_child_ids)
+
+                if classname_child_ids:
+                    classname_node = builder.node(
+                        classname or "<no classname>",
+                        class_duration(logicals),
+                    )
+                    test_file_child_ids.append(classname_node["id"])
+                    builder.add_children(classname_node["id"], classname_child_ids)
+
+            if test_file_child_ids:
+                test_file_node = builder.node(
+                    test_file.name,
+                    test_file_duration(test_file),
                 )
-                execution_child_ids.append(platform_node["id"])
-
-            if execution_child_ids:
-                logical_node = builder.node(
-                    logical.logical_id,
-                    logical_duration(logical),
-                    tags=builder.logical_tags(logical),
-                )
-                suite_child_ids.append(logical_node["id"])
-                builder.add_children(logical_node["id"], execution_child_ids)
+                suite_child_ids.append(test_file_node["id"])
+                builder.add_children(test_file_node["id"], test_file_child_ids)
 
         if suite_child_ids:
             suite_node = builder.node(
@@ -267,7 +338,14 @@ def report_to_report_ui_data(
             "platformExecutions": report.platform_execution_count,
             "targets": len(report.platforms),
             "resolvedPlatforms": report.resolved_platforms,
-            "structuralContainers": len(report.suites) + report.logical_test_count,
+            "structuralContainers": len(report.suites)
+            + sum(len(suite.test_files) for suite in report.suites.values())
+            + sum(
+                len({logical.classname for logical in test_file.logical_tests.values()})
+                for suite in report.suites.values()
+                for test_file in suite.test_files.values()
+            )
+            + report.logical_test_count,
             "statusCounts": dict(report.status_counts),
             "logicalStatusCounts": dict(report.logical_status_counts),
             "rootStatus": report.root_status,
@@ -285,4 +363,11 @@ def report_to_report_ui_data(
         "children": dict(builder.children),
         "testNodes": builder.test_nodes,
     }
+    if report.artifacts:
+        artifact_content: Dict[str, Any] = {}
+        for artifact in report.artifacts:
+            artifact_content[artifact_display_label(artifact, report.artifacts)] = artifact_value(
+                artifact
+            )
+        execution_data["sections"].append(kvp_section("Artifacts", artifact_content))
     return [execution_data]

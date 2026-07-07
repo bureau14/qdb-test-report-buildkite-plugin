@@ -36,6 +36,20 @@ configuration:
         fail_on_test_failures:
           type: boolean
           description: Exit 64 when the generated job report contains failed or errored tests; default true.
+        artifacts:
+          type: array
+          description: Optional additional files to upload with the job report and link from HTML.
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                description: Human-readable artifact group name shown in the report.
+              input_path:
+                type: string
+                description: Local file, directory, or glob to upload.
+            required: [name, input_path]
+            additionalProperties: false
       required: [variant, junit_input_path]
       additionalProperties: false
     aggregate:

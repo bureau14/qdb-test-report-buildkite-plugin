@@ -2,7 +2,7 @@
 """Generate a self-contained HTML report directly from JUnit XML."""
 
 from __future__ import annotations
-from typing import List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import argparse
 import json
@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 
 from html_report_writer import DEFAULT_TEMPLATE, write_html_report
-from junit_report_model import build_report, format_counts, parse_platform_arg
+from junit_report_model import ArtifactLink, build_report, format_counts, parse_platform_arg
 from report_data import report_to_report_ui_data
 
 
@@ -69,6 +69,9 @@ def generate_html_report(
     build_url: Optional[str] = None,
     commit_url: Optional[str] = None,
     source_job_id: Optional[str] = None,
+    source_artifacts_by_job_id: Optional[Dict[str, List[ArtifactLink]]] = None,
+    artifacts: Optional[List[ArtifactLink]] = None,
+    artifact_metadata: Optional[List[Dict[str, Any]]] = None,
     only_failures: bool = False,
     fail_on_test_failures: bool = False,
 ) -> int:
@@ -78,6 +81,8 @@ def generate_html_report(
         build_url=build_url,
         commit_url=commit_url,
         source_job_id=source_job_id,
+        source_artifacts_by_job_id=source_artifacts_by_job_id,
+        artifacts=artifacts,
     )
     data = report_to_report_ui_data(
         report, execution_name=execution_name, only_failures=only_failures
@@ -100,6 +105,8 @@ def generate_html_report(
             "logical_status_counts": dict(report.logical_status_counts),
             "root_status": report.root_status,
         }
+        if artifact_metadata is not None:
+            summary["artifacts"] = artifact_metadata
         summary_json.parent.mkdir(parents=True, exist_ok=True)
         summary_json.write_text(json.dumps(summary, indent=2))
         log(f"Wrote summary JSON output={summary_json}")

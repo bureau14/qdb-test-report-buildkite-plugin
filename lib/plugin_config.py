@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import List, Optional
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -9,6 +9,12 @@ from pathlib import Path
 class PlatformConfig:
     name: str
     path: Path
+
+
+@dataclass(frozen=True)
+class ArtifactConfig:
+    name: str
+    input_path: Path
 
 
 @dataclass(frozen=True)
@@ -29,6 +35,7 @@ class PluginConfig:
     junit_input_path: Optional[Path] = None
     commit: Optional[str] = None
     repo: Optional[str] = None
+    artifacts: List[ArtifactConfig] = field(default_factory=list)
     aggregate_download_parallel: int = 32
     aggregate_download_concurrency: int = 4
 
@@ -71,6 +78,24 @@ def _get_list_env(prefix: str) -> List[str]:
             break
         if value:
             values.append(value)
+        idx += 1
+    return values
+
+
+def _get_artifact_configs(prefix: str) -> List[ArtifactConfig]:
+    values: List[ArtifactConfig] = []
+    idx = 0
+    while True:
+        item_prefix = f"{prefix}_{idx}"
+        name = _get_env(f"{item_prefix}_NAME")
+        input_path = _get_env(f"{item_prefix}_INPUT_PATH")
+        if name is None and input_path is None:
+            break
+        if not name:
+            raise ValueError(f"artifact {idx} requires name")
+        if not input_path:
+            raise ValueError(f"artifact {idx} requires input_path")
+        values.append(ArtifactConfig(name=name, input_path=Path(input_path)))
         idx += 1
     return values
 
@@ -126,6 +151,7 @@ def load_plugin_config() -> PluginConfig:
     variant: Optional[str]
     junit_input_path: Optional[Path]
     fail_on_test_failures: bool
+    artifacts: List[ArtifactConfig]
 
     if scope == "job":
         variant = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT")
@@ -141,11 +167,13 @@ def load_plugin_config() -> PluginConfig:
         fail_on_test_failures = _get_bool_env(
             "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_FAIL_ON_TEST_FAILURES", True
         )
+        artifacts = _get_artifact_configs("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_ARTIFACTS")
         platforms = [PlatformConfig(name=variant, path=junit_input_path)]
     else:
         variant = None
         junit_input_path = None
         fail_on_test_failures = False
+        artifacts = []
         platforms = []
 
     return PluginConfig(
@@ -165,6 +193,7 @@ def load_plugin_config() -> PluginConfig:
         junit_input_path=junit_input_path,
         commit=commit,
         repo=repo,
+        artifacts=artifacts,
         aggregate_download_parallel=aggregate_download_parallel,
         aggregate_download_concurrency=aggregate_download_concurrency,
     )

@@ -2,7 +2,7 @@
 """Parse JUnit XML files into a neutral report model."""
 
 from __future__ import annotations
-from typing import List, Optional, Tuple, Union, Counter, OrderedDict
+from typing import Dict, List, Optional, Tuple, Union, Counter, OrderedDict
 import argparse
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -38,10 +38,20 @@ def format_counts(counter: Counter[str]) -> str:
 
 
 @dataclass
+class ArtifactLink:
+    name: str
+    relative_path: str
+    key: str
+    url: Optional[str]
+    size_bytes: int
+
+
+@dataclass
 class TestcaseExecution:
     platform: str
     source_file: Path
     source_id: str
+    test_file: str
     source_job_id: Optional[str]
     source_job_url: Optional[str]
     suite_name: str
@@ -52,11 +62,13 @@ class TestcaseExecution:
     duration_seconds: float
     reason: Optional[str] = None
     output: Optional[str] = None
+    source_artifacts: List[ArtifactLink] = field(default_factory=list)
 
 
 @dataclass
 class LogicalTest:
     suite_name: str
+    test_file: str
     logical_id: str
     classname: str
     name: str
@@ -64,9 +76,15 @@ class LogicalTest:
 
 
 @dataclass
-class TestSuite:
+class TestFile:
     name: str
     logical_tests: "OrderedDict[str, LogicalTest]" = field(default_factory=OrderedDict)
+
+
+@dataclass
+class TestSuite:
+    name: str
+    test_files: "OrderedDict[str, TestFile]" = field(default_factory=OrderedDict)
 
 
 @dataclass
@@ -81,27 +99,34 @@ class Report:
     raw_testcases: int = 0
     duplicates_seen: int = 0
     duplicates_replaced: int = 0
+    artifacts: List[ArtifactLink] = field(default_factory=list)
 
     @property
     def resolved_platforms(self) -> List[str]:
         """Returns the list of platforms that actually had at least one test execution."""
         seen = set()
         for suite in self.suites.values():
-            for logical in suite.logical_tests.values():
-                for platform in logical.executions:
-                    seen.add(platform)
+            for test_file in suite.test_files.values():
+                for logical in test_file.logical_tests.values():
+                    for platform in logical.executions:
+                        seen.add(platform)
         return [p for p in self.platforms if p in seen]
 
     @property
     def logical_test_count(self) -> int:
-        return sum(len(suite.logical_tests) for suite in self.suites.values())
+        return sum(
+            len(test_file.logical_tests)
+            for suite in self.suites.values()
+            for test_file in suite.test_files.values()
+        )
 
     @property
     def platform_execution_count(self) -> int:
         return sum(
             len(logical.executions)
             for suite in self.suites.values()
-            for logical in suite.logical_tests.values()
+            for test_file in suite.test_files.values()
+            for logical in test_file.logical_tests.values()
         )
 
     @property
@@ -109,7 +134,8 @@ class Report:
         return sum(
             execution.duration_seconds
             for suite in self.suites.values()
-            for logical in suite.logical_tests.values()
+            for test_file in suite.test_files.values()
+            for logical in test_file.logical_tests.values()
             for execution in logical.executions.values()
         )
 
@@ -118,7 +144,8 @@ class Report:
         return Counter(
             execution.status
             for suite in self.suites.values()
-            for logical in suite.logical_tests.values()
+            for test_file in suite.test_files.values()
+            for logical in test_file.logical_tests.values()
             for execution in logical.executions.values()
         )
 
@@ -127,7 +154,8 @@ class Report:
         return Counter(
             logical_status(logical)
             for suite in self.suites.values()
-            for logical in suite.logical_tests.values()
+            for test_file in suite.test_files.values()
+            for logical in test_file.logical_tests.values()
         )
 
     @property
@@ -144,24 +172,21 @@ def has_glob_magic(path: Union[Path, str]) -> bool:
 
 
 def discover_xml_files(path: Union[Path, str]) -> List[Path]:
-    """Return XML files for a file, directory, or glob, sorted deterministically."""
+    """Return XML files for a file, directory, or glob in discovery order."""
     input_path = Path(path)
     if has_glob_magic(input_path):
-        return sorted(
-            {
-                Path(match).resolve()
-                for match in glob.glob(str(input_path), recursive=True)
-                if Path(match).is_file() and Path(match).suffix == ".xml"
-            },
-            key=lambda p: p.as_posix(),
-        )
+        seen = set()
+        files = []
+        for match in glob.glob(str(input_path), recursive=True):
+            candidate = Path(match).resolve()
+            if candidate.is_file() and candidate.suffix == ".xml" and candidate not in seen:
+                seen.add(candidate)
+                files.append(candidate)
+        return files
     if input_path.is_file():
         return [input_path]
     if input_path.is_dir():
-        return sorted(
-            (p for p in input_path.rglob("*.xml") if p.is_file()),
-            key=lambda p: p.relative_to(input_path).as_posix(),
-        )
+        return [p for p in input_path.rglob("*.xml") if p.is_file()]
     log_warn(f"JUnit path does not exist: {input_path}")
     return []
 
@@ -268,6 +293,11 @@ def buildkite_job_url(build_url: Optional[str], job_id: Optional[str]) -> Option
     return f"{build_url.split('#', 1)[0]}#{job_id}"
 
 
+def test_file_name(source_id: str) -> str:
+    source_path = Path(source_id)
+    return source_path.stem or source_path.name or "<unknown>"
+
+
 def logical_status(logical: LogicalTest) -> str:
     statuses = [execution.status for execution in logical.executions.values()]
     if any(status == "ERRORED" for status in statuses):
@@ -301,6 +331,7 @@ def parse_junit_file(
     source_id: Optional[str] = None,
     source_job_id: Optional[str] = None,
     source_job_url: Optional[str] = None,
+    source_artifacts: Optional[List[ArtifactLink]] = None,
 ) -> List[TestcaseExecution]:
     if source_id is None:
         source_id = path.name
@@ -331,6 +362,7 @@ def parse_junit_file(
                     platform=platform,
                     source_file=path,
                     source_id=source_id,
+                    test_file=test_file_name(source_id),
                     source_job_id=source_job_id,
                     source_job_url=source_job_url,
                     suite_name=suite_name,
@@ -341,6 +373,7 @@ def parse_junit_file(
                     duration_seconds=duration_seconds(testcase),
                     reason=reason,
                     output=output,
+                    source_artifacts=source_artifacts or [],
                 )
             )
     status_counts = Counter(execution.status for execution in executions)
@@ -364,6 +397,8 @@ def build_report(
     build_url: Optional[str] = None,
     commit_url: Optional[str] = None,
     source_job_id: Optional[str] = None,
+    source_artifacts_by_job_id: Optional[Dict[str, List[ArtifactLink]]] = None,
+    artifacts: Optional[List[ArtifactLink]] = None,
 ) -> Report:
     log_info(f"Start JUnit report model build title={title!r} platforms={len(platform_specs)}")
     suites: "OrderedDict[str, TestSuite]" = OrderedDict()
@@ -394,6 +429,13 @@ def build_report(
             # aggregates results from all parallel jobs into a single row.
             parts = rel_path.split("/")
             path_source_job_id = next((p for p in parts if UUID_RE.match(p)), None)
+            if (
+                path_source_job_id is None
+                and source_artifacts_by_job_id is not None
+                and parts
+                and parts[0] in source_artifacts_by_job_id
+            ):
+                path_source_job_id = parts[0]
             effective_source_job_id = path_source_job_id or source_job_id
             source_job_url = buildkite_job_url(build_url, effective_source_job_id)
             source_id = (
@@ -421,6 +463,9 @@ def build_report(
             source_id,
             source_job_id=effective_source_job_id,
             source_job_url=source_job_url,
+            source_artifacts=(source_artifacts_by_job_id or {}).get(
+                effective_source_job_id or "", []
+            ),
         )
         total_raw_executions += len(file_executions)
         for execution in file_executions:
@@ -429,15 +474,23 @@ def build_report(
                 suite = TestSuite(name=execution.suite_name)
                 suites[execution.suite_name] = suite
                 log_info(f"created testsuite suite={execution.suite_name}")
-            logical = suite.logical_tests.get(execution.logical_id)
+            test_file = suite.test_files.get(execution.test_file)
+            if test_file is None:
+                test_file = TestFile(name=execution.test_file)
+                suite.test_files[execution.test_file] = test_file
+                log_info(
+                    f"created testfile suite={execution.suite_name} test_file={execution.test_file}"
+                )
+            logical = test_file.logical_tests.get(execution.logical_id)
             if logical is None:
                 logical = LogicalTest(
                     suite_name=execution.suite_name,
+                    test_file=execution.test_file,
                     logical_id=execution.logical_id,
                     classname=execution.classname,
                     name=execution.name,
                 )
-                suite.logical_tests[execution.logical_id] = logical
+                test_file.logical_tests[execution.logical_id] = logical
             existing = logical.executions.get(platform)
             if existing is None:
                 logical.executions[platform] = execution
@@ -448,13 +501,13 @@ def build_report(
                     duplicates_replaced += 1
                     log_warn(
                         f"duplicate replaced test={execution.logical_id} platform={platform} "
-                        f"suite={execution.suite_name} old_status={existing.status} "
+                        f"suite={execution.suite_name} test_file={execution.test_file} old_status={existing.status} "
                         f"new_status={execution.status} old_file={existing.source_file} new_file={execution.source_file}"
                     )
                 else:
                     log_warn(
                         f"duplicate kept-existing test={execution.logical_id} platform={platform} "
-                        f"suite={execution.suite_name} existing_status={existing.status} "
+                        f"suite={execution.suite_name} test_file={execution.test_file} existing_status={existing.status} "
                         f"duplicate_status={execution.status} existing_file={existing.source_file} duplicate_file={execution.source_file}"
                     )
                 logical.executions[platform] = chosen
@@ -470,6 +523,7 @@ def build_report(
         raw_testcases=total_raw_executions,
         duplicates_seen=duplicates_seen,
         duplicates_replaced=duplicates_replaced,
+        artifacts=artifacts or [],
     )
     log_info(
         f"Summary: files={report.total_files} raw_testcases={report.raw_testcases} suites={len(report.suites)} "

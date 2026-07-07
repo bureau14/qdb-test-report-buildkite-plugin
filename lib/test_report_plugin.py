@@ -1,7 +1,8 @@
 from __future__ import annotations
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import sys
 import json
+import mimetypes
 import tempfile
 from pathlib import Path
 from dataclasses import dataclass, replace
@@ -12,9 +13,11 @@ if tools_path not in sys.path:
     sys.path.append(tools_path)
 
 import junit_html_report
+from junit_report_model import ArtifactLink
 
 from plugin_config import PluginConfig, PlatformConfig, load_plugin_config
 from report_paths import build_report_location
+from artifact_inputs import ArtifactFile, collect_artifact_files, slugify_artifact_name
 from object_store import (
     ObjectAuth,
     StoreConfig,
@@ -26,7 +29,12 @@ from object_store import (
     key_join,
     PublishedObject,
 )
-from report_downloads import DownloadedJobXml, collect_full_scope_xml
+from report_downloads import (
+    DownloadedJobXml,
+    collect_full_scope_job_summaries,
+    collect_full_scope_job_summaries_for_xml,
+    collect_full_scope_xml,
+)
 from xml_inputs import collect_job_xml_uploads, XmlUpload
 from annotations import (
     build_annotation_body,
@@ -51,6 +59,9 @@ class GenerationResult:
     summary_path: Path
 
 
+ArtifactMetadata = List[Dict[str, Any]]
+
+
 def log(message: str) -> None:
     print(f"INFO  {message}", file=sys.stderr)
 
@@ -68,12 +79,33 @@ def aggregate_discovery_counts(
 
 
 def add_summary_metadata(
-    summary_path: Path, *, discovered_xml: Optional[Dict[str, int]] = None
+    summary_path: Path,
+    *,
+    discovered_xml: Optional[Dict[str, int]] = None,
+    job_artifacts: Optional[ArtifactMetadata] = None,
 ) -> None:
     summary = json.loads(summary_path.read_text())
     if discovered_xml is not None:
         summary["discovered_xml"] = discovered_xml
+    if job_artifacts is not None:
+        summary["job_artifacts"] = job_artifacts
     summary_path.write_text(json.dumps(summary, indent=2))
+
+
+def artifact_links_from_metadata(metadata: ArtifactMetadata) -> List[ArtifactLink]:
+    links: List[ArtifactLink] = []
+    for artifact in metadata:
+        for file_info in artifact.get("files", []):
+            links.append(
+                ArtifactLink(
+                    name=str(artifact.get("name", "Artifact")),
+                    relative_path=str(file_info.get("relative_path", "")),
+                    key=str(file_info.get("key", "")),
+                    url=file_info.get("url"),
+                    size_bytes=int(file_info.get("size_bytes", 0)),
+                )
+            )
+    return links
 
 
 def build_zero_xml_annotation_body(title: str) -> str:
@@ -84,7 +116,14 @@ def build_zero_xml_annotation_body(title: str) -> str:
     )
 
 
-def run_report_generation(config: PluginConfig, output_dir: Path) -> GenerationResult:
+def run_report_generation(
+    config: PluginConfig,
+    output_dir: Path,
+    *,
+    source_artifacts_by_job_id: Optional[Dict[str, List[ArtifactLink]]] = None,
+    artifacts: Optional[List[ArtifactLink]] = None,
+    artifact_metadata: Optional[ArtifactMetadata] = None,
+) -> GenerationResult:
     """
     Runs the HTML report generator and returns the paths to the generated report files.
     """
@@ -102,6 +141,9 @@ def run_report_generation(config: PluginConfig, output_dir: Path) -> GenerationR
         build_url=config.build_url,
         commit_url=build_commit_url(config.repo, config.commit),
         source_job_id=config.job_id,
+        source_artifacts_by_job_id=source_artifacts_by_job_id,
+        artifacts=artifacts,
+        artifact_metadata=artifact_metadata,
         only_failures=config.only_failures,
         fail_on_test_failures=False,
     )
@@ -118,6 +160,65 @@ def resolve_object_store_context() -> ObjectStoreContext:
     auth = resolve_object_auth(store_cfg)
     bucket, prefix = parse_s3(store_cfg.destination)
     return ObjectStoreContext(store_cfg=store_cfg, auth=auth, bucket=bucket, prefix=prefix)
+
+
+def guessed_content_type(path: Path) -> str:
+    if path.name.endswith(".gz"):
+        return "application/gzip"
+    return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+
+
+def upload_extra_artifacts(
+    config: PluginConfig,
+    artifact_files: List[ArtifactFile],
+    store_context: ObjectStoreContext,
+) -> ArtifactMetadata:
+    location = build_report_location(
+        destination_prefix=store_context.prefix,
+        project_id=config.project_id,
+        git_ref=config.git_ref,
+        build_id=config.build_id,
+        scope=config.scope,
+        job_id=config.job_id,
+        variant=config.variant,
+    )
+
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for artifact_file in artifact_files:
+        artifact = artifact_file.config
+        slug = slugify_artifact_name(artifact.name)
+        key = key_join(location.artifact_prefix, slug, artifact_file.relative_path)
+        log(
+            f"Uploading additional artifact {artifact.name} {artifact_file.relative_path} "
+            f"to s3://{store_context.bucket}/{key}"
+        )
+        published = upload_file(
+            store_context.store_cfg,
+            store_context.auth,
+            store_context.bucket,
+            key,
+            artifact_file.local_path,
+            content_type=guessed_content_type(artifact_file.local_path),
+            content_disposition="attachment",
+        )
+        entry = grouped.setdefault(
+            artifact.name,
+            {
+                "name": artifact.name,
+                "input_path": str(artifact.input_path),
+                "files": [],
+                "warnings": [],
+            },
+        )
+        file_info: Dict[str, Any] = {
+            "relative_path": artifact_file.relative_path,
+            "key": published.key,
+            "size_bytes": published.size_bytes,
+        }
+        if published.url:
+            file_info["url"] = published.url
+        entry["files"].append(file_info)
+    return list(grouped.values())
 
 
 def upload_report_artifacts(
@@ -199,6 +300,10 @@ def main() -> int:
 
             store_context: Optional[ObjectStoreContext] = None
             aggregate_counts: Optional[Dict[str, int]] = None
+            artifact_metadata: ArtifactMetadata = []
+            job_artifacts_metadata: ArtifactMetadata = []
+            source_artifacts_by_job_id: Dict[str, List[ArtifactLink]] = {}
+            report_artifacts: List[ArtifactLink] = []
             if config.scope == "aggregate":
                 store_context = resolve_object_store_context()
                 log("Discovering aggregate JUnit XML object keys from object storage")
@@ -253,10 +358,74 @@ def main() -> int:
                     )
                     for item in downloaded_xml
                 ]
+                log("Discovering aggregate job summary manifests")
+                job_summaries = collect_full_scope_job_summaries_for_xml(
+                    cfg=store_context.store_cfg,
+                    auth=store_context.auth,
+                    bucket=store_context.bucket,
+                    downloaded_xml=downloaded_xml,
+                    output_dir=staging_root / "downloaded-summaries",
+                )
+                if not job_summaries:
+                    job_summaries = collect_full_scope_job_summaries(
+                        cfg=store_context.store_cfg,
+                        auth=store_context.auth,
+                        bucket=store_context.bucket,
+                        destination_prefix=store_context.prefix,
+                        project_id=config.project_id,
+                        git_ref=config.git_ref,
+                        build_id=config.build_id,
+                        output_dir=staging_root / "downloaded-summaries",
+                    )
+                for summary in job_summaries.values():
+                    artifacts = summary.get("artifacts", [])
+                    job_id = str(summary.get("job_id", ""))
+                    job_artifacts_metadata.append(
+                        {
+                            "variant": summary.get("variant"),
+                            "job_id": job_id,
+                            "artifacts": artifacts,
+                        }
+                    )
+                    source_artifacts_by_job_id[job_id] = artifact_links_from_metadata(artifacts)
+                artifact_file_count = sum(
+                    len(artifact.get("files", []))
+                    for summary in job_summaries.values()
+                    for artifact in summary.get("artifacts", [])
+                )
+                log(
+                    "Discovered aggregate job summaries: "
+                    f"{len(job_summaries)} summaries, {artifact_file_count} artifact files."
+                )
+                report_artifacts = [
+                    link for links in source_artifacts_by_job_id.values() for link in links
+                ]
             else:
                 if config.junit_input_path is None or config.variant is None:
                     raise ValueError("scope=job requires variant and junit_input_path")
                 xml_uploads = collect_job_xml_uploads(config.junit_input_path, config.variant)
+                artifact_files = collect_artifact_files(config.artifacts)
+                if artifact_files:
+                    store_context = resolve_object_store_context()
+                    artifact_metadata = upload_extra_artifacts(
+                        config, artifact_files, store_context
+                    )
+                uploaded_artifact_names = {item["name"] for item in artifact_metadata}
+                for artifact in config.artifacts:
+                    if artifact.name not in uploaded_artifact_names:
+                        artifact_metadata.append(
+                            {
+                                "name": artifact.name,
+                                "input_path": str(artifact.input_path),
+                                "files": [],
+                                "warnings": ["no files found for configured artifact input_path"],
+                            }
+                        )
+                if config.job_id:
+                    source_artifacts_by_job_id[config.job_id] = artifact_links_from_metadata(
+                        artifact_metadata
+                    )
+                report_artifacts = artifact_links_from_metadata(artifact_metadata)
 
             # Create temp dir for HTML report generation output
             tmp_base = staging_root / "report"
@@ -266,9 +435,19 @@ def main() -> int:
                 f"Generating {config.scope} report"
                 + (f" for variant {config.variant}" if config.variant else "")
             )
-            generation = run_report_generation(config, tmp_base)
+            generation = run_report_generation(
+                config,
+                tmp_base,
+                source_artifacts_by_job_id=source_artifacts_by_job_id,
+                artifacts=report_artifacts if config.scope == "job" else [],
+                artifact_metadata=artifact_metadata if config.scope == "job" else None,
+            )
             if config.scope == "aggregate":
-                add_summary_metadata(generation.summary_path, discovered_xml=aggregate_counts)
+                add_summary_metadata(
+                    generation.summary_path,
+                    discovered_xml=aggregate_counts,
+                    job_artifacts=job_artifacts_metadata,
+                )
 
             # Upload JUNIT reports, HTML report, summary
             uploads = upload_report_artifacts(

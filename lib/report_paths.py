@@ -10,6 +10,7 @@ class ReportLocation:
     html_key: str
     summary_key: str
     xml_prefix: str
+    artifact_prefix: str
 
 
 def build_report_location(
@@ -41,4 +42,5 @@ def build_report_location(
         html_key=key_join(base_prefix, "index.html"),
         summary_key=key_join(base_prefix, "summary.json"),
         xml_prefix=key_join(base_prefix, "xml"),
+        artifact_prefix=key_join(base_prefix, "artifacts"),
     )

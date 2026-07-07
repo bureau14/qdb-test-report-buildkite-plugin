@@ -42,6 +42,9 @@ steps:
           job:
             variant: linux-haswell-release
             junit_input_path: reports/junit
+            artifacts:
+              - name: Test logs
+                input_path: "test-logs-*.tar.gz"
 ```
 
 `job.junit_input_path` can be:
@@ -51,6 +54,8 @@ steps:
 - a glob, such as `reports/**/*.xml`.
 
 If the path does not exist or no XML files are found, the job report fails with a plugin error.
+
+`job.artifacts` can optionally upload additional non-JUnit files, such as server logs or debug bundles. Each entry requires a `name` and `input_path`. The input path supports the same path styles as `junit_input_path` except directories upload all regular files recursively instead of filtering to XML. Missing or empty additional artifact inputs log a warning, are recorded in `summary.json`, and do not fail the report.
 
 By default, job mode exits `64` when the report contains failed or errored tests. Disable that if your pipeline already handles test failures another way:
 
@@ -160,6 +165,7 @@ plugins:
 | `variant` | string | ✓ | Test variant name and object-store grouping, for example `linux-haswell-release`. |
 | `junit_input_path` | string | ✓ | Local JUnit XML file, directory, or glob to read from the test job. |
 | `fail_on_test_failures` | boolean |  | Exit `64` when the generated job report contains failed or errored tests. Default: `true`. |
+| `artifacts` | array |  | Optional additional artifact groups to upload and link from the report. Each item requires `name` and `input_path`. Missing files warn but do not fail. |
 
 ### `aggregate` object keys
 
@@ -180,12 +186,16 @@ Given destination `s3://bucket/prefix`, project `project`, git ref `refs/heads/m
 prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/index.html
 prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/summary.json
 prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/xml/<relative-junit-path>.xml
+prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/artifacts/<artifact-name-slug>/<relative-artifact-path>
 ```
 
-Aggregate mode discovers XML under the current build's variants prefix:
+The job `summary.json` includes an `artifacts` array with uploaded artifact keys, public URLs when `ARTIFACTS_DOMAIN` is configured, sizes, and warnings for configured artifact inputs that produced no files. Job and aggregate HTML reports render these links in the report-level Artifacts section and in each test leaf's Source section beside the Buildkite job/JUnit XML links.
+
+Aggregate mode discovers XML and job summaries under the current build's variants prefix:
 
 ```text
 prefix/project/refs/heads/main/reports/builds/build-1/variants/*/jobs/*/xml/**/*.xml
+prefix/project/refs/heads/main/reports/builds/build-1/variants/*/jobs/*/summary.json
 ```
 
 The aggregate report is written under:

@@ -203,13 +203,12 @@ export default class TestExecution {
       return [`testsuite:${this.tagTables.suites[node.tags[1] as number]}`];
     }
 
-    const logicalId = node.name;
-    const separatorIndex = logicalId.indexOf("::");
-    const classname = separatorIndex >= 0 ? logicalId.slice(0, separatorIndex) : "";
-    const testName = separatorIndex >= 0 ? logicalId.slice(separatorIndex + 2) : logicalId;
-    const failedPlatforms = node.tags[2] as number[];
-    const erroredPlatforms = node.tags[3] as number[];
-    const skippedPlatforms = node.tags[4] as number[];
+    const classname = this.tagTables.classnames[node.tags[2] as number];
+    const testName = this.tagTables.testNames[node.tags[3] as number];
+    const logicalId = this.tagTables.logicalIds[node.tags[4] as number];
+    const failedPlatforms = node.tags[5] as number[];
+    const erroredPlatforms = node.tags[6] as number[];
+    const skippedPlatforms = node.tags[7] as number[];
     return [
       `logical-test-id:${logicalId}`,
       `testsuite:${this.tagTables.suites[node.tags[1] as number]}`,
