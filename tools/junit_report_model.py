@@ -54,6 +54,7 @@ class TestcaseExecution:
     test_file: str
     source_job_id: Optional[str]
     source_job_url: Optional[str]
+    source_xml_url: Optional[str]
     suite_name: str
     classname: str
     name: str
@@ -331,6 +332,7 @@ def parse_junit_file(
     source_id: Optional[str] = None,
     source_job_id: Optional[str] = None,
     source_job_url: Optional[str] = None,
+    source_xml_url: Optional[str] = None,
     source_artifacts: Optional[List[ArtifactLink]] = None,
 ) -> List[TestcaseExecution]:
     if source_id is None:
@@ -365,6 +367,7 @@ def parse_junit_file(
                     test_file=test_file_name(source_id),
                     source_job_id=source_job_id,
                     source_job_url=source_job_url,
+                    source_xml_url=source_xml_url,
                     suite_name=suite_name,
                     classname=classname,
                     name=name,
@@ -399,6 +402,7 @@ def build_report(
     source_job_id: Optional[str] = None,
     source_artifacts_by_job_id: Optional[Dict[str, List[ArtifactLink]]] = None,
     artifacts: Optional[List[ArtifactLink]] = None,
+    xml_source_links: Optional[Dict[Path, Optional[str]]] = None,
 ) -> Report:
     log_info(f"Start JUnit report model build title={title!r} platforms={len(platform_specs)}")
     suites: "OrderedDict[str, TestSuite]" = OrderedDict()
@@ -438,11 +442,19 @@ def build_report(
                 path_source_job_id = parts[0]
             effective_source_job_id = path_source_job_id or source_job_id
             source_job_url = buildkite_job_url(build_url, effective_source_job_id)
+            source_xml_url = (xml_source_links or {}).get(xml_file.resolve())
             source_id = (
                 "/".join(p for p in parts if p != path_source_job_id and p != platform) or rel_path
             )
             all_files_to_process.append(
-                (platform, xml_file, source_id, effective_source_job_id, source_job_url)
+                (
+                    platform,
+                    xml_file,
+                    source_id,
+                    effective_source_job_id,
+                    source_job_url,
+                    source_xml_url,
+                )
             )
 
     if not all_files_to_process:
@@ -456,6 +468,7 @@ def build_report(
         source_id,
         effective_source_job_id,
         source_job_url,
+        source_xml_url,
     ) in all_files_to_process:
         file_executions = parse_junit_file(
             xml_file,
@@ -463,6 +476,7 @@ def build_report(
             source_id,
             source_job_id=effective_source_job_id,
             source_job_url=source_job_url,
+            source_xml_url=source_xml_url,
             source_artifacts=(source_artifacts_by_job_id or {}).get(
                 effective_source_job_id or "", []
             ),

@@ -92,6 +92,7 @@ class UiDataBuilder:
             "buildUrls": [],
             "jobUrls": [],
             "jobIds": [],
+            "xmlUrls": [],
         }
         self._source_indexes: Dict[str, Dict[str, int]] = {key: {} for key in self.source_tables}
         self.tag_tables: Dict[str, List[str]] = {
@@ -129,6 +130,10 @@ class UiDataBuilder:
             while len(source) < 5:
                 source.append(-1)
             source.append(self._source_index("buildUrls", build_url))
+        if execution.source_xml_url:
+            while len(source) < 6:
+                source.append(-1)
+            source.append(self._source_index("xmlUrls", execution.source_xml_url))
         return source
 
     def _tag_index(self, table: str, value: str) -> int:
@@ -282,7 +287,7 @@ def report_to_report_ui_data(
                             continue
 
                         platform_node = builder.node(
-                            execution.platform,
+                            f"{execution.name} - {execution.platform}",
                             execution.duration_seconds,
                             execution_sections(execution, report.generated_at),
                             execution.status,

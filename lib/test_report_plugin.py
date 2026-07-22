@@ -27,6 +27,7 @@ from object_store import (
     parse_s3,
     aws_clients,
     key_join,
+    internal_url,
     PublishedObject,
 )
 from report_downloads import (
@@ -57,6 +58,12 @@ class ObjectStoreContext:
 class GenerationResult:
     html_path: Path
     summary_path: Path
+
+
+@dataclass(frozen=True)
+class XmlSourceLink:
+    key: str
+    url: Optional[str]
 
 
 ArtifactMetadata = List[Dict[str, Any]]
@@ -108,6 +115,41 @@ def artifact_links_from_metadata(metadata: ArtifactMetadata) -> List[ArtifactLin
     return links
 
 
+def build_job_xml_source_links(
+    config: PluginConfig,
+    xml_uploads: List[XmlUpload],
+    store_context: ObjectStoreContext,
+) -> Dict[Path, XmlSourceLink]:
+    location = build_report_location(
+        destination_prefix=store_context.prefix,
+        project_id=config.project_id,
+        git_ref=config.git_ref,
+        build_id=config.build_id,
+        scope=config.scope,
+        job_id=config.job_id,
+        variant=config.variant,
+    )
+    links: Dict[Path, XmlSourceLink] = {}
+    for xml in xml_uploads:
+        key = key_join(location.xml_prefix, xml.object_relative_path)
+        links[xml.local_path.resolve()] = XmlSourceLink(
+            key=key, url=internal_url(store_context.store_cfg, key)
+        )
+    return links
+
+
+def build_aggregate_xml_source_links(
+    downloaded_xml: List[DownloadedJobXml], store_context: ObjectStoreContext
+) -> Dict[Path, XmlSourceLink]:
+    return {
+        item.local_path.resolve(): XmlSourceLink(
+            key=item.object.key,
+            url=internal_url(store_context.store_cfg, item.object.key),
+        )
+        for item in downloaded_xml
+    }
+
+
 def build_zero_xml_annotation_body(title: str) -> str:
     return (
         f"## {title}\n\n"
@@ -123,6 +165,7 @@ def run_report_generation(
     source_artifacts_by_job_id: Optional[Dict[str, List[ArtifactLink]]] = None,
     artifacts: Optional[List[ArtifactLink]] = None,
     artifact_metadata: Optional[ArtifactMetadata] = None,
+    xml_source_links: Optional[Dict[Path, XmlSourceLink]] = None,
 ) -> GenerationResult:
     """
     Runs the HTML report generator and returns the paths to the generated report files.
@@ -144,6 +187,7 @@ def run_report_generation(
         source_artifacts_by_job_id=source_artifacts_by_job_id,
         artifacts=artifacts,
         artifact_metadata=artifact_metadata,
+        xml_source_links={path: link.url for path, link in (xml_source_links or {}).items()},
         only_failures=config.only_failures,
         fail_on_test_failures=False,
     )
@@ -304,6 +348,7 @@ def main() -> int:
             job_artifacts_metadata: ArtifactMetadata = []
             source_artifacts_by_job_id: Dict[str, List[ArtifactLink]] = {}
             report_artifacts: List[ArtifactLink] = []
+            xml_source_links: Dict[Path, XmlSourceLink] = {}
             if config.scope == "aggregate":
                 store_context = resolve_object_store_context()
                 log("Discovering aggregate JUnit XML object keys from object storage")
@@ -334,6 +379,7 @@ def main() -> int:
                     return 0
 
                 aggregate_counts = aggregate_discovery_counts(downloaded_xml)
+                xml_source_links = build_aggregate_xml_source_links(downloaded_xml, store_context)
                 log(
                     "Discovered JUnit XML for aggregate report: "
                     f"{aggregate_counts['variants']} variants, "
@@ -404,9 +450,10 @@ def main() -> int:
                 if config.junit_input_path is None or config.variant is None:
                     raise ValueError("scope=job requires variant and junit_input_path")
                 xml_uploads = collect_job_xml_uploads(config.junit_input_path, config.variant)
+                store_context = resolve_object_store_context()
+                xml_source_links = build_job_xml_source_links(config, xml_uploads, store_context)
                 artifact_files = collect_artifact_files(config.artifacts)
                 if artifact_files:
-                    store_context = resolve_object_store_context()
                     artifact_metadata = upload_extra_artifacts(
                         config, artifact_files, store_context
                     )
@@ -441,6 +488,7 @@ def main() -> int:
                 source_artifacts_by_job_id=source_artifacts_by_job_id,
                 artifacts=report_artifacts if config.scope == "job" else [],
                 artifact_metadata=artifact_metadata if config.scope == "job" else None,
+                xml_source_links=xml_source_links,
             )
             if config.scope == "aggregate":
                 add_summary_metadata(

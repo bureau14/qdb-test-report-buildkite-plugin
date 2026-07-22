@@ -192,7 +192,37 @@ export default class TestExecution {
         node.source.length > 5 && node.source[5] >= 0
           ? this.sourceTables.buildUrls[node.source[5]]
           : undefined,
+      xmlUrl:
+        node.source.length > 6 && node.source[6] >= 0
+          ? this.sourceTables.xmlUrls[node.source[6]]
+          : undefined,
     };
+  }
+
+  sourceDataForNode(node: TestNodeData): SourceData[] {
+    const sources: SourceData[] = [];
+    const sourceKeys = new Set<string>();
+
+    const collect = (current: TestNodeData) => {
+      const source = this.sourceData(current);
+      if (source) {
+        const key = [
+          source.target,
+          source.suite,
+          source.xml,
+          source.jobId,
+          source.xmlUrl,
+        ].join("\u0000");
+        if (!sourceKeys.has(key)) {
+          sourceKeys.add(key);
+          sources.push(source);
+        }
+      }
+      this.children(current).forEach(collect);
+    };
+
+    collect(node);
+    return sources;
   }
 
   tagLabels(node: TestNodeData): string[] | undefined {

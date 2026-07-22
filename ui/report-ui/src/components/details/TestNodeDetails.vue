@@ -31,24 +31,31 @@ const sections = computed(() => {
     } as SectionData);
   }
 
-  const source = props.execution.sourceData(props.node);
-  if (!source) {
+  const sources = props.execution.sourceDataForNode(props.node);
+  if (sources.length === 0) {
     return result;
   }
 
-  const sourceContent: Record<string, string> = {
-    Target: source.target,
-    "Test suite": source.suite,
-    "JUnit XML": source.xml,
-  };
-  if (source.buildUrl) {
-    sourceContent["Buildkite build"] = `link:${source.buildUrl}`;
-  }
-  if (source.jobUrl) {
-    sourceContent["Buildkite job"] = `link:${source.jobUrl}`;
-  }
-  if (source.jobId) {
-    sourceContent["Job ID"] = source.jobId;
+  const sourceContent: Record<string, string> = {};
+  if (sources.length === 1) {
+    const source = sources[0];
+    sourceContent.Target = source.target;
+    sourceContent["Test suite"] = source.suite;
+    sourceContent["JUnit XML"] = source.xmlUrl ? `link:${source.xmlUrl}` : source.xml;
+    if (source.buildUrl) {
+      sourceContent["Buildkite build"] = `link:${source.buildUrl}`;
+    }
+    if (source.jobUrl) {
+      sourceContent["Buildkite job"] = `link:${source.jobUrl}`;
+    }
+    if (source.jobId) {
+      sourceContent["Job ID"] = source.jobId;
+    }
+  } else {
+    sources.forEach((source, index) => {
+      const label = `JUnit XML ${index + 1} (${source.target} / ${source.suite} / ${source.xml})`;
+      sourceContent[label] = source.xmlUrl ? `link:${source.xmlUrl}` : source.xml;
+    });
   }
   const synthesizedSections: SectionData[] = [
     {

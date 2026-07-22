@@ -55,6 +55,7 @@ export declare global {
     buildUrl: string | undefined;
     jobUrl: string | undefined;
     jobId: string | undefined;
+    xmlUrl: string | undefined;
   }
 
   interface SourceTables {
@@ -64,6 +65,7 @@ export declare global {
     buildUrls: string[];
     jobUrls: string[];
     jobIds: string[];
+    xmlUrls: string[];
   }
 
   interface TagTables {

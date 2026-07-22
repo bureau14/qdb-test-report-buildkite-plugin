@@ -221,6 +221,7 @@ __marimo__/
 
 
 # Repo specific ignores
+.tmp/
 reports/
 .buildkite-test-report/
 report-generation.log

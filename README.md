@@ -7,6 +7,8 @@ A [Buildkite plugin](https://buildkite.com/docs/plugins) for generating self-con
 - **Job report** — after a test step finishes, reads that job's local JUnit XML from `job.junit_input_path`, generates a per-job HTML report, uploads the HTML/summary/raw XML, and optionally fails the step when tests failed.
 - **Aggregate report** — in a later reporting step, discovers XML uploaded by earlier job-report steps for the current build, downloads it, generates one aggregate HTML report, and uploads the aggregate HTML/summary.
 
+Each platform-execution leaf is labeled `{test name} - {platform}`, preserving test identity in the sidebar and detail header. When `ARTIFACTS_DOMAIN` is configured, its Source panel links `JUnit XML` directly to the exact raw XML that produced the selected execution. Without a browser-facing artifacts domain, the XML name remains visible but is not made clickable.
+
 Configure exactly one mode per plugin invocation:
 
 - `job` requires `variant` and `junit_input_path`.
@@ -189,7 +191,7 @@ prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/
 prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/artifacts/<artifact-name-slug>/<relative-artifact-path>
 ```
 
-The job `summary.json` includes an `artifacts` array with uploaded artifact keys, public URLs when `ARTIFACTS_DOMAIN` is configured, sizes, and warnings for configured artifact inputs that produced no files. Job and aggregate HTML reports render these links in the report-level Artifacts section and in each test leaf's Source section beside the Buildkite job/JUnit XML links.
+The job `summary.json` includes an `artifacts` array with uploaded artifact keys, public URLs when `ARTIFACTS_DOMAIN` is configured, sizes, and warnings for configured artifact inputs that produced no files. Job and aggregate HTML reports render these links in the report-level Artifacts section and in each test leaf's Source section beside the Buildkite job/JUnit XML links. The JUnit XML link targets the raw uploaded object and retains its `attachment` disposition.
 
 Aggregate mode discovers XML and job summaries under the current build's variants prefix:
 
@@ -206,6 +208,7 @@ prefix/project/refs/heads/main/reports/builds/build-1/full/summary.json
 ```
 
 Successful aggregate summaries include discovered XML counts for variants, jobs, and XML files.
+Aggregate leaf XML links always target the original contributing job XML objects, never the aggregate step's temporary downloaded files.
 
 ## Backend configuration
 
