@@ -117,7 +117,7 @@ def test_ui_source_contract_supports_optional_junit_xml_links():
     assert "sourceDataForNode(node: TestNodeData): SourceData[]" in test_execution
     assert "this.children(current).forEach(collect)" in test_execution
     assert "link:${source.xmlUrl}" in details
-    assert 'JUnit XML ${index + 1} (${source.target} / ${source.suite} / ${source.xml})' in details
+    assert "JUnit XML ${index + 1} (${source.target} / ${source.suite} / ${source.xml})" in details
     assert "Modified from original source" in "\n".join(test_execution.splitlines()[:3])
     assert "Modified from original source" in "\n".join(details.splitlines()[:3])
 

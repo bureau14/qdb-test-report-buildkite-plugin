@@ -106,6 +106,7 @@ def generate_html_report(
             "status_counts": dict(report.status_counts),
             "logical_status_counts": dict(report.logical_status_counts),
             "root_status": report.root_status,
+            "malformed_junit_xml": report.malformed_junit_xml,
         }
         if artifact_metadata is not None:
             summary["artifacts"] = artifact_metadata

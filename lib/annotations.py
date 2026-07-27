@@ -37,7 +37,13 @@ def get_annotation_warnings(summary: dict, scope: str = "build") -> list[str]:
     return warnings
 
 
-def build_annotation_body(title: str, summary: dict, html_url: str, scope: str = "build") -> str:
+def get_malformed_junit_xml(summary: dict) -> list[dict]:
+    return list(summary.get("malformed_junit_xml", []))
+
+
+def build_annotation_body(
+    title: str, summary: dict, html_url: str | None, scope: str = "build"
+) -> str:
     """
     Builds the markdown body for the Buildkite annotation.
     """
@@ -69,9 +75,16 @@ def build_annotation_body(title: str, summary: dict, html_url: str, scope: str =
     if warnings:
         warning_lines = "\n".join(f"- {warning}" for warning in warnings)
         body += f"\n\n⚠️ Warnings\n\n{warning_lines}"
-    body += (
-        f'\n\n<a href="{html_url}" target="_blank" rel="noopener noreferrer">Open full report</a>'
-    )
+    malformed_junit_xml = get_malformed_junit_xml(summary)
+    if malformed_junit_xml:
+        malformed_lines = "\n".join(
+            f"- {item.get('file', '<unknown>')} ({item.get('platform', '<unknown>')}): "
+            f"{item.get('error', 'invalid XML')}"
+            for item in malformed_junit_xml
+        )
+        body += f"\n\n❌ Malformed JUnit XML\n\n{malformed_lines}"
+    if html_url:
+        body += f'\n\n<a href="{html_url}" target="_blank" rel="noopener noreferrer">Open full report</a>'
     return body
 
 
@@ -84,7 +97,12 @@ def get_annotation_style(summary: dict) -> str:
     failed = counts.get("FAILED", 0)
     errored = counts.get("ERRORED", 0)
 
-    if failed > 0 or errored > 0 or root_status in ("FAILED", "ERRORED"):
+    if (
+        failed > 0
+        or errored > 0
+        or root_status in ("FAILED", "ERRORED")
+        or get_malformed_junit_xml(summary)
+    ):
         return "error"
 
     if get_annotation_warnings(summary):

@@ -310,7 +310,7 @@ def test_build_report_supports_glob_platform_paths(tmp_path, monkeypatch):
     assert report.status_counts["SKIPPED"] == 1
 
 
-def test_build_report_skips_empty_and_malformed_xml_files(tmp_path, capsys):
+def test_build_report_records_malformed_xml_files_and_skips_empty_files(tmp_path, capsys):
     from junit_report_model import build_report
 
     linux = tmp_path / "linux"
@@ -326,6 +326,13 @@ def test_build_report_skips_empty_and_malformed_xml_files(tmp_path, capsys):
     assert report.total_files == 3
     assert report.raw_testcases == 1
     assert report.status_counts["SUCCESSFUL"] == 1
+    assert report.malformed_junit_xml == [
+        {
+            "file": str(linux / "broken.xml"),
+            "platform": "linux",
+            "error": "no element found: line 1, column 11",
+        }
+    ]
     stderr = capsys.readouterr().err
     assert "skipping empty JUnit XML file" in stderr
     assert "file=" in stderr and "empty.xml" in stderr
@@ -816,6 +823,7 @@ def test_cli_writes_summary_json(tmp_path):
         "status_counts": {"SUCCESSFUL": 2, "FAILED": 1},
         "logical_status_counts": {"SUCCESSFUL": 2, "FAILED": 1},
         "root_status": "FAILED",
+        "malformed_junit_xml": [],
     }
 
 

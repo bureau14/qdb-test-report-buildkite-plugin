@@ -100,6 +100,7 @@ class Report:
     raw_testcases: int = 0
     duplicates_seen: int = 0
     duplicates_replaced: int = 0
+    malformed_junit_xml: List[Dict[str, str]] = field(default_factory=list)
     artifacts: List[ArtifactLink] = field(default_factory=list)
 
     @property
@@ -334,6 +335,7 @@ def parse_junit_file(
     source_job_url: Optional[str] = None,
     source_xml_url: Optional[str] = None,
     source_artifacts: Optional[List[ArtifactLink]] = None,
+    malformed_junit_xml: Optional[List[Dict[str, str]]] = None,
 ) -> List[TestcaseExecution]:
     if source_id is None:
         source_id = path.name
@@ -344,6 +346,10 @@ def parse_junit_file(
         root = ET.parse(path).getroot()
     except ET.ParseError as error:
         log_warn(f"skipping malformed JUnit XML file file={path} platform={platform} error={error}")
+        if malformed_junit_xml is not None:
+            malformed_junit_xml.append(
+                {"file": str(path), "platform": platform, "error": str(error)}
+            )
         return []
     executions: List[TestcaseExecution] = []
     suites = iter_junit_suites(root)
@@ -411,6 +417,7 @@ def build_report(
     all_files_to_process = []
     duplicates_seen = 0
     duplicates_replaced = 0
+    malformed_junit_xml: List[Dict[str, str]] = []
 
     for platform, raw_path in platform_specs:
         input_path = Path(raw_path)
@@ -480,6 +487,7 @@ def build_report(
             source_artifacts=(source_artifacts_by_job_id or {}).get(
                 effective_source_job_id or "", []
             ),
+            malformed_junit_xml=malformed_junit_xml,
         )
         total_raw_executions += len(file_executions)
         for execution in file_executions:
@@ -537,6 +545,7 @@ def build_report(
         raw_testcases=total_raw_executions,
         duplicates_seen=duplicates_seen,
         duplicates_replaced=duplicates_replaced,
+        malformed_junit_xml=malformed_junit_xml,
         artifacts=artifacts or [],
     )
     log_info(

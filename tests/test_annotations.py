@@ -79,6 +79,28 @@ def test_build_annotation_body_includes_warnings():
     assert "A report warning was recorded." in body
 
 
+def test_build_annotation_body_lists_malformed_junit_xml_files():
+    summary = {
+        "logical_tests": 1,
+        "status_counts": {"SUCCESSFUL": 1},
+        "malformed_junit_xml": [
+            {
+                "file": "reports/linux/broken.xml",
+                "platform": "linux",
+                "error": "no element found: line 1, column 11",
+            }
+        ],
+    }
+
+    body = build_annotation_body(
+        "Job report", summary, "http://example.com/report.html", scope="job"
+    )
+
+    assert "Malformed JUnit XML" in body
+    assert "reports/linux/broken.xml (linux): no element found: line 1, column 11" in body
+    assert get_job_annotation_style(summary) == "error"
+
+
 def test_build_annotation_body_explains_empty_global_targets():
     summary = {
         "logical_tests": 135,

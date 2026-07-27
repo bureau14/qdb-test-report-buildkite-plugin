@@ -18,7 +18,7 @@ Common report options such as `title`, `only_failures`, `annotate`, and `project
 
 The plugin runs from the Buildkite `post-command` hook, so reports are still published after the step command exits with a failure.
 
-The plugin exits `64` when `job.fail_on_test_failures` is true and the generated job report contains failed or errored tests. It exits `1` for internal plugin errors and otherwise exits `0` so Buildkite can preserve the original command status. Aggregate mode exits `0` when no XML is discovered, but creates an error-style annotation unless `annotate: false` is set.
+The plugin exits `64` when `job.fail_on_test_failures` is true and the generated job report contains failed or errored tests. It exits `1` when any discovered JUnit XML is malformed and creates an error annotation listing the malformed files when `annotate: true`. When the HTML report is available through `ARTIFACTS_DOMAIN`, that annotation includes its link; if the report is unavailable, it still creates the error annotation without a link. It also exits `1` for other internal plugin errors and otherwise exits `0` so Buildkite can preserve the original command status. Aggregate mode exits `0` when no XML is discovered, but creates an error-style annotation unless `annotate: false` is set.
 
 ## Requirements
 
@@ -271,7 +271,7 @@ python3 tools/junit_html_report.py \
 | `--only-failures` | No | `false` | Filter report to only show `FAILED`/`ERRORED` tests in the tree while keeping full summary counts. |
 | `--fail-on-test-failures` | No | `false` | Exit code `64` if any test has status `FAILED` or `ERRORED`. |
 
-The standalone converter writes progress and summary details to stderr. Malformed or empty XML files are skipped with warnings. If no XML files are discovered across all configured inputs, it still writes an empty report and logs a warning.
+The standalone converter writes progress and summary details to stderr. Empty XML files are skipped with warnings. Malformed XML files are recorded in `summary.json` so the Buildkite plugin can fail the build and annotate the invalid inputs. If no XML files are discovered across all configured inputs, it still writes an empty report and logs a warning.
 
 ## Licensing and Attribution
 

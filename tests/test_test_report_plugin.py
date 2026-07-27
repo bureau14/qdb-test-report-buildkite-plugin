@@ -601,6 +601,77 @@ def test_main_job_fails_when_summary_has_errored_tests(monkeypatch, tmp_path):
     assert main() == 64
 
 
+@pytest.mark.parametrize(
+    ("uploads_html", "expect_report_link"),
+    [(True, True), (False, False)],
+    ids=["report-available", "report-missing"],
+)
+def test_main_job_fails_and_annotates_malformed_junit_xml(
+    monkeypatch, tmp_path, uploads_html, expect_report_link
+):
+    xml_dir = tmp_path / "xml"
+    xml_dir.mkdir()
+    (xml_dir / "broken.xml").write_text("<testsuite>", encoding="utf-8")
+    monkeypatch.setattr(
+        "os.environ",
+        {
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE": "Job Tests",
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT": "linux",
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_JUNIT_INPUT_PATH": str(xml_dir),
+            "BUILDKITE_PIPELINE_SLUG": "project",
+            "BUILDKITE_BUILD_ID": "build-1",
+            "BUILDKITE_JOB_ID": "job-1",
+            "BUILDKITE_BRANCH": "main",
+        },
+    )
+
+    def fake_run_report_generation(config, output_dir, **kwargs):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        html_path = output_dir / "index.html"
+        summary_path = output_dir / "summary.json"
+        html_path.write_text("html", encoding="utf-8")
+        summary_path.write_text(
+            '{"root_status":"SUCCESSFUL","logical_tests":0,"status_counts":{},'
+            '"malformed_junit_xml":[{"file":"broken.xml","platform":"linux",'
+            '"error":"no element found: line 1, column 11"}]}',
+            encoding="utf-8",
+        )
+        return GenerationResult(html_path=html_path, summary_path=summary_path)
+
+    from object_store import PublishedObject
+
+    monkeypatch.setattr("test_report_plugin.run_report_generation", fake_run_report_generation)
+    monkeypatch.setattr(
+        "test_report_plugin.upload_report_artifacts",
+        lambda config, generation, xml_uploads, store_context=None: (
+            {
+                "html": PublishedObject(
+                    "bucket",
+                    "prefix/job/index.html",
+                    "https://reports.example.com/job/index.html",
+                    4,
+                )
+            }
+            if uploads_html
+            else {}
+        ),
+    )
+    annotations = []
+    monkeypatch.setattr(
+        "test_report_plugin.create_buildkite_annotation",
+        lambda body, context, style, priority, scope: annotations.append(
+            (body, context, style, priority, scope)
+        ),
+    )
+
+    assert main() == 1
+    assert annotations[0][1:] == ("test-report:linux:job-1", "error", 10, "job")
+    assert "Malformed JUnit XML" in annotations[0][0]
+    assert "broken.xml (linux): no element found: line 1, column 11" in annotations[0][0]
+    assert ("Open full report" in annotations[0][0]) is expect_report_link
+    assert ("https://reports.example.com/job/index.html" in annotations[0][0]) is expect_report_link
+
+
 def test_main_full_defaults_to_ignore_failed_tests_for_exit_status(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "os.environ",

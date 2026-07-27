@@ -508,15 +508,15 @@ def main() -> int:
                 else:
                     log(f"HTML report uploaded to s3://{html_upload.bucket}/{html_upload.key}")
 
-            # Create annotation if enabled and HTML URL is available
+            # A malformed JUnit file is a build error even when HTML upload is unavailable.
             if config.annotate:
                 html_url = html_upload.url if html_upload is not None else None
-                if not html_url:
+                summary = json.loads(generation.summary_path.read_text())
+                if not html_url and not summary.get("malformed_junit_xml"):
                     warn(
                         "HTML public URL unavailable (ARTIFACTS_DOMAIN not set); skipping annotation"
                     )
                 else:
-                    summary = json.loads(generation.summary_path.read_text())
                     body = build_annotation_body(
                         config.title, summary, html_url, scope=config.scope
                     )
@@ -540,6 +540,12 @@ def main() -> int:
             failed_or_errored = int(status_counts.get("FAILED", 0)) + int(
                 status_counts.get("ERRORED", 0)
             )
+            malformed_junit_xml = summary.get("malformed_junit_xml", [])
+            if malformed_junit_xml:
+                log(
+                    f"Report found {len(malformed_junit_xml)} malformed JUnit XML file(s). Exiting 1."
+                )
+                return 1
             if config.fail_on_test_failures and failed_or_errored:
                 log(
                     f"Report has {failed_or_errored} failed/errored test execution(s) and fail_on_test_failures=true. Exiting 64."
