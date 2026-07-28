@@ -421,6 +421,64 @@ def test_main_job_annotation_context(monkeypatch, tmp_path):
     assert "Open full report" in annotations[0][0]
 
 
+def test_main_job_warns_when_command_failed_after_all_tests_passed_without_report_url(
+    monkeypatch, tmp_path
+):
+    xml_dir = tmp_path / "xml"
+    xml_dir.mkdir()
+    (xml_dir / "test.xml").write_text("<testsuites />", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "os.environ",
+        {
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE": "Job Tests",
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT": "linux",
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_JUNIT_INPUT_PATH": str(xml_dir),
+            "BUILDKITE_COMMAND_EXIT_STATUS": "1",
+            "BUILDKITE_PIPELINE_SLUG": "project",
+            "BUILDKITE_BUILD_ID": "build-1",
+            "BUILDKITE_JOB_ID": "job-1",
+            "BUILDKITE_BRANCH": "main",
+        },
+    )
+
+    def fake_run_report_generation(config, output_dir, **kwargs):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        html_path = output_dir / "index.html"
+        summary_path = output_dir / "summary.json"
+        html_path.write_text("html", encoding="utf-8")
+        summary_path.write_text(
+            '{"root_status":"SUCCESSFUL","logical_tests":2,"targets":1,'
+            '"status_counts":{"SUCCESSFUL":2}}',
+            encoding="utf-8",
+        )
+        return GenerationResult(html_path=html_path, summary_path=summary_path)
+
+    from object_store import PublishedObject
+
+    monkeypatch.setattr("test_report_plugin.run_report_generation", fake_run_report_generation)
+    monkeypatch.setattr(
+        "test_report_plugin.upload_report_artifacts",
+        lambda config, generation, xml_uploads, store_context=None: {
+            "html": PublishedObject("bucket", "prefix/job/index.html", None, 4)
+        },
+    )
+    annotations = []
+    monkeypatch.setattr(
+        "test_report_plugin.create_buildkite_annotation",
+        lambda body, context, style, priority, scope: annotations.append(
+            (body, context, style, priority, scope)
+        ),
+    )
+
+    assert main() == 0
+    assert annotations[0][1:] == ("test-report:linux:job-1", "warning", 10, "job")
+    assert (
+        "Step command exited with status 1 although all reported tests passed." in annotations[0][0]
+    )
+    assert "Open full report" not in annotations[0][0]
+
+
 def test_main_job_collects_xml_from_junit_input_path(monkeypatch, tmp_path):
     xml_dir = tmp_path / "xml"
     xml_dir.mkdir()

@@ -200,14 +200,14 @@ def test_sidebar_search_is_a_case_insensitive_ancestor_preserving_filter():
     assert "containsSearchMatch" in visible_tree
     assert 'v-model="treeState.searchQuery"' in toolbar
     assert 'type="search"' in toolbar
-    assert 'toolbar: {' in main
+    assert "toolbar: {" in main
     assert 'search: "Search tests"' in main
 
 
 def test_sidebar_search_collects_matches_from_all_sibling_branches():
-    visible_tree = (
-        REPO_ROOT / "ui/report-ui/src/components/sidebar/VisibleTree.ts"
-    ).read_text(encoding="utf-8")
+    visible_tree = (REPO_ROOT / "ui/report-ui/src/components/sidebar/VisibleTree.ts").read_text(
+        encoding="utf-8"
+    )
 
     assert "let descendantMatch = false" in visible_tree
     assert "for (const child of children)" in visible_tree
@@ -215,9 +215,9 @@ def test_sidebar_search_collects_matches_from_all_sibling_branches():
 
 
 def test_sidebar_search_keeps_all_descendants_of_a_direct_match():
-    visible_tree = (
-        REPO_ROOT / "ui/report-ui/src/components/sidebar/VisibleTree.ts"
-    ).read_text(encoding="utf-8")
+    visible_tree = (REPO_ROOT / "ui/report-ui/src/components/sidebar/VisibleTree.ts").read_text(
+        encoding="utf-8"
+    )
 
     assert "function addVisibleDescendants(" in visible_tree
     assert "addVisibleDescendants(execution, node, children)" in visible_tree
@@ -227,9 +227,9 @@ def test_sidebar_defaults_to_alphabetical_sorting_at_every_tree_depth():
     tree_state = (REPO_ROOT / "ui/report-ui/src/components/sidebar/TreeState.ts").read_text(
         encoding="utf-8"
     )
-    visible_tree = (
-        REPO_ROOT / "ui/report-ui/src/components/sidebar/VisibleTree.ts"
-    ).read_text(encoding="utf-8")
+    visible_tree = (REPO_ROOT / "ui/report-ui/src/components/sidebar/VisibleTree.ts").read_text(
+        encoding="utf-8"
+    )
     toolbar = (REPO_ROOT / "ui/report-ui/src/components/sidebar/ToolBar.vue").read_text(
         encoding="utf-8"
     )
@@ -238,10 +238,10 @@ def test_sidebar_defaults_to_alphabetical_sorting_at_every_tree_depth():
     assert 'public sortMode: "alphabetical" | "execution" = "alphabetical"' in tree_state
     assert "toggleSortMode()" in tree_state
     assert "sortedChildren" in visible_tree
-    assert "treeState.sortMode === \"alphabetical\"" in visible_tree
+    assert 'treeState.sortMode === "alphabetical"' in visible_tree
     assert "localeCompare" in visible_tree
     assert "treeState.toggleSortMode()" in toolbar
-    assert 'toolbar.sortAlphabetically' in toolbar
+    assert "toolbar.sortAlphabetically" in toolbar
     assert 'sortAlphabetically: "Sort alphabetically"' in main
     assert 'sortByExecutionOrder: "Sort by execution order"' in main
 
@@ -264,10 +264,10 @@ def test_sidebar_syncs_selected_nodes_with_static_url_fragments():
     assert "decodeURIComponent" in sidebar
     assert "execution.node(nodeId)" in sidebar
     assert "treeState.revealNode(linkedSelection.execution, linkedSelection.item)" in sidebar
-    assert "window.addEventListener(\"hashchange\", selectLocationHash)" in sidebar
-    assert "window.removeEventListener(\"hashchange\", selectLocationHash)" in sidebar
+    assert 'window.addEventListener("hashchange", selectLocationHash)' in sidebar
+    assert 'window.removeEventListener("hashchange", selectLocationHash)' in sidebar
     assert "window.history.replaceState" in sidebar
-    assert 'const locator = `#node=${encodeURIComponent(next.item.id)}`' in sidebar
+    assert "const locator = `#node=${encodeURIComponent(next.item.id)}`" in sidebar
 
 
 def test_virtualized_tree_scrolls_selected_deep_link_target_into_view():

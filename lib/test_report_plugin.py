@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 import sys
 import json
 import mimetypes
+import os
 import tempfile
 from pathlib import Path
 from dataclasses import dataclass, replace
@@ -97,6 +98,34 @@ def add_summary_metadata(
     if job_artifacts is not None:
         summary["job_artifacts"] = job_artifacts
     summary_path.write_text(json.dumps(summary, indent=2))
+
+
+def add_command_failure_warning(
+    summary: Dict[str, Any], command_exit_status: Optional[str]
+) -> bool:
+    if command_exit_status in (None, "", "0"):
+        return False
+
+    try:
+        exit_status = int(command_exit_status)
+    except ValueError:
+        return False
+
+    if exit_status == 0:
+        return False
+
+    counts = summary.get("logical_status_counts") or summary.get("status_counts", {})
+    passed = int(counts.get("SUCCESSFUL", 0))
+    failed = int(counts.get("FAILED", 0))
+    errored = int(counts.get("ERRORED", 0))
+    skipped = int(counts.get("SKIPPED", 0))
+    if passed == 0 or failed or errored or skipped:
+        return False
+
+    summary.setdefault("warnings", []).append(
+        f"Step command exited with status {exit_status} although all reported tests passed."
+    )
+    return True
 
 
 def artifact_links_from_metadata(metadata: ArtifactMetadata) -> List[ArtifactLink]:
@@ -497,6 +526,12 @@ def main() -> int:
                     job_artifacts=job_artifacts_metadata,
                 )
 
+            summary = json.loads(generation.summary_path.read_text())
+            if config.scope == "job" and add_command_failure_warning(
+                summary, os.environ.get("BUILDKITE_COMMAND_EXIT_STATUS")
+            ):
+                generation.summary_path.write_text(json.dumps(summary, indent=2))
+
             # Upload JUNIT reports, HTML report, summary
             uploads = upload_report_artifacts(
                 config, generation, xml_uploads, store_context=store_context
@@ -511,8 +546,11 @@ def main() -> int:
             # A malformed JUnit file is a build error even when HTML upload is unavailable.
             if config.annotate:
                 html_url = html_upload.url if html_upload is not None else None
-                summary = json.loads(generation.summary_path.read_text())
-                if not html_url and not summary.get("malformed_junit_xml"):
+                if config.scope == "job":
+                    style = get_job_annotation_style(summary)
+                else:
+                    style = get_annotation_style(summary)
+                if not html_url and style != "warning" and not summary.get("malformed_junit_xml"):
                     warn(
                         "HTML public URL unavailable (ARTIFACTS_DOMAIN not set); skipping annotation"
                     )
@@ -520,11 +558,6 @@ def main() -> int:
                     body = build_annotation_body(
                         config.title, summary, html_url, scope=config.scope
                     )
-                    if config.scope == "job":
-                        style = get_job_annotation_style(summary)
-                    else:
-                        style = get_annotation_style(summary)
-
                     if config.scope == "job":
                         context = f"test-report:{config.variant}:{config.job_id}"
                         create_buildkite_annotation(body, context, style, priority=10, scope="job")
@@ -535,7 +568,6 @@ def main() -> int:
                         )
 
             # Exit with failure code if any test failed or errored and fail_on_test_failures is true
-            summary = json.loads(generation.summary_path.read_text())
             status_counts = summary.get("status_counts", {})
             failed_or_errored = int(status_counts.get("FAILED", 0)) + int(
                 status_counts.get("ERRORED", 0)
