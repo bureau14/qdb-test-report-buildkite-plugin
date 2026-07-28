@@ -55,6 +55,27 @@ watch(rows, () => {
   }
 });
 
+watch(selection, async (next) => {
+  const selectedId = next?.item.id;
+  if (!selectedId) {
+    return;
+  }
+  await nextTick();
+  const selectedIndex = rows.value.findIndex((row) => row.id === selectedId);
+  if (selectedIndex < 0 || !container.value) {
+    return;
+  }
+  const selectedTop = selectedIndex * ROW_HEIGHT;
+  const selectedBottom = selectedTop + ROW_HEIGHT;
+  const viewportBottom = container.value.scrollTop + viewportHeight.value;
+  if (selectedTop < container.value.scrollTop) {
+    container.value.scrollTop = selectedTop;
+  } else if (selectedBottom > viewportBottom) {
+    container.value.scrollTop = selectedBottom - viewportHeight.value;
+  }
+  scrollTop.value = container.value.scrollTop;
+});
+
 onMounted(async () => {
   await nextTick();
   updateViewportHeight();

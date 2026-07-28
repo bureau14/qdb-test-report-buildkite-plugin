@@ -13,6 +13,8 @@ export default class TreeState {
   public showFailedAndErrored = false;
   public showSkipped = false;
   public showSuccessful = false;
+  public searchQuery = "";
+  public sortMode: "alphabetical" | "execution" = "alphabetical";
 
   constructor(executions: TestExecution[]) {
     const nodes: Record<string, NodeState> = {};
@@ -57,6 +59,11 @@ export default class TreeState {
     this.showSkipped = !this.showSkipped;
   }
 
+  toggleSortMode() {
+    this.sortMode =
+      this.sortMode === "alphabetical" ? "execution" : "alphabetical";
+  }
+
   collapseAll() {
     Object.keys(this.nodes).forEach((key) => {
       this.nodes[key].collapsed = true;
@@ -73,6 +80,30 @@ export default class TreeState {
     this.nodes[id].collapsed = !this.nodes[id].collapsed;
   }
 
+  clearFilters() {
+    this.showAborted = false;
+    this.showFailedAndErrored = false;
+    this.showSkipped = false;
+    this.showSuccessful = false;
+    this.searchQuery = "";
+  }
+
+  revealNode(execution: TestExecution, node: TestNodeData | TestExecution) {
+    this.clearFilters();
+    if (!(node instanceof TestExecution)) {
+      execution.parents(node).forEach((parent) => {
+        const state = this.nodes[parent.id];
+        if (state) {
+          state.collapsed = false;
+        }
+      });
+    }
+    const state = this.nodes[node.id];
+    if (state) {
+      state.collapsed = false;
+    }
+  }
+
   hasActiveStatusFilter(): boolean {
     return (
       this.showAborted ||
@@ -80,6 +111,15 @@ export default class TreeState {
       this.showSkipped ||
       this.showSuccessful
     );
+  }
+
+  hasActiveSearch(): boolean {
+    return this.searchQuery.trim().length > 0;
+  }
+
+  matchesSearch(name: string): boolean {
+    const query = this.searchQuery.trim().toLocaleLowerCase();
+    return query.length === 0 || name.toLocaleLowerCase().includes(query);
   }
 
   isVisible(statuses: string[]): boolean {

@@ -72,6 +72,9 @@ app.use(
           millis: "{count} ms",
         },
         toolbar: {
+          search: "Search tests",
+          sortAlphabetically: "Sort alphabetically",
+          sortByExecutionOrder: "Sort by execution order",
           collapseAll: "Collapse all",
           expandAll: "Expand all",
           showAborted: "Show aborted",

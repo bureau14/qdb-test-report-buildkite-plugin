@@ -116,6 +116,10 @@ export default class TestExecution {
     return this.testNodes.size;
   }
 
+  node(id: string): TestNodeData | TestExecution | undefined {
+    return id === this.id ? this : this.testNodes.get(id);
+  }
+
   nodesWithChildren(): TestNodeData[] {
     return this.nodesWithChildrenValue;
   }

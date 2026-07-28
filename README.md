@@ -9,6 +9,8 @@ A [Buildkite plugin](https://buildkite.com/docs/plugins) for generating self-con
 
 Each platform-execution leaf is labeled `{test name} - {platform}`, preserving test identity in the sidebar and detail header. When `ARTIFACTS_DOMAIN` is configured, its Source panel links `JUnit XML` directly to the exact raw XML that produced the selected execution. Without a browser-facing artifacts domain, the XML name remains visible but is not made clickable.
 
+The self-contained report supports case-insensitive sidebar search without a server. It also updates the browser URL to `#node=<id>` for the selected report node; share that full URL to open the same static report with the node selected, its path expanded, and the sidebar scrolled to it. Node IDs are specific to the generated report file.
+
 Configure exactly one mode per plugin invocation:
 
 - `job` requires `variant` and `junit_input_path`.

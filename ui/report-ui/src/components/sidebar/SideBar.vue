@@ -5,7 +5,7 @@ import ExecutionTree from "./ExecutionTree.vue";
 import ToolBar from "./ToolBar.vue";
 import TestExecution from "../common/TestExecution.ts";
 import Selection from "../common/Selection.ts";
-import { provide, reactive } from "vue";
+import { onBeforeUnmount, onMounted, provide, reactive, watch } from "vue";
 import TreeState, { treeStateKey } from "./TreeState.ts";
 
 const selection = defineModel<Selection | undefined>("selection");
@@ -20,6 +20,59 @@ performance.measure(
   "report-tree-state-create-end",
 );
 provide(treeStateKey, treeState);
+
+function nodeIdFromHash(hash: string): string | undefined {
+  if (!hash.startsWith("#node=")) {
+    return undefined;
+  }
+  try {
+    return decodeURIComponent(hash.slice("#node=".length));
+  } catch {
+    return undefined;
+  }
+}
+
+function selectionFromLocationHash(): Selection | undefined {
+  const nodeId = nodeIdFromHash(window.location.hash);
+  if (!nodeId) {
+    return undefined;
+  }
+  for (const execution of props.executions) {
+    const node = execution.node(nodeId);
+    if (node) {
+      return new Selection(execution, node);
+    }
+  }
+  return undefined;
+}
+
+function selectLocationHash() {
+  const linkedSelection = selectionFromLocationHash();
+  if (!linkedSelection) {
+    return;
+  }
+  treeState.revealNode(linkedSelection.execution, linkedSelection.item);
+  selection.value = linkedSelection;
+}
+
+watch(selection, (next) => {
+  if (!next) {
+    return;
+  }
+  const locator = `#node=${encodeURIComponent(next.item.id)}`;
+  if (window.location.hash !== locator) {
+    window.history.replaceState(null, "", locator);
+  }
+});
+
+onMounted(() => {
+  selectLocationHash();
+  window.addEventListener("hashchange", selectLocationHash);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("hashchange", selectLocationHash);
+});
 
 const resizeConfig: ResizableConfig = {
   edge: {
