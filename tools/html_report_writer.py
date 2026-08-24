@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Union
+from typing import Any
 
 PLACEHOLDER = "<!-- TEST_REPORT_DATA -->"
 DEFAULT_TEMPLATE = Path(__file__).resolve().parent / "templates" / "report-template.html"
@@ -18,7 +18,7 @@ def dumps_embedded_json(data: Any) -> str:
     return text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
-def render_html(data: Any, template_path: Union[Path, str] = DEFAULT_TEMPLATE) -> str:
+def render_html(data: Any, template_path: Path | str = DEFAULT_TEMPLATE) -> str:
     template = Path(template_path).read_text(encoding="utf-8")
     placeholder_count = template.count(PLACEHOLDER)
     if placeholder_count != 1:
@@ -33,8 +33,8 @@ def render_html(data: Any, template_path: Union[Path, str] = DEFAULT_TEMPLATE) -
 
 def write_html_report(
     data: Any,
-    output: Union[Path, str],
-    template_path: Union[Path, str] = DEFAULT_TEMPLATE,
+    output: Path | str,
+    template_path: Path | str = DEFAULT_TEMPLATE,
 ) -> Path:
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

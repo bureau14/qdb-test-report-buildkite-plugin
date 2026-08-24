@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict, List
 import glob
 import re
 import sys
+from dataclasses import dataclass
+from pathlib import Path
 
 from plugin_config import ArtifactConfig
 
@@ -32,7 +31,7 @@ def has_glob_magic(path: Path) -> bool:
     return any(char in str(path) for char in "*?[]")
 
 
-def _collect_for_artifact(config: ArtifactConfig) -> List[ArtifactFile]:
+def _collect_for_artifact(config: ArtifactConfig) -> list[ArtifactFile]:
     input_path = config.input_path
     path_str = str(input_path)
 
@@ -85,8 +84,8 @@ def _collect_for_artifact(config: ArtifactConfig) -> List[ArtifactFile]:
     return []
 
 
-def collect_artifact_files(configs: List[ArtifactConfig]) -> List[ArtifactFile]:
-    seen_slugs: Dict[str, str] = {}
+def collect_artifact_files(configs: list[ArtifactConfig]) -> list[ArtifactFile]:
+    seen_slugs: dict[str, str] = {}
     for config in configs:
         slug = slugify_artifact_name(config.name)
         previous = seen_slugs.get(slug)
@@ -96,7 +95,7 @@ def collect_artifact_files(configs: List[ArtifactConfig]) -> List[ArtifactFile]:
             )
         seen_slugs[slug] = config.name
 
-    result: List[ArtifactFile] = []
+    result: list[ArtifactFile] = []
     for config in configs:
         files = _collect_for_artifact(config)
         if not files:

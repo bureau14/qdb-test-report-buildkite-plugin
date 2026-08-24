@@ -1,10 +1,11 @@
 from __future__ import annotations
-from typing import List
-from dataclasses import dataclass
-from pathlib import Path
-from plugin_config import PlatformConfig
+
 import glob
 import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+from plugin_config import PlatformConfig
 
 
 @dataclass(frozen=True)
@@ -13,8 +14,8 @@ class XmlUpload:
     object_relative_path: str
 
 
-def _collect_uploads_for_path(path: Path, prefix: str = "") -> List[XmlUpload]:
-    uploads: List[XmlUpload] = []
+def _collect_uploads_for_path(path: Path, prefix: str = "") -> list[XmlUpload]:
+    uploads: list[XmlUpload] = []
     path_str = str(path)
     is_glob = any(c in path_str for c in "*?[]")
 
@@ -47,7 +48,7 @@ def _collect_uploads_for_path(path: Path, prefix: str = "") -> List[XmlUpload]:
     return uploads
 
 
-def collect_job_xml_uploads(junit_input_path: Path, variant: str) -> List[XmlUpload]:
+def collect_job_xml_uploads(junit_input_path: Path, variant: str) -> list[XmlUpload]:
     """Collect job-scope JUnit XML files relative to the configured input path."""
 
     path_str = str(junit_input_path)
@@ -65,7 +66,7 @@ def collect_job_xml_uploads(junit_input_path: Path, variant: str) -> List[XmlUpl
     return uploads
 
 
-def collect_xml_uploads(platforms: List[PlatformConfig], scope: str) -> List[XmlUpload]:
+def collect_xml_uploads(platforms: list[PlatformConfig], scope: str) -> list[XmlUpload]:
     """
     Collects XML files to upload based on the provided platform configurations.
     Handles glob patterns, directories, and single files. Validates existence and raises errors or warnings based on the scope if files are missing.

@@ -4,7 +4,6 @@ import pytest
 # from report_paths import report_scope_key, build_report_location, ReportLocation
 from report_paths import build_report_location
 
-
 # def test_report_scope_key_full():
 #     assert report_scope_key("full", None) == "full"
 #     assert report_scope_key("full", "job-123") == "full"

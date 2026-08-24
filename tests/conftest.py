@@ -1,5 +1,5 @@
-import sys
 import os
+import sys
 
 # Add lib and tools to sys.path
 root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

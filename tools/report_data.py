@@ -4,40 +4,40 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from junit_report_model import (
     ArtifactLink,
     LogicalTest,
     Report,
+    TestcaseExecution,
     TestFile,
     TestSuite,
-    TestcaseExecution,
 )
 
 STATUS_SORT = {"ERRORED": 0, "FAILED": 1, "ABORTED": 2, "SKIPPED": 3, "SUCCESSFUL": 4}
 
 
 def duration_millis(seconds: float) -> int:
-    return int(round(max(seconds, 0.0) * 1000))
+    return round(max(seconds, 0.0) * 1000)
 
 
-def labels_section(labels: List[str]) -> Dict[str, Any]:
+def labels_section(labels: list[str]) -> dict[str, Any]:
     return {"title": "Tags", "blocks": [{"type": "labels", "content": sorted(labels)}]}
 
 
-def kvp_section(title: str, content: Dict[str, Any]) -> Dict[str, Any]:
+def kvp_section(title: str, content: dict[str, Any]) -> dict[str, Any]:
     return {
         "title": title,
         "blocks": [{"type": "kvp", "content": {k: str(v) for k, v in content.items()}}],
     }
 
 
-def reason_section(reason: str) -> Dict[str, Any]:
+def reason_section(reason: str) -> dict[str, Any]:
     return {"title": "Reason", "blocks": [{"type": "p", "content": reason}]}
 
 
-def output_section(output: str, generated_at: str) -> Dict[str, Any]:
+def output_section(output: str, generated_at: str) -> dict[str, Any]:
     return {
         "title": "Attachments",
         "blocks": [
@@ -55,8 +55,8 @@ def output_section(output: str, generated_at: str) -> Dict[str, Any]:
     }
 
 
-def artifact_link_data(artifact: ArtifactLink) -> Dict[str, Any]:
-    data: Dict[str, Any] = {
+def artifact_link_data(artifact: ArtifactLink) -> dict[str, Any]:
+    data: dict[str, Any] = {
         "name": artifact.name,
         "relativePath": artifact.relative_path,
         "key": artifact.key,
@@ -67,7 +67,7 @@ def artifact_link_data(artifact: ArtifactLink) -> Dict[str, Any]:
     return data
 
 
-def artifact_display_label(artifact: ArtifactLink, siblings: List[ArtifactLink]) -> str:
+def artifact_display_label(artifact: ArtifactLink, siblings: list[ArtifactLink]) -> str:
     same_name_count = sum(1 for item in siblings if item.name == artifact.name)
     if same_name_count > 1:
         return f"{artifact.name} / {artifact.relative_path}"
@@ -83,9 +83,9 @@ def artifact_value(artifact: ArtifactLink) -> str:
 class UiDataBuilder:
     def __init__(self) -> None:
         self._next_id = 1
-        self.test_nodes: List[Dict[str, Any]] = []
-        self.children: "OrderedDict[str, Dict[str, List[str]]]" = OrderedDict()
-        self.source_tables: Dict[str, List[str]] = {
+        self.test_nodes: list[dict[str, Any]] = []
+        self.children: OrderedDict[str, dict[str, list[str]]] = OrderedDict()
+        self.source_tables: dict[str, list[str]] = {
             "targets": [],
             "suites": [],
             "xmls": [],
@@ -94,15 +94,15 @@ class UiDataBuilder:
             "jobIds": [],
             "xmlUrls": [],
         }
-        self._source_indexes: Dict[str, Dict[str, int]] = {key: {} for key in self.source_tables}
-        self.tag_tables: Dict[str, List[str]] = {
+        self._source_indexes: dict[str, dict[str, int]] = {key: {} for key in self.source_tables}
+        self.tag_tables: dict[str, list[str]] = {
             "suites": [],
             "platforms": [],
             "classnames": [],
             "testNames": [],
             "logicalIds": [],
         }
-        self._tag_indexes: Dict[str, Dict[str, int]] = {key: {} for key in self.tag_tables}
+        self._tag_indexes: dict[str, dict[str, int]] = {key: {} for key in self.tag_tables}
 
     def next_id(self) -> str:
         value = str(self._next_id)
@@ -116,7 +116,7 @@ class UiDataBuilder:
             self.source_tables[table].append(value)
         return indexes[value]
 
-    def source(self, execution: TestcaseExecution, build_url: Optional[str]) -> List[int]:
+    def source(self, execution: TestcaseExecution, build_url: str | None) -> list[int]:
         source = [
             self._source_index("targets", execution.platform),
             self._source_index("suites", execution.suite_name),
@@ -150,13 +150,13 @@ class UiDataBuilder:
             self.tag_tables[table].append(value)
         return indexes[value]
 
-    def suite_tags(self, suite: TestSuite) -> List[Any]:
+    def suite_tags(self, suite: TestSuite) -> list[Any]:
         return [0, self._tag_index("suites", suite.name)]
 
-    def logical_tags(self, logical: LogicalTest) -> List[Any]:
-        failed_platforms: List[int] = []
-        errored_platforms: List[int] = []
-        skipped_platforms: List[int] = []
+    def logical_tags(self, logical: LogicalTest) -> list[Any]:
+        failed_platforms: list[int] = []
+        errored_platforms: list[int] = []
+        skipped_platforms: list[int] = []
         for execution in logical.executions.values():
             platform_index = self._tag_index("platforms", execution.platform)
             if execution.status == "FAILED":
@@ -180,13 +180,13 @@ class UiDataBuilder:
         self,
         name: str,
         duration_seconds_value: float,
-        sections: List[Dict[str, Optional[Any]]] = None,
-        status: Optional[str] = None,
-        source: Optional[List[int]] = None,
-        tags: Optional[List[Any]] = None,
-        source_artifacts: Optional[List[ArtifactLink]] = None,
-    ) -> Dict[str, Any]:
-        result: Dict[str, Any] = {
+        sections: list[dict[str, Any | None]] | None = None,
+        status: str | None = None,
+        source: list[int] | None = None,
+        tags: list[Any] | None = None,
+        source_artifacts: list[ArtifactLink] | None = None,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "id": self.next_id(),
             "name": name,
             "durationMillis": duration_millis(duration_seconds_value),
@@ -204,15 +204,15 @@ class UiDataBuilder:
         self.test_nodes.append(result)
         return result
 
-    def add_children(self, parent_id: str, child_ids: List[str]) -> None:
+    def add_children(self, parent_id: str, child_ids: list[str]) -> None:
         self.children[parent_id] = {"ids": child_ids, "childStatuses": []}
 
     def finalize_child_statuses(self) -> None:
         node_by_id = {node["id"]: node for node in self.test_nodes}
 
-        def statuses_for(node_id: str) -> Set[str]:
+        def statuses_for(node_id: str) -> set[str]:
             if node_id in self.children:
-                statuses: Set[str] = set()
+                statuses: set[str] = set()
                 for child_id in self.children[node_id]["ids"]:
                     statuses.update(statuses_for(child_id))
                 self.children[node_id]["childStatuses"] = sorted(
@@ -234,7 +234,7 @@ def test_file_duration(test_file: TestFile) -> float:
     return sum(logical_duration(logical) for logical in test_file.logical_tests.values())
 
 
-def class_duration(logicals: List[LogicalTest]) -> float:
+def class_duration(logicals: list[LogicalTest]) -> float:
     return sum(logical_duration(logical) for logical in logicals)
 
 
@@ -242,8 +242,8 @@ def suite_duration(suite: TestSuite) -> float:
     return sum(test_file_duration(test_file) for test_file in suite.test_files.values())
 
 
-def execution_sections(execution: TestcaseExecution, generated_at: str) -> List[Dict[str, Any]]:
-    sections: List[Dict[str, Any]] = []
+def execution_sections(execution: TestcaseExecution, generated_at: str) -> list[dict[str, Any]]:
+    sections: list[dict[str, Any]] = []
     if execution.reason:
         sections.append(reason_section(execution.reason))
     if execution.output:
@@ -252,14 +252,14 @@ def execution_sections(execution: TestcaseExecution, generated_at: str) -> List[
 
 
 def report_to_report_ui_data(
-    report: Report, execution_name: Optional[str] = None, only_failures: bool = False
-) -> List[Dict[str, Any]]:
+    report: Report, execution_name: str | None = None, only_failures: bool = False
+) -> list[dict[str, Any]]:
     builder = UiDataBuilder()
     execution_id = builder.next_id()
 
     root_labels = ["view:tests-first"]
 
-    summary_content: Dict[str, Any] = {
+    summary_content: dict[str, Any] = {
         "Suites": len(report.suites),
         "Logical tests": report.logical_test_count,
         "Platform executions": report.platform_execution_count,
@@ -271,23 +271,23 @@ def report_to_report_ui_data(
     if report.commit_url:
         summary_content["Git commit"] = f"link:{report.commit_url}"
 
-    suite_ids: List[str] = []
+    suite_ids: list[str] = []
 
     for suite in report.suites.values():
-        suite_child_ids: List[str] = []
+        suite_child_ids: list[str] = []
 
         for test_file in suite.test_files.values():
-            test_file_child_ids: List[str] = []
-            logicals_by_classname: "OrderedDict[str, List[LogicalTest]]" = OrderedDict()
+            test_file_child_ids: list[str] = []
+            logicals_by_classname: OrderedDict[str, list[LogicalTest]] = OrderedDict()
 
             for logical in test_file.logical_tests.values():
                 logicals_by_classname.setdefault(logical.classname, []).append(logical)
 
             for classname, logicals in logicals_by_classname.items():
-                classname_child_ids: List[str] = []
+                classname_child_ids: list[str] = []
 
                 for logical in logicals:
-                    execution_child_ids: List[str] = []
+                    execution_child_ids: list[str] = []
 
                     for execution in logical.executions.values():
                         if only_failures and execution.status not in {"FAILED", "ERRORED"}:
@@ -376,7 +376,7 @@ def report_to_report_ui_data(
         "testNodes": builder.test_nodes,
     }
     if report.artifacts:
-        artifact_content: Dict[str, Any] = {}
+        artifact_content: dict[str, Any] = {}
         for artifact in report.artifacts:
             artifact_content[artifact_display_label(artifact, report.artifacts)] = artifact_value(
                 artifact

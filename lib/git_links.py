@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from typing import Optional
 from urllib.parse import urlparse
 
 
-def build_commit_url(repo: Optional[str], commit: Optional[str]) -> Optional[str]:
+def build_commit_url(repo: str | None, commit: str | None) -> str | None:
     """Build a browser URL for a git commit from Buildkite repo metadata."""
     if not repo or not commit:
         return None
@@ -23,7 +22,7 @@ def build_commit_url(repo: Optional[str], commit: Optional[str]) -> Optional[str
     return f"https://{host}/{path}/{commit_path}/{commit}"
 
 
-def _normalize_repo_url(repo: str) -> Optional[tuple[str, str]]:
+def _normalize_repo_url(repo: str) -> tuple[str, str] | None:
     if repo.startswith("git@") and ":" in repo:
         host, path = repo.removeprefix("git@").split(":", 1)
         return _clean_host_path(host, path)
@@ -35,11 +34,10 @@ def _normalize_repo_url(repo: str) -> Optional[tuple[str, str]]:
     return None
 
 
-def _clean_host_path(host: str, path: str) -> Optional[tuple[str, str]]:
+def _clean_host_path(host: str, path: str) -> tuple[str, str] | None:
     host = host.strip().lower()
     path = path.strip().rstrip("/")
-    if path.endswith(".git"):
-        path = path[:-4]
+    path = path.removesuffix(".git")
     if not host or not path or "/" not in path:
         return None
     return host, path

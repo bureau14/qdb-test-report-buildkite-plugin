@@ -49,7 +49,7 @@ def write_large_junit(path: Path, *, total: int, failed_every: int = 0) -> None:
 
 def embedded_data(html: str):
     match = re.search(
-        r'<script id="report-data" type="application/json">(.*?)</script>', html, re.S
+        r'<script id="report-data" type="application/json">(.*?)</script>', html, re.DOTALL
     )
     assert match is not None
     return json.loads(match.group(1))
@@ -839,8 +839,8 @@ def test_cli_writes_self_contained_html_from_repeated_platform_arguments(tmp_pat
             str(output),
         ],
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
+        check=False,
     )
 
     assert result.returncode == 0, result.stderr

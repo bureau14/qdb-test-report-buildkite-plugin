@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Optional
+
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,26 +21,26 @@ class ArtifactConfig:
 class PluginConfig:
     scope: str
     title: str
-    variant: Optional[str]
-    execution_name: Optional[str]
+    variant: str | None
+    execution_name: str | None
     project_id: str
     git_ref: str
     build_id: str
-    job_id: Optional[str]
-    build_url: Optional[str]
-    platforms: List[PlatformConfig]
+    job_id: str | None
+    build_url: str | None
+    platforms: list[PlatformConfig]
     only_failures: bool
     annotate: bool
     fail_on_test_failures: bool
-    junit_input_path: Optional[Path] = None
-    commit: Optional[str] = None
-    repo: Optional[str] = None
-    artifacts: List[ArtifactConfig] = field(default_factory=list)
+    junit_input_path: Path | None = None
+    commit: str | None = None
+    repo: str | None = None
+    artifacts: list[ArtifactConfig] = field(default_factory=list)
     aggregate_download_parallel: int = 32
     aggregate_download_concurrency: int = 4
 
 
-def _get_env(key: str, default: Optional[str] = None) -> Optional[str]:
+def _get_env(key: str, default: str | None = None) -> str | None:
     return os.environ.get(key, default)
 
 
@@ -69,8 +69,8 @@ def _get_int_env(key: str, default: int) -> int:
     return parsed
 
 
-def _get_list_env(prefix: str) -> List[str]:
-    values: List[str] = []
+def _get_list_env(prefix: str) -> list[str]:
+    values: list[str] = []
     idx = 0
     while True:
         value = _get_env(f"{prefix}_{idx}")
@@ -82,8 +82,8 @@ def _get_list_env(prefix: str) -> List[str]:
     return values
 
 
-def _get_artifact_configs(prefix: str) -> List[ArtifactConfig]:
-    values: List[ArtifactConfig] = []
+def _get_artifact_configs(prefix: str) -> list[ArtifactConfig]:
+    values: list[ArtifactConfig] = []
     idx = 0
     while True:
         item_prefix = f"{prefix}_{idx}"
@@ -148,10 +148,10 @@ def load_plugin_config() -> PluginConfig:
         "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_DOWNLOAD_CONCURRENCY", 4
     )
 
-    variant: Optional[str]
-    junit_input_path: Optional[Path]
+    variant: str | None
+    junit_input_path: Path | None
     fail_on_test_failures: bool
-    artifacts: List[ArtifactConfig]
+    artifacts: list[ArtifactConfig]
 
     if scope == "job":
         variant = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT")

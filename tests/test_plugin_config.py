@@ -1,6 +1,7 @@
-import pytest
 from pathlib import Path
-from plugin_config import ArtifactConfig, load_plugin_config, PlatformConfig
+
+import pytest
+from plugin_config import ArtifactConfig, PlatformConfig, load_plugin_config
 
 
 @pytest.fixture(autouse=True)

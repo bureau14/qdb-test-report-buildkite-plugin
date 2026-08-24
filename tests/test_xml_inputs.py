@@ -1,7 +1,8 @@
 from pathlib import Path
+
 import pytest
-from xml_inputs import collect_job_xml_uploads, collect_xml_uploads, XmlUpload
 from plugin_config import PlatformConfig
+from xml_inputs import XmlUpload, collect_job_xml_uploads, collect_xml_uploads
 
 
 def test_collect_xml_uploads_file(tmp_path):

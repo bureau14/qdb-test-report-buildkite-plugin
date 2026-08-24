@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from artifact_inputs import (
     ArtifactConfig,
     ArtifactFile,

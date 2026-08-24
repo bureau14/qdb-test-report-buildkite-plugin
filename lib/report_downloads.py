@@ -1,12 +1,14 @@
 from __future__ import annotations
-from typing import Any, Callable, Dict, List, Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import json
 import threading
 import time
-
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
 from boto3.s3.transfer import TransferConfig
 from object_store import (
     ObjectAuth,
@@ -92,7 +94,7 @@ def build_aggregate_xml_discovery_prefix(
     )
 
 
-def _xml_metadata_from_key(*, prefix: str, key: str, size_bytes: int) -> Optional[JobXmlObject]:
+def _xml_metadata_from_key(*, prefix: str, key: str, size_bytes: int) -> JobXmlObject | None:
     if not key.endswith(".xml"):
         return None
     relative_to_variants = key[len(prefix) :].lstrip("/") if key.startswith(prefix) else key
@@ -115,7 +117,7 @@ def _xml_metadata_from_key(*, prefix: str, key: str, size_bytes: int) -> Optiona
 
 def _summary_metadata_from_key(
     *, prefix: str, key: str, size_bytes: int
-) -> Optional[JobSummaryObject]:
+) -> JobSummaryObject | None:
     if not key.endswith("/summary.json"):
         return None
     relative_to_variants = key[len(prefix) :].lstrip("/") if key.startswith(prefix) else key
@@ -139,7 +141,7 @@ def find_job_xml_objects(
     project_id: str,
     git_ref: str,
     build_id: str,
-) -> List[JobXmlObject]:
+) -> list[JobXmlObject]:
     """Find JUnit XML objects uploaded by job-scope report steps for a build."""
 
     prefix = build_aggregate_xml_discovery_prefix(
@@ -148,7 +150,7 @@ def find_job_xml_objects(
         git_ref=git_ref,
         build_id=build_id,
     )
-    found: List[JobXmlObject] = []
+    found: list[JobXmlObject] = []
     for obj in list_objects(cfg, auth, bucket, prefix):
         metadata = _xml_metadata_from_key(
             prefix=prefix,
@@ -169,7 +171,7 @@ def find_job_summary_objects(
     project_id: str,
     git_ref: str,
     build_id: str,
-) -> List[JobSummaryObject]:
+) -> list[JobSummaryObject]:
     """Find job-scope summary manifests for a build."""
 
     prefix = build_aggregate_xml_discovery_prefix(
@@ -178,7 +180,7 @@ def find_job_summary_objects(
         git_ref=git_ref,
         build_id=build_id,
     )
-    found: List[JobSummaryObject] = []
+    found: list[JobSummaryObject] = []
     for obj in list_objects(cfg, auth, bucket, prefix):
         metadata = _summary_metadata_from_key(
             prefix=prefix,
@@ -202,8 +204,8 @@ def collect_full_scope_xml(
     output_dir: Path,
     download_parallel: int = 32,
     download_concurrency: int = 4,
-    log_fn: Optional[Callable[[str], None]] = None,
-) -> List[DownloadedJobXml]:
+    log_fn: Callable[[str], None] | None = None,
+) -> list[DownloadedJobXml]:
     """Download discovered job-scope XML into a full-scope staging directory."""
 
     list_started = time.monotonic()
@@ -258,7 +260,7 @@ def collect_full_scope_xml(
         )
         return DownloadedJobXml(object=obj, local_path=local_path)
 
-    downloaded: List[Optional[DownloadedJobXml]] = [None] * len(objects)
+    downloaded: list[DownloadedJobXml | None] = [None] * len(objects)
     download_started = time.monotonic()
     completed = 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -295,7 +297,7 @@ def collect_full_scope_job_summaries(
     git_ref: str,
     build_id: str,
     output_dir: Path,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     """Download discovered job summary manifests keyed by Buildkite job id."""
 
     objects = find_job_summary_objects(
@@ -308,7 +310,7 @@ def collect_full_scope_job_summaries(
         build_id=build_id,
     )
 
-    summaries: Dict[str, Dict[str, Any]] = {}
+    summaries: dict[str, dict[str, Any]] = {}
     for obj in objects:
         local_path = Path(output_dir) / obj.variant / obj.job_id / "summary.json"
         download_file(cfg, auth, bucket, obj.key, local_path)
@@ -322,7 +324,7 @@ def collect_full_scope_job_summaries(
     return summaries
 
 
-def _summary_key_from_xml_key(key: str) -> Optional[str]:
+def _summary_key_from_xml_key(key: str) -> str | None:
     marker = "/xml/"
     if marker not in key:
         return None
@@ -334,12 +336,12 @@ def collect_full_scope_job_summaries_for_xml(
     cfg: StoreConfig,
     auth: ObjectAuth,
     bucket: str,
-    downloaded_xml: List[DownloadedJobXml],
+    downloaded_xml: list[DownloadedJobXml],
     output_dir: Path,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     """Download job summary manifests directly from discovered XML job prefixes."""
 
-    summary_keys: Dict[str, JobSummaryObject] = {}
+    summary_keys: dict[str, JobSummaryObject] = {}
     for item in downloaded_xml:
         key = _summary_key_from_xml_key(item.object.key)
         if key is None:
@@ -351,12 +353,12 @@ def collect_full_scope_job_summaries_for_xml(
             size_bytes=0,
         )
 
-    summaries: Dict[str, Dict[str, Any]] = {}
+    summaries: dict[str, dict[str, Any]] = {}
     for obj in summary_keys.values():
         local_path = Path(output_dir) / obj.variant / obj.job_id / "summary.json"
         try:
             download_file(cfg, auth, bucket, obj.key, local_path)
-        except Exception:
+        except Exception:  # noqa: BLE001, S112 - optional summary sidecar
             continue
         try:
             summary = json.loads(local_path.read_text(encoding="utf-8"))

@@ -2,15 +2,16 @@
 """Parse JUnit XML files into a neutral report model."""
 
 from __future__ import annotations
-from typing import Dict, List, Optional, Tuple, Union, Counter, OrderedDict
+
 import argparse
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from pathlib import Path
 import glob
 import re
 import sys
 import xml.etree.ElementTree as ET
+from collections import Counter, OrderedDict
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
 
 STATUS_ORDER = ["SUCCESSFUL", "SKIPPED", "FAILED", "ERRORED"]
 STATUS_SEVERITY = {"SUCCESSFUL": 0, "SKIPPED": 1, "FAILED": 2, "ERRORED": 3}
@@ -18,7 +19,9 @@ STATUS_SEVERITY = {"SUCCESSFUL": 0, "SKIPPED": 1, "FAILED": 2, "ERRORED": 3}
 # Pattern to match Buildkite Job IDs (UUIDs). We strip these from test identities
 # to support Buildkite parallelism: multiple jobs for the same variant can each
 # upload their own JUnit XML without being treated as distinct tests in the report.
-UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
 QDB_PROCESS_ID_TESTCASE = "qdb_test_process_id"
 QDB_TEST_LOG_NAME_RE = re.compile(r"^qdb_test_log_pid_(\d+)_.+\.json$")
 
@@ -44,7 +47,7 @@ class ArtifactLink:
     name: str
     relative_path: str
     key: str
-    url: Optional[str]
+    url: str | None
     size_bytes: int
 
 
@@ -54,19 +57,19 @@ class TestcaseExecution:
     source_file: Path
     source_id: str
     test_file: str
-    source_job_id: Optional[str]
-    source_job_url: Optional[str]
-    source_xml_url: Optional[str]
+    source_job_id: str | None
+    source_job_url: str | None
+    source_xml_url: str | None
     suite_name: str
     classname: str
     name: str
     logical_id: str
     status: str
     duration_seconds: float
-    reason: Optional[str] = None
-    output: Optional[str] = None
-    source_artifacts: List[ArtifactLink] = field(default_factory=list)
-    qdb_process_id: Optional[str] = None
+    reason: str | None = None
+    output: str | None = None
+    source_artifacts: list[ArtifactLink] = field(default_factory=list)
+    qdb_process_id: str | None = None
 
 
 @dataclass
@@ -76,38 +79,38 @@ class LogicalTest:
     logical_id: str
     classname: str
     name: str
-    executions: "OrderedDict[str, TestcaseExecution]" = field(default_factory=OrderedDict)
+    executions: OrderedDict[str, TestcaseExecution] = field(default_factory=OrderedDict)
 
 
 @dataclass
 class TestFile:
     name: str
-    logical_tests: "OrderedDict[str, LogicalTest]" = field(default_factory=OrderedDict)
+    logical_tests: OrderedDict[str, LogicalTest] = field(default_factory=OrderedDict)
 
 
 @dataclass
 class TestSuite:
     name: str
-    test_files: "OrderedDict[str, TestFile]" = field(default_factory=OrderedDict)
+    test_files: OrderedDict[str, TestFile] = field(default_factory=OrderedDict)
 
 
 @dataclass
 class Report:
     title: str
-    platforms: List[str]
-    suites: "OrderedDict[str, TestSuite]"
-    build_url: Optional[str] = None
-    commit_url: Optional[str] = None
+    platforms: list[str]
+    suites: OrderedDict[str, TestSuite]
+    build_url: str | None = None
+    commit_url: str | None = None
     generated_at: str = ""
     total_files: int = 0
     raw_testcases: int = 0
     duplicates_seen: int = 0
     duplicates_replaced: int = 0
-    malformed_junit_xml: List[Dict[str, str]] = field(default_factory=list)
-    artifacts: List[ArtifactLink] = field(default_factory=list)
+    malformed_junit_xml: list[dict[str, str]] = field(default_factory=list)
+    artifacts: list[ArtifactLink] = field(default_factory=list)
 
     @property
-    def resolved_platforms(self) -> List[str]:
+    def resolved_platforms(self) -> list[str]:
         """Returns the list of platforms that actually had at least one test execution."""
         seen = set()
         for suite in self.suites.values():
@@ -169,14 +172,14 @@ class Report:
 
 
 def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def has_glob_magic(path: Union[Path, str]) -> bool:
+def has_glob_magic(path: Path | str) -> bool:
     return any(char in str(path) for char in "*?[]")
 
 
-def discover_xml_files(path: Union[Path, str]) -> List[Path]:
+def discover_xml_files(path: Path | str) -> list[Path]:
     """Return XML files for a file, directory, or glob in discovery order."""
     input_path = Path(path)
     if has_glob_magic(input_path):
@@ -196,7 +199,7 @@ def discover_xml_files(path: Union[Path, str]) -> List[Path]:
     return []
 
 
-def parse_platform_arg(value: str) -> Tuple[str, Path]:
+def parse_platform_arg(value: str) -> tuple[str, Path]:
     if "=" not in value:
         raise argparse.ArgumentTypeError("platform must use name=path format")
     name, raw_path = value.split("=", 1)
@@ -207,7 +210,7 @@ def parse_platform_arg(value: str) -> Tuple[str, Path]:
     return name.strip(), Path(raw_path)
 
 
-def logical_test_identity(testcase: ET.Element, source_id: str) -> Tuple[str, str, str]:
+def logical_test_identity(testcase: ET.Element, source_id: str) -> tuple[str, str, str]:
     name = testcase.attrib.get("name", "").strip() or "<unnamed>"
     classname = testcase.attrib.get("classname", "").strip()
     test_id = f"{classname}::{name}" if classname else name
@@ -224,7 +227,7 @@ def testcase_status(testcase: ET.Element) -> str:
     return "SUCCESSFUL"
 
 
-def specific_reason_from_text(text: Optional[str]) -> Optional[str]:
+def specific_reason_from_text(text: str | None) -> str | None:
     if not text:
         return None
     lines = [line.strip() for line in text.splitlines() if line.strip()]
@@ -237,9 +240,7 @@ def specific_reason_from_text(text: Optional[str]) -> Optional[str]:
     return lines[0] if lines else None
 
 
-def testcase_reason_and_output(
-    testcase: ET.Element, status: str
-) -> Tuple[Optional[str], Optional[str]]:
+def testcase_reason_and_output(testcase: ET.Element, status: str) -> tuple[str | None, str | None]:
     if status == "ERRORED":
         node = testcase.find("error")
     elif status == "FAILED":
@@ -250,15 +251,18 @@ def testcase_reason_and_output(
         node = None
 
     reason = None
-    output_parts: List[str] = []
+    output_parts: list[str] = []
     if node is not None:
         raw_message = node.attrib.get("message")
         node_text = node.text.strip() if node.text and node.text.strip() else None
         if node_text:
             output_parts.append(node_text)
-        if status == "SKIPPED" and raw_message:
-            reason = raw_message
-        elif raw_message and raw_message.lower() not in {"failure", "error"}:
+        if (
+            status == "SKIPPED"
+            and raw_message
+            or raw_message
+            and raw_message.lower() not in {"failure", "error"}
+        ):
             reason = raw_message
         else:
             reason = specific_reason_from_text(node_text) or raw_message or node.attrib.get("type")
@@ -283,7 +287,7 @@ def duration_seconds(testcase: ET.Element) -> float:
     return max(value, 0.0)
 
 
-def aggregate_status(statuses: List[str]) -> str:
+def aggregate_status(statuses: list[str]) -> str:
     if any(status == "ERRORED" for status in statuses):
         return "ERRORED"
     if any(status == "FAILED" for status in statuses):
@@ -292,7 +296,7 @@ def aggregate_status(statuses: List[str]) -> str:
     return "SUCCESSFUL"
 
 
-def buildkite_job_url(build_url: Optional[str], job_id: Optional[str]) -> Optional[str]:
+def buildkite_job_url(build_url: str | None, job_id: str | None) -> str | None:
     if not build_url or not job_id:
         return None
     return f"{build_url.split('#', 1)[0]}#{job_id}"
@@ -324,14 +328,14 @@ def local_name(element: ET.Element) -> str:
     return element.tag.rsplit("}", 1)[-1]
 
 
-def testcase_system_out(testcase: ET.Element) -> Optional[str]:
+def testcase_system_out(testcase: ET.Element) -> str | None:
     for child in testcase:
         if local_name(child) == "system-out" and child.text:
             return child.text.strip() or None
     return None
 
 
-def qdb_process_id(root: ET.Element) -> Optional[str]:
+def qdb_process_id(root: ET.Element) -> str | None:
     values = {
         value
         for testcase in root.iter()
@@ -352,8 +356,8 @@ def is_qdb_test_log(artifact: ArtifactLink) -> bool:
 
 
 def source_artifacts_for_junit(
-    qdb_pid: Optional[str], artifacts: List[ArtifactLink]
-) -> List[ArtifactLink]:
+    qdb_pid: str | None, artifacts: list[ArtifactLink]
+) -> list[ArtifactLink]:
     non_qdb_logs = [artifact for artifact in artifacts if not is_qdb_test_log(artifact)]
     if not qdb_pid:
         return non_qdb_logs
@@ -365,7 +369,7 @@ def source_artifacts_for_junit(
     ]
 
 
-def iter_junit_suites(root: ET.Element) -> List[ET.Element]:
+def iter_junit_suites(root: ET.Element) -> list[ET.Element]:
     if local_name(root) == "testsuite":
         return [root]
     return [element for element in root.iter() if local_name(element) == "testsuite"]
@@ -374,13 +378,13 @@ def iter_junit_suites(root: ET.Element) -> List[ET.Element]:
 def parse_junit_file(
     path: Path,
     platform: str,
-    source_id: Optional[str] = None,
-    source_job_id: Optional[str] = None,
-    source_job_url: Optional[str] = None,
-    source_xml_url: Optional[str] = None,
-    source_artifacts: Optional[List[ArtifactLink]] = None,
-    malformed_junit_xml: Optional[List[Dict[str, str]]] = None,
-) -> List[TestcaseExecution]:
+    source_id: str | None = None,
+    source_job_id: str | None = None,
+    source_job_url: str | None = None,
+    source_xml_url: str | None = None,
+    source_artifacts: list[ArtifactLink] | None = None,
+    malformed_junit_xml: list[dict[str, str]] | None = None,
+) -> list[TestcaseExecution]:
     if source_id is None:
         source_id = path.name
     if path.stat().st_size == 0:
@@ -395,7 +399,7 @@ def parse_junit_file(
                 {"file": str(path), "platform": platform, "error": str(error)}
             )
         return []
-    executions: List[TestcaseExecution] = []
+    executions: list[TestcaseExecution] = []
     source_qdb_process_id = qdb_process_id(root)
     suites = iter_junit_suites(root)
     if not suites:
@@ -448,22 +452,22 @@ def parse_junit_file(
 
 def build_report(
     title: str,
-    platform_specs: List[Tuple[str, Union[Path, str]]],
-    build_url: Optional[str] = None,
-    commit_url: Optional[str] = None,
-    source_job_id: Optional[str] = None,
-    source_artifacts_by_job_id: Optional[Dict[str, List[ArtifactLink]]] = None,
-    artifacts: Optional[List[ArtifactLink]] = None,
-    xml_source_links: Optional[Dict[Path, Optional[str]]] = None,
+    platform_specs: list[tuple[str, Path | str]],
+    build_url: str | None = None,
+    commit_url: str | None = None,
+    source_job_id: str | None = None,
+    source_artifacts_by_job_id: dict[str, list[ArtifactLink]] | None = None,
+    artifacts: list[ArtifactLink] | None = None,
+    xml_source_links: dict[Path, str | None] | None = None,
 ) -> Report:
     log_info(f"Start JUnit report model build title={title!r} platforms={len(platform_specs)}")
-    suites: "OrderedDict[str, TestSuite]" = OrderedDict()
+    suites: OrderedDict[str, TestSuite] = OrderedDict()
     total_files = 0
     total_raw_executions = 0
     all_files_to_process = []
     duplicates_seen = 0
     duplicates_replaced = 0
-    malformed_junit_xml: List[Dict[str, str]] = []
+    malformed_junit_xml: list[dict[str, str]] = []
 
     for platform, raw_path in platform_specs:
         input_path = Path(raw_path)

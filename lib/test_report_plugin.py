@@ -1,12 +1,13 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
-import sys
+
 import json
 import mimetypes
 import os
+import sys
 import tempfile
-from pathlib import Path
 from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Any
 
 # Add tools to path so we can import junit_html_report tool
 tools_path = str(Path(__file__).parent.parent / "tools")
@@ -14,37 +15,36 @@ if tools_path not in sys.path:
     sys.path.append(tools_path)
 
 import junit_html_report
-from junit_report_model import ArtifactLink
-
-from plugin_config import PluginConfig, PlatformConfig, load_plugin_config
-from report_paths import build_report_location
+from annotations import (
+    build_annotation_body,
+    create_buildkite_annotation,
+    get_annotation_style,
+    get_job_annotation_style,
+)
 from artifact_inputs import ArtifactFile, collect_artifact_files, slugify_artifact_name
+from git_links import build_commit_url
+from junit_report_model import ArtifactLink
 from object_store import (
     ObjectAuth,
+    PublishedObject,
     StoreConfig,
+    aws_clients,
+    internal_url,
+    key_join,
     load_store_config,
+    parse_s3,
     resolve_object_auth,
     upload_file,
-    parse_s3,
-    aws_clients,
-    key_join,
-    internal_url,
-    PublishedObject,
 )
+from plugin_config import PlatformConfig, PluginConfig, load_plugin_config
 from report_downloads import (
     DownloadedJobXml,
     collect_full_scope_job_summaries,
     collect_full_scope_job_summaries_for_xml,
     collect_full_scope_xml,
 )
-from xml_inputs import collect_job_xml_uploads, XmlUpload
-from annotations import (
-    build_annotation_body,
-    get_annotation_style,
-    get_job_annotation_style,
-    create_buildkite_annotation,
-)
-from git_links import build_commit_url
+from report_paths import build_report_location
+from xml_inputs import XmlUpload, collect_job_xml_uploads
 
 
 @dataclass(frozen=True)
@@ -64,10 +64,10 @@ class GenerationResult:
 @dataclass(frozen=True)
 class XmlSourceLink:
     key: str
-    url: Optional[str]
+    url: str | None
 
 
-ArtifactMetadata = List[Dict[str, Any]]
+ArtifactMetadata = list[dict[str, Any]]
 
 
 def log(message: str) -> None:
@@ -79,8 +79,8 @@ def warn(message: str) -> None:
 
 
 def aggregate_discovery_counts(
-    downloaded_xml: List[DownloadedJobXml],
-) -> Dict[str, int]:
+    downloaded_xml: list[DownloadedJobXml],
+) -> dict[str, int]:
     variants = {item.variant for item in downloaded_xml}
     jobs = {(item.variant, item.job_id) for item in downloaded_xml}
     return {"variants": len(variants), "jobs": len(jobs), "files": len(downloaded_xml)}
@@ -89,8 +89,8 @@ def aggregate_discovery_counts(
 def add_summary_metadata(
     summary_path: Path,
     *,
-    discovered_xml: Optional[Dict[str, int]] = None,
-    job_artifacts: Optional[ArtifactMetadata] = None,
+    discovered_xml: dict[str, int] | None = None,
+    job_artifacts: ArtifactMetadata | None = None,
 ) -> None:
     summary = json.loads(summary_path.read_text())
     if discovered_xml is not None:
@@ -100,9 +100,7 @@ def add_summary_metadata(
     summary_path.write_text(json.dumps(summary, indent=2))
 
 
-def add_command_failure_warning(
-    summary: Dict[str, Any], command_exit_status: Optional[str]
-) -> bool:
+def add_command_failure_warning(summary: dict[str, Any], command_exit_status: str | None) -> bool:
     if command_exit_status in (None, "", "0"):
         return False
 
@@ -128,8 +126,8 @@ def add_command_failure_warning(
     return True
 
 
-def artifact_links_from_metadata(metadata: ArtifactMetadata) -> List[ArtifactLink]:
-    links: List[ArtifactLink] = []
+def artifact_links_from_metadata(metadata: ArtifactMetadata) -> list[ArtifactLink]:
+    links: list[ArtifactLink] = []
     for artifact in metadata:
         for file_info in artifact.get("files", []):
             links.append(
@@ -146,9 +144,9 @@ def artifact_links_from_metadata(metadata: ArtifactMetadata) -> List[ArtifactLin
 
 def build_job_xml_source_links(
     config: PluginConfig,
-    xml_uploads: List[XmlUpload],
+    xml_uploads: list[XmlUpload],
     store_context: ObjectStoreContext,
-) -> Dict[Path, XmlSourceLink]:
+) -> dict[Path, XmlSourceLink]:
     location = build_report_location(
         destination_prefix=store_context.prefix,
         project_id=config.project_id,
@@ -158,7 +156,7 @@ def build_job_xml_source_links(
         job_id=config.job_id,
         variant=config.variant,
     )
-    links: Dict[Path, XmlSourceLink] = {}
+    links: dict[Path, XmlSourceLink] = {}
     for xml in xml_uploads:
         key = key_join(location.xml_prefix, xml.object_relative_path)
         links[xml.local_path.resolve()] = XmlSourceLink(
@@ -168,8 +166,8 @@ def build_job_xml_source_links(
 
 
 def build_aggregate_xml_source_links(
-    downloaded_xml: List[DownloadedJobXml], store_context: ObjectStoreContext
-) -> Dict[Path, XmlSourceLink]:
+    downloaded_xml: list[DownloadedJobXml], store_context: ObjectStoreContext
+) -> dict[Path, XmlSourceLink]:
     return {
         item.local_path.resolve(): XmlSourceLink(
             key=item.object.key,
@@ -191,10 +189,10 @@ def run_report_generation(
     config: PluginConfig,
     output_dir: Path,
     *,
-    source_artifacts_by_job_id: Optional[Dict[str, List[ArtifactLink]]] = None,
-    artifacts: Optional[List[ArtifactLink]] = None,
-    artifact_metadata: Optional[ArtifactMetadata] = None,
-    xml_source_links: Optional[Dict[Path, XmlSourceLink]] = None,
+    source_artifacts_by_job_id: dict[str, list[ArtifactLink]] | None = None,
+    artifacts: list[ArtifactLink] | None = None,
+    artifact_metadata: ArtifactMetadata | None = None,
+    xml_source_links: dict[Path, XmlSourceLink] | None = None,
 ) -> GenerationResult:
     """
     Runs the HTML report generator and returns the paths to the generated report files.
@@ -243,7 +241,7 @@ def guessed_content_type(path: Path) -> str:
 
 def upload_extra_artifacts(
     config: PluginConfig,
-    artifact_files: List[ArtifactFile],
+    artifact_files: list[ArtifactFile],
     store_context: ObjectStoreContext,
 ) -> ArtifactMetadata:
     location = build_report_location(
@@ -256,7 +254,7 @@ def upload_extra_artifacts(
         variant=config.variant,
     )
 
-    grouped: Dict[str, Dict[str, Any]] = {}
+    grouped: dict[str, dict[str, Any]] = {}
     for artifact_file in artifact_files:
         artifact = artifact_file.config
         slug = slugify_artifact_name(artifact.name)
@@ -283,7 +281,7 @@ def upload_extra_artifacts(
                 "warnings": [],
             },
         )
-        file_info: Dict[str, Any] = {
+        file_info: dict[str, Any] = {
             "relative_path": artifact_file.relative_path,
             "key": published.key,
             "size_bytes": published.size_bytes,
@@ -297,9 +295,9 @@ def upload_extra_artifacts(
 def upload_report_artifacts(
     config: PluginConfig,
     generation: GenerationResult,
-    xml_uploads: List[XmlUpload],
-    store_context: Optional[ObjectStoreContext] = None,
-) -> Dict[str, PublishedObject]:
+    xml_uploads: list[XmlUpload],
+    store_context: ObjectStoreContext | None = None,
+) -> dict[str, PublishedObject]:
     """
     Uploads report artifacts (HTML, summary, and job-scope XML) to the object store.
     """
@@ -371,13 +369,13 @@ def main() -> int:
             staging_root = Path(tmp_dir_str)
             full_scope_xml_stage_root = staging_root / "downloaded-xml"
 
-            store_context: Optional[ObjectStoreContext] = None
-            aggregate_counts: Optional[Dict[str, int]] = None
+            store_context: ObjectStoreContext | None = None
+            aggregate_counts: dict[str, int] | None = None
             artifact_metadata: ArtifactMetadata = []
             job_artifacts_metadata: ArtifactMetadata = []
-            source_artifacts_by_job_id: Dict[str, List[ArtifactLink]] = {}
-            report_artifacts: List[ArtifactLink] = []
-            xml_source_links: Dict[Path, XmlSourceLink] = {}
+            source_artifacts_by_job_id: dict[str, list[ArtifactLink]] = {}
+            report_artifacts: list[ArtifactLink] = []
+            xml_source_links: dict[Path, XmlSourceLink] = {}
             if config.scope == "aggregate":
                 store_context = resolve_object_store_context()
                 log("Discovering aggregate JUnit XML object keys from object storage")
@@ -585,7 +583,7 @@ def main() -> int:
                 return 64
 
             return 0
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - plugin CLI boundary
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

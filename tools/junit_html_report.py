@@ -2,12 +2,12 @@
 """Generate a self-contained HTML report directly from JUnit XML."""
 
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Tuple, Union
 
 import argparse
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
+from typing import Any
 
 from html_report_writer import DEFAULT_TEMPLATE, write_html_report
 from junit_report_model import ArtifactLink, build_report, format_counts, parse_platform_arg
@@ -61,18 +61,18 @@ def build_parser() -> argparse.ArgumentParser:
 def generate_html_report(
     *,
     title: str,
-    platform_specs: List[Tuple[str, Union[Path, str]]],
+    platform_specs: list[tuple[str, Path | str]],
     output: Path,
-    summary_json: Optional[Path] = None,
+    summary_json: Path | None = None,
     template: Path = DEFAULT_TEMPLATE,
-    execution_name: Optional[str] = None,
-    build_url: Optional[str] = None,
-    commit_url: Optional[str] = None,
-    source_job_id: Optional[str] = None,
-    source_artifacts_by_job_id: Optional[Dict[str, List[ArtifactLink]]] = None,
-    artifacts: Optional[List[ArtifactLink]] = None,
-    artifact_metadata: Optional[List[Dict[str, Any]]] = None,
-    xml_source_links: Optional[Dict[Path, Optional[str]]] = None,
+    execution_name: str | None = None,
+    build_url: str | None = None,
+    commit_url: str | None = None,
+    source_job_id: str | None = None,
+    source_artifacts_by_job_id: dict[str, list[ArtifactLink]] | None = None,
+    artifacts: list[ArtifactLink] | None = None,
+    artifact_metadata: list[dict[str, Any]] | None = None,
+    xml_source_links: dict[Path, str | None] | None = None,
     only_failures: bool = False,
     fail_on_test_failures: bool = False,
 ) -> int:
@@ -130,7 +130,7 @@ def generate_html_report(
     return 0
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return generate_html_report(
@@ -145,7 +145,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             only_failures=args.only_failures,
             fail_on_test_failures=args.fail_on_test_failures,
         )
-    except Exception as exc:  # pragma: no cover - CLI guard
+    except Exception as exc:  # noqa: BLE001 - CLI guard
         warn(f"error: {exc}")
         return 1
 

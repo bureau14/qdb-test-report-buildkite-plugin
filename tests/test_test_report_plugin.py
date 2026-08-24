@@ -1,21 +1,22 @@
-from unittest.mock import MagicMock
-from pathlib import Path
 import json
 import re
+from pathlib import Path
+from unittest.mock import MagicMock
+
 import pytest
+from artifact_inputs import ArtifactConfig, ArtifactFile
+from plugin_config import PlatformConfig, PluginConfig
 from test_report_plugin import (
-    build_aggregate_xml_source_links,
-    build_job_xml_source_links,
-    run_report_generation,
-    upload_extra_artifacts,
-    upload_report_artifacts,
     GenerationResult,
     ObjectStoreContext,
     XmlSourceLink,
+    build_aggregate_xml_source_links,
+    build_job_xml_source_links,
     main,
+    run_report_generation,
+    upload_extra_artifacts,
+    upload_report_artifacts,
 )
-from artifact_inputs import ArtifactConfig, ArtifactFile
-from plugin_config import PluginConfig, PlatformConfig
 from xml_inputs import XmlUpload
 
 
@@ -198,7 +199,7 @@ def test_upload_report_artifacts(monkeypatch, tmp_path):
     mock_ssm = MagicMock()
     monkeypatch.setattr("test_report_plugin.aws_clients", lambda: (mock_s3, mock_ssm))
 
-    from object_store import StoreConfig, ObjectAuth
+    from object_store import ObjectAuth, StoreConfig
 
     monkeypatch.setattr(
         "test_report_plugin.load_store_config",
@@ -264,7 +265,7 @@ def test_upload_extra_artifacts_returns_summary_metadata(monkeypatch, tmp_path):
         fail_on_test_failures=False,
     )
 
-    from object_store import ObjectAuth, StoreConfig, PublishedObject
+    from object_store import ObjectAuth, PublishedObject, StoreConfig
 
     store_cfg = StoreConfig(
         backend="s3",
@@ -1235,7 +1236,7 @@ def test_main_aggregate_renders_job_manifest_artifacts_in_html(monkeypatch, tmp_
         },
     )
 
-    from object_store import ObjectAuth, StoreConfig, PublishedObject
+    from object_store import ObjectAuth, PublishedObject, StoreConfig
     from report_downloads import collect_full_scope_job_summaries
 
     build_id = "019edee4-9015-4e35-8327-3c6db7823db"
@@ -1343,7 +1344,7 @@ def test_main_aggregate_renders_job_manifest_artifacts_in_html(monkeypatch, tmp_
     assert "Test logs" in html
     assert artifact_url in html
     match = re.search(
-        r'<script id="report-data" type="application/json">(.*?)</script>', html, re.S
+        r'<script id="report-data" type="application/json">(.*?)</script>', html, re.DOTALL
     )
     assert match is not None
     data = json.loads(match.group(1))

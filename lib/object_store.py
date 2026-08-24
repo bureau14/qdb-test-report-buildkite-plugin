@@ -23,14 +23,13 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 from urllib.parse import urlparse
 
 import boto3
 from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 from botocore.exceptions import ClientError
-
 
 # ---------------------------------------------------------------------------
 # Timeout / retry constants
@@ -62,11 +61,11 @@ class StoreConfig:
 
     backend: str
     destination: str
-    endpoint_url: Optional[str] = None
-    r2_account_id: Optional[str] = None
-    r2_access_key_id: Optional[str] = None
-    r2_secret_access_key: Optional[str] = None
-    artifacts_domain: Optional[str] = None
+    endpoint_url: str | None = None
+    r2_account_id: str | None = None
+    r2_access_key_id: str | None = None
+    r2_secret_access_key: str | None = None
+    artifacts_domain: str | None = None
 
 
 @dataclass(frozen=True)
@@ -75,15 +74,15 @@ class ObjectAuth:
     For R2, populated from SSM-stored credentials derived from the Cloudflare API token.
     """
 
-    access_key_id: Optional[str] = None
-    secret_access_key: Optional[str] = None
+    access_key_id: str | None = None
+    secret_access_key: str | None = None
 
 
 @dataclass(frozen=True)
 class PublishedObject:
     bucket: str
     key: str
-    url: Optional[str]
+    url: str | None
     size_bytes: int
 
 
@@ -91,7 +90,7 @@ class PublishedObject:
 class ObjectInfo:
     key: str
     size_bytes: int
-    last_modified: Optional[Any] = None
+    last_modified: Any | None = None
 
 
 def die(msg: str) -> None:
@@ -145,7 +144,7 @@ def aws_clients():
     )
 
 
-def _ssm_get_optional(ssm, name: str, with_decryption: bool = True) -> Optional[str]:
+def _ssm_get_optional(ssm, name: str, with_decryption: bool = True) -> str | None:
     """Return SSM parameter value or None if absent. Re-raises non-NotFound errors
     so IAM misconfigurations surface explicitly."""
 
@@ -160,7 +159,7 @@ def _ssm_get_optional(ssm, name: str, with_decryption: bool = True) -> Optional[
         die(f"failed to read SSM parameter {name}: {code} — {msg}")
 
 
-def _check_placeholder(value: Optional[str], label: str) -> None:
+def _check_placeholder(value: str | None, label: str) -> None:
     """Die if value looks like a placeholder that was never replaced with a real one."""
     if value and any(value.startswith(prefix) for prefix in _PLACEHOLDER_PREFIXES):
         die(
@@ -169,7 +168,7 @@ def _check_placeholder(value: Optional[str], label: str) -> None:
         )
 
 
-def _env_or_ssm(ssm, env_name: str, ssm_name: str, with_decryption: bool = True) -> Optional[str]:
+def _env_or_ssm(ssm, env_name: str, ssm_name: str, with_decryption: bool = True) -> str | None:
     """Env var with SSM fallback. Env takes precedence for per-job overrides."""
 
     return os.environ.get(env_name) or _ssm_get_optional(
@@ -264,7 +263,7 @@ def load_store_config(ssm) -> StoreConfig:
     )
 
 
-def parse_s3(uri: str) -> Tuple[str, str]:
+def parse_s3(uri: str) -> tuple[str, str]:
     """Parse s3://bucket/prefix URI into (bucket, prefix).
     Also handles plain bucket names (legacy SSM format)."""
 
@@ -280,7 +279,7 @@ def key_join(*parts: str) -> str:
     return "/".join(str(part).strip("/") for part in parts if str(part).strip("/"))
 
 
-def fmt_size(n: Union[int, float]) -> str:
+def fmt_size(n: float) -> str:
     size = float(n)
     for unit in ("B", "KiB", "MiB", "GiB"):
         if abs(size) < 1024:
@@ -322,7 +321,7 @@ def _s3_client(cfg: StoreConfig, auth: ObjectAuth):
             s3={"addressing_style": "path"},
         )
 
-    kwargs: Dict[str, Any] = {"config": client_cfg}
+    kwargs: dict[str, Any] = {"config": client_cfg}
     if cfg.backend == "r2":
         kwargs["region_name"] = "auto"
     if cfg.endpoint_url:
@@ -334,7 +333,7 @@ def _s3_client(cfg: StoreConfig, auth: ObjectAuth):
     return boto3.client("s3", **kwargs)
 
 
-def internal_url(cfg: StoreConfig, key: str) -> Optional[str]:
+def internal_url(cfg: StoreConfig, key: str) -> str | None:
     """Return a browser-accessible URL for an object, if artifacts_domain is set."""
     if not cfg.artifacts_domain:
         return None
@@ -350,13 +349,13 @@ def list_objects(
     auth: ObjectAuth,
     bucket: str,
     prefix: str,
-) -> List[ObjectInfo]:
+) -> list[ObjectInfo]:
     """List objects under an S3/R2 prefix using the configured backend."""
 
-    def _do() -> List[ObjectInfo]:
+    def _do() -> list[ObjectInfo]:
         client = _s3_client(cfg, auth)
         paginator = client.get_paginator("list_objects_v2")
-        objects: List[ObjectInfo] = []
+        objects: list[ObjectInfo] = []
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
             for item in page.get("Contents", []):
                 objects.append(
@@ -385,8 +384,8 @@ def download_file(
     local_path: Path,
     *,
     concurrency: int = 32,
-    client: Optional[Any] = None,
-    transfer_config: Optional[TransferConfig] = None,
+    client: Any | None = None,
+    transfer_config: TransferConfig | None = None,
 ) -> None:
     """Download one object to a local path, creating parent directories first."""
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
-from typing import Optional
+
 from dataclasses import dataclass
+
 from object_store import key_join
 
 
@@ -20,8 +21,8 @@ def build_report_location(
     git_ref: str,
     build_id: str,
     scope: str,
-    job_id: Optional[str],
-    variant: Optional[str] = None,
+    job_id: str | None,
+    variant: str | None = None,
 ) -> ReportLocation:
     # Base parts: <prefix>/<project_id>/<git_ref>/reports/builds/<build_id>
     parts = [destination_prefix, project_id, git_ref, "reports", "builds", build_id]
