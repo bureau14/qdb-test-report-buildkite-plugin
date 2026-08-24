@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import subprocess
 import sys
@@ -78,6 +79,30 @@ def test_dumps_embedded_json_escapes_html_sensitive_chars():
     assert "<" not in rendered
     assert ">" not in rendered
     assert "&" not in rendered
+
+
+def test_junit_report_model_imports_without_datetime_utc(tmp_path):
+    (tmp_path / "datetime.py").write_text(
+        "from _datetime import date, datetime, time, timedelta, timezone, tzinfo\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join((str(tmp_path), str(TOOLS_DIR)))
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import junit_report_model; print(junit_report_model.utc_now_iso())",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().endswith("Z")
 
 
 def test_large_report_generation_preserves_summary_and_filters_tree(tmp_path):
