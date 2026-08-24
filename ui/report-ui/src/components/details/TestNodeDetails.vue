@@ -51,33 +51,43 @@ const sections = computed(() => {
     if (source.jobId) {
       sourceContent["Job ID"] = source.jobId;
     }
+    if (source.qdbProcessId) {
+      sourceContent["QDB PID"] = source.qdbProcessId;
+    }
   } else {
     sources.forEach((source, index) => {
       const label = `JUnit XML ${index + 1} (${source.target} / ${source.suite} / ${source.xml})`;
       sourceContent[label] = source.xmlUrl ? `link:${source.xmlUrl}` : source.xml;
+      if (source.qdbProcessId) {
+        sourceContent[`QDB PID ${index + 1} (${source.xml})`] = source.qdbProcessId;
+      }
     });
   }
+
   const synthesizedSections: SectionData[] = [
     {
       title: "Source",
       blocks: [{ type: "kvp", content: sourceContent }],
     } as SectionData,
   ];
-  if (props.node.sourceArtifacts) {
+  const sourceArtifacts = props.execution.sourceArtifactsForNode(props.node);
+  if (sourceArtifacts.length > 0) {
     const artifactContent: Record<string, string> = {};
-    const duplicateArtifactNames = props.node.sourceArtifacts.reduce(
+    const duplicateArtifactNames = sourceArtifacts.reduce(
       (counts, artifact) => {
         counts[artifact.name] = (counts[artifact.name] || 0) + 1;
         return counts;
       },
       {} as Record<string, number>,
     );
-    for (const artifact of props.node.sourceArtifacts) {
+    for (const artifact of sourceArtifacts) {
       const label =
         duplicateArtifactNames[artifact.name] > 1
           ? `${artifact.name} / ${artifact.relativePath}`
           : artifact.name;
-      artifactContent[label] = artifact.url ? `link:${artifact.url}` : artifact.key;
+      artifactContent[label] = artifact.url
+        ? `link:${artifact.url}\n${artifact.relativePath}`
+        : artifact.key;
     }
     synthesizedSections.push({
       title: "Artifacts",

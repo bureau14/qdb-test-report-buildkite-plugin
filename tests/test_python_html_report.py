@@ -234,6 +234,89 @@ def test_report_data_renders_artifacts_only_in_leaf_source_sections(tmp_path):
     }
 
 
+def test_artifact_link_value_displays_uploaded_relative_path():
+    from junit_report_model import ArtifactLink
+    from report_data import artifact_value
+
+    artifact = ArtifactLink(
+        name="QDB test logs",
+        relative_path="test_log/qdb_test_log_pid_90560.json",
+        key="artifacts/test_log/qdb_test_log_pid_90560.json",
+        url="https://reports.example/artifacts/test_log/qdb_test_log_pid_90560.json",
+        size_bytes=123,
+    )
+
+    assert artifact_value(artifact) == (
+        "link:https://reports.example/artifacts/test_log/qdb_test_log_pid_90560.json\n"
+        "test_log/qdb_test_log_pid_90560.json"
+    )
+
+
+def test_qdb_process_id_metadata_matches_only_its_uploaded_json_log(tmp_path):
+    from junit_report_model import ArtifactLink, build_report
+    from report_data import report_to_report_ui_data
+
+    linux = tmp_path / "linux"
+    write(
+        linux / "qdb_auth_test.xml",
+        junit_xml(
+            '<testcase name="qdb_test_process_id" time="0"><system-out>90560</system-out></testcase>',
+            '<testcase classname="acl" name="data_size" time="0.1"/>',
+            suite_name="qdb_unit_tests",
+        ),
+    )
+    matching_log = ArtifactLink(
+        name="QDB test logs",
+        relative_path="test_log/qdb_test_log_pid_90560_1724412755000000000.json",
+        key="artifacts/test_log/qdb_test_log_pid_90560_1724412755000000000.json",
+        url="https://reports.example/qdb_test_log_pid_90560_1724412755000000000.json",
+        size_bytes=123,
+    )
+    other_log = ArtifactLink(
+        name="QDB test logs",
+        relative_path="test_log/qdb_test_log_pid_81234_1724412755000000000.json",
+        key="artifacts/test_log/qdb_test_log_pid_81234_1724412755000000000.json",
+        url="https://reports.example/qdb_test_log_pid_81234_1724412755000000000.json",
+        size_bytes=456,
+    )
+
+    report = build_report(
+        "PID report",
+        [("linux", linux)],
+        source_job_id="job-1",
+        source_artifacts_by_job_id={"job-1": [matching_log, other_log]},
+    )
+
+    assert report.raw_testcases == 2
+    execution_model = (
+        report.suites["qdb_unit_tests"]
+        .test_files["qdb_auth_test"]
+        .logical_tests["acl::data_size"]
+        .executions["linux"]
+    )
+    assert execution_model.qdb_process_id == "90560"
+    assert execution_model.source_artifacts == [matching_log]
+
+    execution = report_to_report_ui_data(report)[0]
+    leaves = [node for node in execution["testNodes"] if node.get("status") == "SUCCESSFUL"]
+    assert [node["name"] for node in leaves] == [
+        "qdb_test_process_id - linux",
+        "data_size - linux",
+    ]
+    assert all(node["source"] == [0, 0, 0, -1, -1, -1, -1, 0] for node in leaves)
+    assert execution["sourceTables"]["qdbProcessIds"] == ["90560"]
+    for leaf in leaves:
+        assert leaf["sourceArtifacts"] == [
+            {
+                "name": "QDB test logs",
+                "relativePath": matching_log.relative_path,
+                "key": matching_log.key,
+                "url": matching_log.url,
+                "sizeBytes": 123,
+            }
+        ]
+
+
 def test_report_summary_ui_does_not_show_raw_testcases(tmp_path):
     from junit_report_model import build_report
     from report_data import report_to_report_ui_data

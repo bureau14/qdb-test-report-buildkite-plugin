@@ -93,13 +93,26 @@ def test_test_node_details_synthesizes_source_and_tag_sections_from_compact_meta
     assert "link:${source.buildUrl}" in source
     assert "Buildkite job" in source
     assert "link:${source.jobUrl}" in source
-    assert "props.node.sourceArtifacts" in source
+    assert "props.execution.sourceArtifactsForNode(props.node)" in source
     assert 'title: "Artifacts"' in source
     assert "artifactContent[label]" in source
     assert 'sourceContent["Artifact:' not in source
     assert "Artifact:" not in source
     assert ':sections="sections"' in source
     assert ':sections="node.sections"' not in source
+
+
+def test_artifact_links_display_the_uploaded_relative_path():
+    details = (REPO_ROOT / "ui/report-ui/src/components/details/TestNodeDetails.vue").read_text(
+        encoding="utf-8"
+    )
+    rendered_block = (
+        REPO_ROOT / "ui/report-ui/src/components/details/RenderedBlock.vue"
+    ).read_text(encoding="utf-8")
+
+    assert "`link:${artifact.url}\\n${artifact.relativePath}`" in details
+    assert "function linkText(value: string): string" in rendered_block
+    assert 'value.substring(5).split("\\n", 2)' in rendered_block
 
 
 def test_ui_source_contract_supports_optional_junit_xml_links():
@@ -113,10 +126,15 @@ def test_ui_source_contract_supports_optional_junit_xml_links():
 
     assert "xmlUrl: string | undefined" in global_types
     assert "xmlUrls: string[]" in global_types
+    assert "qdbProcessId: string | undefined" in global_types
+    assert "qdbProcessIds?: string[]" in global_types
     assert "this.sourceTables.xmlUrls[node.source[6]]" in test_execution
+    assert "this.sourceTables.qdbProcessIds?.[node.source[7]]" in test_execution
     assert "sourceDataForNode(node: TestNodeData): SourceData[]" in test_execution
+    assert "sourceArtifactsForNode(node: TestNodeData): SourceArtifactData[]" in test_execution
     assert "this.children(current).forEach(collect)" in test_execution
     assert "link:${source.xmlUrl}" in details
+    assert 'sourceContent["QDB PID"] = source.qdbProcessId' in details
     assert "JUnit XML ${index + 1} (${source.target} / ${source.suite} / ${source.xml})" in details
     assert "Modified from original source" in "\n".join(test_execution.splitlines()[:3])
     assert "Modified from original source" in "\n".join(details.splitlines()[:3])

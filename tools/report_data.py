@@ -76,7 +76,7 @@ def artifact_display_label(artifact: ArtifactLink, siblings: List[ArtifactLink])
 
 def artifact_value(artifact: ArtifactLink) -> str:
     if artifact.url:
-        return f"link:{artifact.url}"
+        return f"link:{artifact.url}\n{artifact.relative_path}"
     return artifact.key
 
 
@@ -134,6 +134,13 @@ class UiDataBuilder:
             while len(source) < 6:
                 source.append(-1)
             source.append(self._source_index("xmlUrls", execution.source_xml_url))
+        if execution.qdb_process_id:
+            if "qdbProcessIds" not in self.source_tables:
+                self.source_tables["qdbProcessIds"] = []
+                self._source_indexes["qdbProcessIds"] = {}
+            while len(source) < 7:
+                source.append(-1)
+            source.append(self._source_index("qdbProcessIds", execution.qdb_process_id))
         return source
 
     def _tag_index(self, table: str, value: str) -> int:

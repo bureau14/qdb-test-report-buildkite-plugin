@@ -56,6 +56,7 @@ export declare global {
     jobUrl: string | undefined;
     jobId: string | undefined;
     xmlUrl: string | undefined;
+    qdbProcessId: string | undefined;
   }
 
   interface SourceTables {
@@ -66,6 +67,7 @@ export declare global {
     jobUrls: string[];
     jobIds: string[];
     xmlUrls: string[];
+    qdbProcessIds?: string[];
   }
 
   interface TagTables {

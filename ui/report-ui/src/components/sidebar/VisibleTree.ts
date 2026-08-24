@@ -42,7 +42,7 @@ export function visibleRows(
   ): boolean {
     const statuses = nodeStatuses(execution, node);
     let hasVisibleChild = false;
-    for (const child of sortedChildren(children)) {
+    for (const child of children) {
       hasVisibleChild =
         addVisibleDescendants(execution, child, execution.children(child)) ||
         hasVisibleChild;
@@ -67,7 +67,7 @@ export function visibleRows(
       return true;
     }
     let descendantMatch = false;
-    for (const child of sortedChildren(children)) {
+    for (const child of children) {
       descendantMatch =
         containsSearchMatch(execution, child, execution.children(child)) ||
         descendantMatch;

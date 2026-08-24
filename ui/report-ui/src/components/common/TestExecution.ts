@@ -200,6 +200,10 @@ export default class TestExecution {
         node.source.length > 6 && node.source[6] >= 0
           ? this.sourceTables.xmlUrls[node.source[6]]
           : undefined,
+      qdbProcessId:
+        node.source.length > 7 && node.source[7] >= 0
+          ? this.sourceTables.qdbProcessIds?.[node.source[7]]
+          : undefined,
     };
   }
 
@@ -216,6 +220,7 @@ export default class TestExecution {
           source.xml,
           source.jobId,
           source.xmlUrl,
+          source.qdbProcessId,
         ].join("\u0000");
         if (!sourceKeys.has(key)) {
           sourceKeys.add(key);
@@ -227,6 +232,25 @@ export default class TestExecution {
 
     collect(node);
     return sources;
+  }
+
+  sourceArtifactsForNode(node: TestNodeData): SourceArtifactData[] {
+    const artifacts: SourceArtifactData[] = [];
+    const artifactKeys = new Set<string>();
+
+    const collect = (current: TestNodeData) => {
+      for (const artifact of current.sourceArtifacts || []) {
+        const key = [artifact.name, artifact.relativePath, artifact.key].join("\u0000");
+        if (!artifactKeys.has(key)) {
+          artifactKeys.add(key);
+          artifacts.push(artifact);
+        }
+      }
+      this.children(current).forEach(collect);
+    };
+
+    collect(node);
+    return artifacts;
   }
 
   tagLabels(node: TestNodeData): string[] | undefined {

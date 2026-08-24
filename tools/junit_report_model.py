@@ -19,6 +19,8 @@ STATUS_SEVERITY = {"SUCCESSFUL": 0, "SKIPPED": 1, "FAILED": 2, "ERRORED": 3}
 # to support Buildkite parallelism: multiple jobs for the same variant can each
 # upload their own JUnit XML without being treated as distinct tests in the report.
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+QDB_PROCESS_ID_TESTCASE = "qdb_test_process_id"
+QDB_TEST_LOG_NAME_RE = re.compile(r"^qdb_test_log_pid_(\d+)_.+\.json$")
 
 
 def log_info(message: str) -> None:
@@ -64,6 +66,7 @@ class TestcaseExecution:
     reason: Optional[str] = None
     output: Optional[str] = None
     source_artifacts: List[ArtifactLink] = field(default_factory=list)
+    qdb_process_id: Optional[str] = None
 
 
 @dataclass
@@ -321,6 +324,47 @@ def local_name(element: ET.Element) -> str:
     return element.tag.rsplit("}", 1)[-1]
 
 
+def testcase_system_out(testcase: ET.Element) -> Optional[str]:
+    for child in testcase:
+        if local_name(child) == "system-out" and child.text:
+            return child.text.strip() or None
+    return None
+
+
+def qdb_process_id(root: ET.Element) -> Optional[str]:
+    values = {
+        value
+        for testcase in root.iter()
+        if local_name(testcase) == "testcase"
+        and testcase.attrib.get("name") == QDB_PROCESS_ID_TESTCASE
+        and (value := testcase_system_out(testcase)) is not None
+        and value.isdecimal()
+    }
+    if len(values) == 1:
+        return values.pop()
+    if values:
+        log_warn(f"conflicting {QDB_PROCESS_ID_TESTCASE} values: {sorted(values)}")
+    return None
+
+
+def is_qdb_test_log(artifact: ArtifactLink) -> bool:
+    return QDB_TEST_LOG_NAME_RE.fullmatch(Path(artifact.relative_path).name) is not None
+
+
+def source_artifacts_for_junit(
+    qdb_pid: Optional[str], artifacts: List[ArtifactLink]
+) -> List[ArtifactLink]:
+    non_qdb_logs = [artifact for artifact in artifacts if not is_qdb_test_log(artifact)]
+    if not qdb_pid:
+        return non_qdb_logs
+    return non_qdb_logs + [
+        artifact
+        for artifact in artifacts
+        if (match := QDB_TEST_LOG_NAME_RE.fullmatch(Path(artifact.relative_path).name))
+        and match.group(1) == qdb_pid
+    ]
+
+
 def iter_junit_suites(root: ET.Element) -> List[ET.Element]:
     if local_name(root) == "testsuite":
         return [root]
@@ -352,6 +396,7 @@ def parse_junit_file(
             )
         return []
     executions: List[TestcaseExecution] = []
+    source_qdb_process_id = qdb_process_id(root)
     suites = iter_junit_suites(root)
     if not suites:
         log_warn(f"no testsuite elements found file={path} platform={platform}")
@@ -383,6 +428,7 @@ def parse_junit_file(
                     reason=reason,
                     output=output,
                     source_artifacts=source_artifacts or [],
+                    qdb_process_id=source_qdb_process_id,
                 )
             )
     status_counts = Counter(execution.status for execution in executions)
@@ -484,11 +530,18 @@ def build_report(
             source_job_id=effective_source_job_id,
             source_job_url=source_job_url,
             source_xml_url=source_xml_url,
-            source_artifacts=(source_artifacts_by_job_id or {}).get(
-                effective_source_job_id or "", []
-            ),
             malformed_junit_xml=malformed_junit_xml,
         )
+        qdb_pid = next(
+            (execution.qdb_process_id for execution in file_executions if execution.qdb_process_id),
+            None,
+        )
+        matching_artifacts = source_artifacts_for_junit(
+            qdb_pid,
+            (source_artifacts_by_job_id or {}).get(effective_source_job_id or "", []),
+        )
+        for execution in file_executions:
+            execution.source_artifacts = matching_artifacts
         total_raw_executions += len(file_executions)
         for execution in file_executions:
             suite = suites.get(execution.suite_name)

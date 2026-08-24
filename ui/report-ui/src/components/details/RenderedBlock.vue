@@ -11,6 +11,15 @@ defineProps<{ block: BlockData; depth: number }>();
 const showImage = inject(imageHandler, () => {
   console.error("No image handler provided");
 });
+
+function linkHref(value: string): string {
+  return value.substring(5).split("\n", 2)[0];
+}
+
+function linkText(value: string): string {
+  const [href, text] = value.substring(5).split("\n", 2);
+  return text || href;
+}
 </script>
 
 <template>
@@ -33,14 +42,12 @@ const showImage = inject(imageHandler, () => {
         <td>
           <a
             v-if="(pair[1] as string).startsWith('link:')"
-            :href="(pair[1] as string).substring(5)"
+            :href="linkHref(pair[1] as string)"
             target="_blank"
             rel="noopener noreferrer"
             class="text-blue-600 dark:text-blue-500 hover:underline"
           >
-            <pre class="text-sm whitespace-pre-wrap break-all">{{
-              (pair[1] as string).substring(5)
-            }}</pre>
+            <pre class="text-sm whitespace-pre-wrap break-all">{{ linkText(pair[1] as string) }}</pre>
           </a>
           <pre v-else class="text-sm whitespace-pre-wrap break-all">{{
             pair[1]
