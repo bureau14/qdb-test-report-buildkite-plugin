@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Serialize the neutral JUnit report model into the report HTML UI data contract."""
 
 from __future__ import annotations

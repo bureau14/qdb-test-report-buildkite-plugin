@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Parse JUnit XML files into a neutral report model."""
 
 from __future__ import annotations
