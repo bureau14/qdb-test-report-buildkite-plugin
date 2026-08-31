@@ -101,6 +101,29 @@ def test_build_annotation_body_lists_malformed_junit_xml_files():
     assert get_job_annotation_style(summary) == "error"
 
 
+def test_build_annotation_body_links_uploaded_malformed_junit_xml():
+    summary = {
+        "logical_tests": 1,
+        "status_counts": {"SUCCESSFUL": 1},
+        "malformed_junit_xml": [
+            {
+                "file": "reports/linux/broken.xml",
+                "platform": "linux",
+                "error": "no element found: line 1, column 11",
+                "url": "https://reports.example.com/xml/reports/linux/broken.xml",
+            }
+        ],
+    }
+
+    body = build_annotation_body("Job report", summary, None, scope="job")
+
+    assert (
+        '<a href="https://reports.example.com/xml/reports/linux/broken.xml" '
+        'target="_blank" rel="noopener noreferrer">reports/linux/broken.xml (linux)</a>: '
+        "no element found: line 1, column 11"
+    ) in body
+
+
 def test_build_annotation_body_explains_empty_global_targets():
     summary = {
         "logical_tests": 135,

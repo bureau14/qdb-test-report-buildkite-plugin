@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from pathlib import Path
 from typing import Any
 
 from junit_report_model import (
@@ -381,4 +382,14 @@ def report_to_report_ui_data(
                 artifact
             )
         execution_data["sections"].append(kvp_section("Artifacts", artifact_content))
+    if report.malformed_junit_xml:
+        malformed_content: dict[str, Any] = {}
+        for item in report.malformed_junit_xml:
+            file = item.get("file", "<unknown>")
+            platform = item.get("platform", "<unknown>")
+            error = item.get("error", "invalid XML")
+            malformed_content[f"{Path(file).name} ({platform})"] = (
+                f"link:{item['url']}\n{error}" if item.get("url") else error
+            )
+        execution_data["sections"].append(kvp_section("Malformed JUnit XML", malformed_content))
     return [execution_data]
