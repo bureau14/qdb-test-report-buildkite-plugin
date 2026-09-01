@@ -448,6 +448,35 @@ def test_build_report_records_malformed_xml_files_and_skips_empty_files(tmp_path
     assert "broken.xml" in stderr
 
 
+def test_report_data_links_uploaded_malformed_junit_xml(tmp_path):
+    from junit_report_model import build_report
+    from report_data import report_to_report_ui_data
+
+    linux = tmp_path / "linux"
+    broken = linux / "broken.xml"
+    write(
+        linux / "valid.xml",
+        junit_xml('<testcase classname="Smoke" name="passes" time="0.01"/>'),
+    )
+    write(broken, "<testsuite>")
+    malformed_url = "https://reports.example.com/xml/linux/broken.xml"
+
+    report = build_report(
+        "dirty xml",
+        [("linux", linux)],
+        xml_source_links={broken.resolve(): malformed_url},
+    )
+    execution = report_to_report_ui_data(report)[0]
+
+    assert report.malformed_junit_xml[0]["url"] == malformed_url
+    malformed_section = next(
+        section for section in execution["sections"] if section["title"] == "Malformed JUnit XML"
+    )
+    assert malformed_section["blocks"][0]["content"] == {
+        "broken.xml (linux)": f"link:{malformed_url}\nno element found: line 1, column 11"
+    }
+
+
 def test_build_report_keeps_source_file_aware_identity_and_worst_duplicate_status(
     tmp_path,
 ):

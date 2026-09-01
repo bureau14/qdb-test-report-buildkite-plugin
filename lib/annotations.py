@@ -78,11 +78,16 @@ def build_annotation_body(
         body += f"\n\n⚠️ Warnings\n\n{warning_lines}"
     malformed_junit_xml = get_malformed_junit_xml(summary)
     if malformed_junit_xml:
-        malformed_lines = "\n".join(
-            f"- {item.get('file', '<unknown>')} ({item.get('platform', '<unknown>')}): "
-            f"{item.get('error', 'invalid XML')}"
-            for item in malformed_junit_xml
-        )
+
+        def malformed_line(item: dict) -> str:
+            file = item.get("file", "<unknown>")
+            platform = item.get("platform", "<unknown>")
+            label = f"{file} ({platform})"
+            if url := item.get("url"):
+                label = f'<a href="{url}" target="_blank" rel="noopener noreferrer">{label}</a>'
+            return f"- {label}: {item.get('error', 'invalid XML')}"
+
+        malformed_lines = "\n".join(malformed_line(item) for item in malformed_junit_xml)
         body += f"\n\n❌ Malformed JUnit XML\n\n{malformed_lines}"
     if html_url:
         body += f'\n\n<a href="{html_url}" target="_blank" rel="noopener noreferrer">Open full report</a>'

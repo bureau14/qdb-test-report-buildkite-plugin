@@ -394,9 +394,10 @@ def parse_junit_file(
     except ET.ParseError as error:
         log_warn(f"skipping malformed JUnit XML file file={path} platform={platform} error={error}")
         if malformed_junit_xml is not None:
-            malformed_junit_xml.append(
-                {"file": str(path), "platform": platform, "error": str(error)}
-            )
+            malformed = {"file": str(path), "platform": platform, "error": str(error)}
+            if source_xml_url:
+                malformed["url"] = source_xml_url
+            malformed_junit_xml.append(malformed)
         return []
     executions: list[TestcaseExecution] = []
     source_qdb_process_id = qdb_process_id(root)
