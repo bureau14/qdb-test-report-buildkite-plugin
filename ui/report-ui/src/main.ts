@@ -20,14 +20,14 @@ function measureStartup<T>(name: string, callback: () => T): T {
 function readEmbeddedReportData(): ExecutionData[] {
   const el = document.getElementById("report-data");
   if (!el) {
-    if (globalThis.testExecutions) {
+    if (Array.isArray(globalThis.testExecutions)) {
       return globalThis.testExecutions;
     }
     throw new Error("Missing embedded report data: #report-data");
   }
 
   performance.mark("report-json-parse-start");
-  const data = JSON.parse(el.textContent || "null") as ExecutionData[];
+  const data: unknown = JSON.parse(el.textContent || "null");
   performance.mark("report-json-parse-end");
   performance.measure(
     "report-json-parse",
@@ -36,7 +36,10 @@ function readEmbeddedReportData(): ExecutionData[] {
   );
 
   el.remove();
-  return data;
+  if (!Array.isArray(data)) {
+    throw new Error("Invalid embedded report data: expected an array");
+  }
+  return data as ExecutionData[];
 }
 
 const reportData = readEmbeddedReportData();

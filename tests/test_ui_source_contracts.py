@@ -34,6 +34,9 @@ def test_main_reads_embedded_report_data_as_json_and_removes_script_node():
     assert 'document.getElementById("report-data")' in source
     assert "JSON.parse" in source
     assert ".remove()" in source
+    assert "Array.isArray(globalThis.testExecutions)" in source
+    assert "Array.isArray(data)" in source
+    assert '"Invalid embedded report data: expected an array"' in source
     assert '"report-json-parse"' in source
     assert '"report-model-create"' in source
     assert '"report-app-mount"' in source
