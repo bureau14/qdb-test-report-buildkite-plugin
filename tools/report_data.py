@@ -103,6 +103,8 @@ class UiDataBuilder:
             "logicalIds": [],
         }
         self._tag_indexes: dict[str, dict[str, int]] = {key: {} for key in self.tag_tables}
+        self.source_artifact_table: list[dict[str, Any]] = []
+        self._source_artifact_indexes: dict[tuple[str, str, str, str | None, int], int] = {}
 
     def next_id(self) -> str:
         value = str(self._next_id)
@@ -149,6 +151,22 @@ class UiDataBuilder:
             indexes[value] = len(self.tag_tables[table])
             self.tag_tables[table].append(value)
         return indexes[value]
+
+    def source_artifact_indexes(self, artifacts: list[ArtifactLink]) -> list[int]:
+        indexes: list[int] = []
+        for artifact in artifacts:
+            identity = (
+                artifact.name,
+                artifact.relative_path,
+                artifact.key,
+                artifact.url,
+                artifact.size_bytes,
+            )
+            if identity not in self._source_artifact_indexes:
+                self._source_artifact_indexes[identity] = len(self.source_artifact_table)
+                self.source_artifact_table.append(artifact_link_data(artifact))
+            indexes.append(self._source_artifact_indexes[identity])
+        return indexes
 
     def suite_tags(self, suite: TestSuite) -> list[Any]:
         return [0, self._tag_index("suites", suite.name)]
@@ -200,7 +218,7 @@ class UiDataBuilder:
         if tags is not None:
             result["tags"] = tags
         if source_artifacts:
-            result["sourceArtifacts"] = [artifact_link_data(item) for item in source_artifacts]
+            result["sourceArtifacts"] = self.source_artifact_indexes(source_artifacts)
         self.test_nodes.append(result)
         return result
 
@@ -363,6 +381,7 @@ def report_to_report_ui_data(
             "rootStatus": report.root_status,
         },
         "sourceTables": builder.source_tables,
+        "sourceArtifactTable": builder.source_artifact_table,
         "tagTables": builder.tag_tables,
         "sections": [
             labels_section(root_labels),

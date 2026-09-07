@@ -23,6 +23,7 @@ UUID_RE = re.compile(
 )
 QDB_PROCESS_ID_TESTCASE = "qdb_test_process_id"
 QDB_TEST_LOG_NAME_RE = re.compile(r"^qdb_test_log_pid_(\d+)_.+\.json$")
+MAX_EMBEDDED_TEST_OUTPUT_BYTES = 256 * 1024
 
 
 def log_info(message: str) -> None:
@@ -39,6 +40,20 @@ def format_counts(counter: Counter[str]) -> str:
         if key not in STATUS_ORDER and counter[key]:
             parts.append(f"{key}={counter[key]}")
     return ", ".join(parts) if parts else "none"
+
+
+def cap_embedded_test_output(output: str) -> str:
+    encoded_output = output.encode("utf-8")
+    if len(encoded_output) <= MAX_EMBEDDED_TEST_OUTPUT_BYTES:
+        return output
+
+    message = (
+        f"\n\n[Output truncated from {len(encoded_output)} bytes. "
+        "Inspect the full JUnit XML for complete output.]"
+    )
+    content_limit = MAX_EMBEDDED_TEST_OUTPUT_BYTES - len(message.encode("utf-8"))
+    preview = encoded_output[:content_limit].decode("utf-8", errors="ignore")
+    return f"{preview}{message}"
 
 
 @dataclass
@@ -274,7 +289,8 @@ def testcase_reason_and_output(testcase: ET.Element, status: str) -> tuple[str |
             if reason is None and status == "SKIPPED":
                 reason = output_text.splitlines()[0]
 
-    return reason, "\n\n".join(output_parts) if output_parts else None
+    output = "\n\n".join(output_parts) if output_parts else None
+    return reason, cap_embedded_test_output(output) if output else None
 
 
 def duration_seconds(testcase: ET.Element) -> float:

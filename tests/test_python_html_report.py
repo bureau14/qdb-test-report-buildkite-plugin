@@ -210,14 +210,17 @@ def test_report_data_renders_buildkite_and_commit_urls_as_links(tmp_path):
     assert execution["sourceTables"]["buildUrls"] == ["https://buildkite.example/builds/1234"]
 
 
-def test_report_data_renders_artifacts_only_in_leaf_source_sections(tmp_path):
+def test_report_data_interns_repeated_leaf_artifacts_at_execution_level(tmp_path):
     from junit_report_model import ArtifactLink, build_report
     from report_data import report_to_report_ui_data
 
     linux = tmp_path / "linux"
     write(
         linux / "a.xml",
-        junit_xml('<testcase classname="Smoke" name="passes" time="0.1"/>'),
+        junit_xml(
+            '<testcase classname="Smoke" name="passes" time="0.1"/>',
+            '<testcase classname="Smoke" name="also_passes" time="0.1"/>',
+        ),
     )
 
     report = build_report(
@@ -248,15 +251,17 @@ def test_report_data_renders_artifacts_only_in_leaf_source_sections(tmp_path):
     assert "Test logs" not in root_metadata
     assert "Artifact: Test logs" not in root_metadata
 
-    leaf = next(node for node in execution["testNodes"] if node.get("status") == "SUCCESSFUL")
-    source_artifact = leaf["sourceArtifacts"][0]
-    assert source_artifact == {
-        "name": "Test logs",
-        "relativePath": "test-logs-1.tar.gz",
-        "key": "prefix/artifacts/test-logs/test-logs-1.tar.gz",
-        "url": "https://reports.example.com/prefix/artifacts/test-logs/test-logs-1.tar.gz",
-        "sizeBytes": 123,
-    }
+    assert execution["sourceArtifactTable"] == [
+        {
+            "name": "Test logs",
+            "relativePath": "test-logs-1.tar.gz",
+            "key": "prefix/artifacts/test-logs/test-logs-1.tar.gz",
+            "url": "https://reports.example.com/prefix/artifacts/test-logs/test-logs-1.tar.gz",
+            "sizeBytes": 123,
+        }
+    ]
+    leaves = [node for node in execution["testNodes"] if node.get("status") == "SUCCESSFUL"]
+    assert [leaf["sourceArtifacts"] for leaf in leaves] == [[0], [0]]
 
 
 def test_artifact_link_value_displays_uploaded_relative_path():
@@ -330,16 +335,16 @@ def test_qdb_process_id_metadata_matches_only_its_uploaded_json_log(tmp_path):
     ]
     assert all(node["source"] == [0, 0, 0, -1, -1, -1, -1, 0] for node in leaves)
     assert execution["sourceTables"]["qdbProcessIds"] == ["90560"]
-    for leaf in leaves:
-        assert leaf["sourceArtifacts"] == [
-            {
-                "name": "QDB test logs",
-                "relativePath": matching_log.relative_path,
-                "key": matching_log.key,
-                "url": matching_log.url,
-                "sizeBytes": 123,
-            }
-        ]
+    assert execution["sourceArtifactTable"] == [
+        {
+            "name": "QDB test logs",
+            "relativePath": matching_log.relative_path,
+            "key": matching_log.key,
+            "url": matching_log.url,
+            "sizeBytes": 123,
+        }
+    ]
+    assert [leaf["sourceArtifacts"] for leaf in leaves] == [[0], [0]]
 
 
 def test_report_summary_ui_does_not_show_raw_testcases(tmp_path):
@@ -781,6 +786,40 @@ def test_non_success_leaf_preserves_source_metadata_without_implicit_source(tmp_
     }
     assert "source:junit" not in json.dumps(leaf["sections"])
     assert "Reason" in [section["title"] for section in leaf["sections"]]
+
+
+def test_report_caps_large_output_and_points_to_full_junit_xml(tmp_path):
+    from junit_report_model import MAX_EMBEDDED_TEST_OUTPUT_BYTES, build_report
+    from report_data import report_to_report_ui_data
+
+    linux = tmp_path / "linux"
+    write(
+        linux / "junit.xml",
+        junit_xml(
+            '<testcase classname="Smoke" name="fails" time="0.01">'
+            '<failure message="failure"><![CDATA[begin\n'
+            + ("middle line\n" * (MAX_EMBEDDED_TEST_OUTPUT_BYTES // 4))
+            + "]]></failure>"
+            "</testcase>"
+        ),
+    )
+
+    execution = report_to_report_ui_data(build_report("capped", [("linux", linux)]))[0]
+    leaf = next(node for node in execution["testNodes"] if node.get("status") == "FAILED")
+    pre_content = next(
+        block["content"]
+        for section in leaf["sections"]
+        for block in section["blocks"]
+        if block["type"] == "sub"
+        for subsection in block["content"]
+        for block in subsection["blocks"]
+        if block["type"] == "pre"
+    )
+
+    assert len(pre_content.encode("utf-8")) <= MAX_EMBEDDED_TEST_OUTPUT_BYTES
+    assert pre_content.startswith("begin\n")
+    assert "Output truncated from" in pre_content
+    assert "Inspect the full JUnit XML for complete output." in pre_content
 
 
 def test_report_ui_data_has_valid_tree_leaf_statuses_and_failure_details(tmp_path):

@@ -71,6 +71,7 @@ export default class TestExecution {
   private readonly statusCounts: Map<string, number>;
   private readonly firstFailedOrErroredNode: TestNodeData | undefined;
   private readonly sourceTables: SourceTables | undefined;
+  private readonly sourceArtifactTable: SourceArtifactData[] | undefined;
   private readonly tagTables: TagTables | undefined;
 
   constructor(execution: ExecutionData) {
@@ -80,6 +81,7 @@ export default class TestExecution {
     this.sections = execution.sections || [];
     this.summary = execution.summary;
     this.sourceTables = execution.sourceTables;
+    this.sourceArtifactTable = execution.sourceArtifactTable;
     this.tagTables = execution.tagTables;
     this.rootIds = execution.roots || [];
     this.childrenMetadata = new Map(
@@ -239,7 +241,11 @@ export default class TestExecution {
     const artifactKeys = new Set<string>();
 
     const collect = (current: TestNodeData) => {
-      for (const artifact of current.sourceArtifacts || []) {
+      for (const artifactIndex of current.sourceArtifacts || []) {
+        const artifact = this.sourceArtifactTable?.[artifactIndex];
+        if (!artifact) {
+          continue;
+        }
         const key = [artifact.name, artifact.relativePath, artifact.key].join("\u0000");
         if (!artifactKeys.has(key)) {
           artifactKeys.add(key);
