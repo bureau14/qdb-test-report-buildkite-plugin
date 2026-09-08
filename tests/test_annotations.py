@@ -1,4 +1,104 @@
+import annotations
+import pytest
 from annotations import build_annotation_body, get_annotation_style, get_job_annotation_style
+
+
+def failed_case(name="Class::test", status="FAILED", platform="linux"):
+    return {
+        "suite": "suite",
+        "test_file": "tests.xml",
+        "test_case": name,
+        "platform": platform,
+        "status": status,
+    }
+
+
+@pytest.mark.parametrize("scope", ["build", "job"])
+def test_failed_test_table(scope):
+    summary = {
+        "logical_tests": 2,
+        "status_counts": {"FAILED": 1, "ERRORED": 1},
+        "failed_test_cases": [failed_case(), failed_case("Class::error", "ERRORED", "windows")],
+    }
+    body = build_annotation_body("Tests", summary, None, scope=scope)
+    assert "| Suite | Test file | Test case | Target | Status |" in body
+    assert "| suite | tests.xml | Class::test | linux | FAILED |" in body
+    assert "| suite | tests.xml | Class::error | windows | ERRORED |" in body
+    assert "omitted" not in body
+
+
+def test_failed_test_table_escapes_test_names():
+    summary = {"failed_test_cases": [failed_case("<script>&|`*_[x]~\\\r\nnext")]}
+    body = build_annotation_body("Tests", summary, None)
+    assert "&lt;script&gt;&amp;&#124;&#96;&#42;&#95;&#91;x&#93;&#126;&#92; next" in body
+    assert "<script>" not in body
+
+
+def test_failed_test_table_fills_byte_budget():
+    case = failed_case("Class::測試🙂")
+    summary = {
+        "warnings": ["Warning with unicode: ⚠"],
+        "failed_test_cases": [case] * 20000,
+    }
+    body = build_annotation_body("Tests", summary, "https://example.com/report")
+    row = "| suite | tests.xml | Class::測試🙂 | linux | FAILED |\n"
+    shown = body.count(row)
+    assert 0 < shown < 20000
+    assert f"{20000 - shown} failed test execution(s) omitted" in body
+    assert "Warning with unicode: ⚠" in body
+    assert "Open full report</a>" in body
+    assert len(body.encode("utf-8")) <= annotations.MAX_ANNOTATION_BYTES
+    assert len((body + row).encode("utf-8")) > annotations.MAX_ANNOTATION_BYTES
+
+
+def test_failed_test_table_keeps_all_rows_at_exact_limit(monkeypatch):
+    summary = {"failed_test_cases": [failed_case(), failed_case("other")]}
+    full_body = build_annotation_body("Tests", summary, None)
+    monkeypatch.setattr(annotations, "MAX_ANNOTATION_BYTES", len(full_body.encode("utf-8")))
+    assert build_annotation_body("Tests", summary, None) == full_body
+
+
+def test_failed_test_table_skips_oversized_row_and_keeps_later_cases():
+    summary = {
+        "failed_test_cases": [failed_case("x" * annotations.MAX_ANNOTATION_BYTES), failed_case()],
+    }
+    body = build_annotation_body("Tests", summary, None)
+    assert "| suite | tests.xml | Class::test | linux | FAILED |" in body
+    assert "1 failed test execution(s) omitted" in body
+    assert len(body.encode("utf-8")) <= annotations.MAX_ANNOTATION_BYTES
+
+
+def test_failed_test_table_without_room_for_rows(monkeypatch):
+    monkeypatch.setattr(annotations, "MAX_ANNOTATION_BYTES", 150)
+    body = build_annotation_body("Tests", {"failed_test_cases": [failed_case()]}, None)
+    assert "1 failed test execution(s) omitted" in body
+    assert "| Suite |" not in body
+    assert len(body.encode("utf-8")) <= 150
+
+
+@pytest.mark.parametrize("scope", ["build", "job"])
+def test_annotation_sends_large_utf8_body_via_stdin(monkeypatch, scope):
+    calls = []
+    monkeypatch.setattr(
+        annotations.subprocess, "run", lambda *args, **kwargs: calls.append((args, kwargs))
+    )
+    body = "測試🙂" * 50000
+    annotations.create_buildkite_annotation(body, "tests", "error", 10, scope=scope)
+    args, kwargs = calls[0]
+    expected = [
+        "buildkite-agent",
+        "annotate",
+        "--context",
+        "tests",
+        "--style",
+        "error",
+        "--priority",
+        "10",
+    ]
+    if scope == "job":
+        expected += ["--scope", "job"]
+    assert args == (expected,)
+    assert kwargs == {"input": body.encode("utf-8"), "check": True}
 
 
 def test_build_annotation_body_multi_target():

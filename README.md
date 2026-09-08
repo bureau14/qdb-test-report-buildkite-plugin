@@ -18,6 +18,8 @@ Configure exactly one mode per plugin invocation:
 
 Common report options such as `title`, `only_failures`, `annotate`, and `project_id` stay at the plugin top level.
 
+Job and aggregate annotations include a table of failed and errored test executions, showing the suite, test file, test case, target, and status. Complete rows are included up to Buildkite's 1 MiB annotation limit, with a count of omitted executions when necessary. The summary and full-report link retain their space in the annotation.
+
 The plugin runs from the Buildkite `post-command` hook, so reports are still published after the step command exits with a failure.
 
 The plugin exits `64` when `job.fail_on_test_failures` is true and the generated job report contains failed or errored tests. It exits `1` when any discovered JUnit XML is malformed and creates an error annotation listing the malformed files when `annotate: true`. When the HTML report is available through `ARTIFACTS_DOMAIN`, that annotation includes its link; if the report is unavailable, it still creates the error annotation without a link. When the original job command exits non-zero but every reported test passes, the plugin creates a warning annotation explaining the mismatch, even without `ARTIFACTS_DOMAIN`. It also exits `1` for other internal plugin errors and otherwise exits `0` so Buildkite can preserve the original command status. Aggregate mode exits `0` when no XML is discovered, but creates an error-style annotation unless `annotate: false` is set.

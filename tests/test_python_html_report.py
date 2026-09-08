@@ -1000,7 +1000,55 @@ def test_cli_writes_summary_json(tmp_path):
         "logical_status_counts": {"SUCCESSFUL": 2, "FAILED": 1},
         "root_status": "FAILED",
         "malformed_junit_xml": [],
+        "failed_test_cases": [
+            {
+                "suite": "suite",
+                "test_file": "junit",
+                "test_case": "S::f",
+                "platform": "linux",
+                "status": "FAILED",
+            }
+        ],
     }
+
+
+def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
+    from annotations import build_annotation_body
+    from junit_html_report import generate_html_report
+
+    linux = write(
+        tmp_path / "linux" / "tests.xml",
+        junit_xml(
+            '<testcase classname="S" name="pass"/>',
+            '<testcase classname="S" name="skip"><skipped/></testcase>',
+            '<testcase classname="S" name="bad"><failure/></testcase>',
+            '<testcase classname="S" name="bad"/>',
+        ),
+    )
+    windows = write(
+        tmp_path / "windows" / "tests.xml",
+        junit_xml(
+            '<testcase classname="S" name="bad"><error/></testcase>',
+        ),
+    )
+    summary_path = tmp_path / "summary.json"
+    assert (
+        generate_html_report(
+            title="Tests",
+            platform_specs=[("linux", linux), ("windows", windows)],
+            output=tmp_path / "report.html",
+            summary_json=summary_path,
+            only_failures=True,
+        )
+        == 0
+    )
+    summary = json.loads(summary_path.read_text())
+    assert len(summary["failed_test_cases"]) == 2
+    body = build_annotation_body("Tests", summary, None)
+    assert "| suite | tests | S::bad | linux | FAILED |" in body
+    assert "| suite | tests | S::bad | windows | ERRORED |" in body
+    assert "S::pass" not in body
+    assert "S::skip" not in body
 
 
 def test_cli_fail_on_test_failures_returns_64_for_failures_and_errors(tmp_path):
