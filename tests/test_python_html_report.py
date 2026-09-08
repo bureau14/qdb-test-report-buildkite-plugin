@@ -1007,6 +1007,8 @@ def test_cli_writes_summary_json(tmp_path):
                 "test_case": "S::f",
                 "platform": "linux",
                 "status": "FAILED",
+                "reason": "f",
+                "source_xml_url": None,
             }
         ],
     }
@@ -1021,14 +1023,14 @@ def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
         junit_xml(
             '<testcase classname="S" name="pass"/>',
             '<testcase classname="S" name="skip"><skipped/></testcase>',
-            '<testcase classname="S" name="bad"><failure/></testcase>',
+            '<testcase classname="S" name="bad"><failure message="Expected 42"/></testcase>',
             '<testcase classname="S" name="bad"/>',
         ),
     )
     windows = write(
         tmp_path / "windows" / "tests.xml",
         junit_xml(
-            '<testcase classname="S" name="bad"><error/></testcase>',
+            '<testcase classname="S" name="bad"><error message="Timeout"/></testcase>',
         ),
     )
     summary_path = tmp_path / "summary.json"
@@ -1038,6 +1040,10 @@ def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
             platform_specs=[("linux", linux), ("windows", windows)],
             output=tmp_path / "report.html",
             summary_json=summary_path,
+            xml_source_links={
+                linux.resolve(): "https://example.com/linux/job-1/tests.xml",
+                windows.resolve(): "https://example.com/windows/job-2/tests.xml",
+            },
             only_failures=True,
         )
         == 0
@@ -1045,8 +1051,14 @@ def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
     summary = json.loads(summary_path.read_text())
     assert len(summary["failed_test_cases"]) == 2
     body = build_annotation_body("Tests", summary, None)
-    assert "| suite | tests | S::bad | linux | FAILED |" in body
-    assert "| suite | tests | S::bad | windows | ERRORED |" in body
+    assert (
+        "| suite | tests | S::bad | linux | FAILED | Expected 42 | "
+        '<a href="https://example.com/linux/job-1/tests.xml"'
+    ) in body
+    assert (
+        "| suite | tests | S::bad | windows | ERRORED | Timeout | "
+        '<a href="https://example.com/windows/job-2/tests.xml"'
+    ) in body
     assert "S::pass" not in body
     assert "S::skip" not in body
 

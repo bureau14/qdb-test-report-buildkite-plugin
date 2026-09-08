@@ -21,7 +21,9 @@ def test_failed_test_table(scope):
         "failed_test_cases": [failed_case(), failed_case("Class::error", "ERRORED", "windows")],
     }
     body = build_annotation_body("Tests", summary, None, scope=scope)
-    assert "| Suite | Test file | Test case | Target | Status |" in body
+    assert (
+        "| Suite | Test file | Test case | Target | Status | Failure reason | JUnit XML |" in body
+    )
     assert "| suite | tests.xml | Class::test | linux | FAILED |" in body
     assert "| suite | tests.xml | Class::error | windows | ERRORED |" in body
     assert "omitted" not in body
@@ -36,12 +38,17 @@ def test_failed_test_table_escapes_test_names():
 
 def test_failed_test_table_fills_byte_budget():
     case = failed_case("Class::測試🙂")
+    case.update(reason="Expected 測試🙂", source_xml_url="https://example.com/job/tests.xml")
     summary = {
         "warnings": ["Warning with unicode: ⚠"],
         "failed_test_cases": [case] * 20000,
     }
     body = build_annotation_body("Tests", summary, "https://example.com/report")
-    row = "| suite | tests.xml | Class::測試🙂 | linux | FAILED |\n"
+    row = (
+        "| suite | tests.xml | Class::測試🙂 | linux | FAILED | Expected 測試🙂 | "
+        '<a href="https://example.com/job/tests.xml" target="_blank" '
+        'rel="noopener noreferrer">XML</a> |\n'
+    )
     shown = body.count(row)
     assert 0 < shown < 20000
     assert f"{20000 - shown} failed test execution(s) omitted" in body
@@ -49,6 +56,37 @@ def test_failed_test_table_fills_byte_budget():
     assert "Open full report</a>" in body
     assert len(body.encode("utf-8")) <= annotations.MAX_ANNOTATION_BYTES
     assert len((body + row).encode("utf-8")) > annotations.MAX_ANNOTATION_BYTES
+
+
+def test_failed_test_table_escapes_reason_and_exact_xml_link():
+    case = failed_case()
+    case.update(
+        reason="Expected <value> | **actual**\r\nsecond line",
+        source_xml_url='https://example.com/job/tests.xml?a=1&b="x|y"',
+    )
+    body = build_annotation_body("Tests", {"failed_test_cases": [case]}, None)
+    assert "Expected &lt;value&gt; &#124; &#42;&#42;actual&#42;&#42; second line" in body
+    assert (
+        '<a href="https://example.com/job/tests.xml?a=1&amp;b=&quot;x&#124;y&quot;" '
+        'target="_blank" rel="noopener noreferrer">XML</a>'
+    ) in body
+
+
+def test_failed_test_table_caps_reason():
+    case = failed_case()
+    case["reason"] = "測" * 1000
+    body = build_annotation_body("Tests", {"failed_test_cases": [case]}, None)
+    assert "測" * (annotations.MAX_FAILURE_REASON_CHARS - 1) + "…" in body
+    assert "測" * annotations.MAX_FAILURE_REASON_CHARS not in body
+
+
+@pytest.mark.parametrize("fields", [{}, {"reason": None, "source_xml_url": None}])
+def test_failed_test_table_missing_reason_and_xml_link(fields):
+    case = failed_case()
+    case.update(fields)
+    body = build_annotation_body("Tests", {"failed_test_cases": [case]}, None)
+    assert "| FAILED | — | — |\n" in body
+    assert "<a " not in body
 
 
 def test_failed_test_table_keeps_all_rows_at_exact_limit(monkeypatch):

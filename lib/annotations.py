@@ -5,6 +5,7 @@ import sys
 from html import escape
 
 MAX_ANNOTATION_BYTES = 1024 * 1024
+MAX_FAILURE_REASON_CHARS = 240
 
 
 def failed_test_table(summary: dict, available_bytes: int) -> str:
@@ -14,8 +15,8 @@ def failed_test_table(summary: dict, available_bytes: int) -> str:
 
     header = (
         "\n\n### Failed test cases\n\n"
-        "| Suite | Test file | Test case | Target | Status |\n"
-        "| --- | --- | --- | --- | --- |\n"
+        "| Suite | Test file | Test case | Target | Status | Failure reason | JUnit XML |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
     )
 
     def cell(value: str) -> str:
@@ -28,15 +29,23 @@ def failed_test_table(summary: dict, available_bytes: int) -> str:
     def omitted_notice(count: int) -> str:
         return f"\n\n{count} failed test execution(s) omitted due to the annotation size limit."
 
-    rendered_rows = [
-        "| "
-        + " | ".join(
+    def render_row(case: dict) -> str:
+        cells = [
             cell(case.get(key, ""))
             for key in ("suite", "test_file", "test_case", "platform", "status")
-        )
-        + " |\n"
-        for case in cases
-    ]
+        ]
+        reason = " ".join((case.get("reason") or "").split())
+        if len(reason) > MAX_FAILURE_REASON_CHARS:
+            reason = reason[: MAX_FAILURE_REASON_CHARS - 1] + "…"
+        cells.append(cell(reason) if reason else "—")
+        if url := case.get("source_xml_url"):
+            url = escape(url, quote=True).replace("|", "&#124;")
+            cells.append(f'<a href="{url}" target="_blank" rel="noopener noreferrer">XML</a>')
+        else:
+            cells.append("—")
+        return "| " + " | ".join(cells) + " |\n"
+
+    rendered_rows = [render_row(case) for case in cases]
     row_sizes = [len(row.encode("utf-8")) for row in rendered_rows]
     size = len(header.encode("utf-8"))
     if size + sum(row_sizes) <= available_bytes:

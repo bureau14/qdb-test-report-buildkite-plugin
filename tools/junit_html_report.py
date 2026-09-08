@@ -114,6 +114,8 @@ def generate_html_report(
                     "test_case": execution.logical_id,
                     "platform": execution.platform,
                     "status": execution.status,
+                    "reason": execution.reason,
+                    "source_xml_url": execution.source_xml_url,
                 }
                 for suite in report.suites.values()
                 for test_file in suite.test_files.values()
