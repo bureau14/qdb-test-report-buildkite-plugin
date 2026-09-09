@@ -18,7 +18,7 @@ Configure exactly one mode per plugin invocation:
 
 Common report options such as `title`, `only_failures`, `annotate`, and `project_id` stay at the plugin top level.
 
-Job and aggregate annotations include a table of failed and errored test executions, showing the suite, test file, test case, target, status, failure reason, and a link to the exact source JUnit XML when its public URL is available. Failure reasons are flattened to one line and capped at 240 characters; missing reasons or XML links appear as a dash. Complete rows are included up to Buildkite's 1 MiB annotation limit, with a count of omitted executions when necessary. The summary and full-report link retain their space in the annotation.
+Job and aggregate annotations separate failed and errored executions into two tables. The Boost.Test/test-runner table shows status, `suite::file`, test case, and failure reason. The CTest table shows status, test case (without the repeated class name), and failure reason. Neither table includes targets or XML links. Failure reasons are flattened to one line and capped at 240 characters; missing reasons appear as a dash. Both tables share Buildkite's 1 MiB annotation limit, with a count of omitted executions when necessary. The summary and full-report link retain their space in the annotation.
 
 The plugin runs from the Buildkite `post-command` hook, so reports are still published after the step command exits with a failure.
 

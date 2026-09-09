@@ -1005,6 +1005,7 @@ def test_cli_writes_summary_json(tmp_path):
                 "suite": "suite",
                 "test_file": "junit",
                 "test_case": "S::f",
+                "report_kind": "test",
                 "platform": "linux",
                 "status": "FAILED",
                 "reason": "f",
@@ -1051,16 +1052,62 @@ def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
     summary = json.loads(summary_path.read_text())
     assert len(summary["failed_test_cases"]) == 2
     body = build_annotation_body("Tests", summary, None)
-    assert (
-        "| suite | tests | S::bad | linux | FAILED | Expected 42 | "
-        '<a href="https://example.com/linux/job-1/tests.xml"'
-    ) in body
-    assert (
-        "| suite | tests | S::bad | windows | ERRORED | Timeout | "
-        '<a href="https://example.com/windows/job-2/tests.xml"'
-    ) in body
+    assert "| FAILED | suite::tests | S::bad | Expected 42 |" in body
+    assert "| ERRORED | suite::tests | S::bad | Timeout |" in body
+    assert "<a " not in body
     assert "S::pass" not in body
     assert "S::skip" not in body
+
+
+def test_summary_distinguishes_ctest_and_test_runner_reports(tmp_path):
+    from annotations import build_annotation_body
+    from junit_html_report import generate_html_report
+
+    ctest = write(
+        tmp_path / "ctest.xml",
+        '<testsuite name="custom-build-name" disabled="0" hostname="agent" '
+        'timestamp="2026-09-09T12:00:00">'
+        '<testcase name="binary" classname="binary" status="fail" time="1">'
+        '<failure message="Timeout"/><system-out>details</system-out>'
+        "</testcase></testsuite>",
+    )
+    runner = write(
+        tmp_path / "runner.xml",
+        junit_xml(
+            '<testcase name="query"><failure message="Expected rows"/></testcase>',
+            suite_name="qdb_test_runner",
+        ),
+    )
+    # Repeated class/name alone is not enough to classify arbitrary JUnit as CTest.
+    boost = write(
+        tmp_path / "boost.xml",
+        junit_xml(
+            '<testcase name="same" classname="same"><failure message="Assertion"/></testcase>',
+        ),
+    )
+    summary_path = tmp_path / "summary.json"
+    assert (
+        generate_html_report(
+            title="Tests",
+            platform_specs=[("linux", ctest), ("linux", runner), ("linux", boost)],
+            output=tmp_path / "report.html",
+            summary_json=summary_path,
+        )
+        == 0
+    )
+    summary = json.loads(summary_path.read_text())
+    assert [case["report_kind"] for case in summary["failed_test_cases"]] == [
+        "ctest",
+        "test",
+        "test",
+    ]
+    body = build_annotation_body("Tests", summary, None)
+    ctest_table, detailed_table = body.split("### Failed test cases — Boost.Test / test-runner")
+    assert "qdb&#95;test&#95;runner::runner | query | Expected rows" in detailed_table
+    assert "suite::boost | same::same | Assertion" in detailed_table
+    assert "| FAILED | binary | Timeout |" in ctest_table
+    assert "binary::binary" not in ctest_table
+    assert "custom-build-name" not in ctest_table
 
 
 def test_cli_fail_on_test_failures_returns_64_for_failures_and_errors(tmp_path):

@@ -111,7 +111,10 @@ def generate_html_report(
                 {
                     "suite": execution.suite_name,
                     "test_file": execution.test_file,
-                    "test_case": execution.logical_id,
+                    "test_case": (
+                        execution.name if execution.report_kind == "ctest" else execution.logical_id
+                    ),
+                    "report_kind": execution.report_kind,
                     "platform": execution.platform,
                     "status": execution.status,
                     "reason": execution.reason,

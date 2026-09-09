@@ -13,11 +13,18 @@ def failed_test_table(summary: dict, available_bytes: int) -> str:
     if not cases:
         return ""
 
-    header = (
-        "\n\n### Failed test cases\n\n"
-        "| Suite | Test file | Test case | Target | Status | Failure reason | JUnit XML |\n"
-        "| --- | --- | --- | --- | --- | --- | --- |\n"
-    )
+    headers = {
+        "ctest": (
+            "\n\n### Failed test cases — CTest\n\n"
+            "| Status | Test case | Failure reason |\n"
+            "| --- | --- | --- |\n"
+        ),
+        "test": (
+            "\n\n### Failed test cases — Boost.Test / test-runner\n\n"
+            "| Status | Suite::file | Test case | Failure reason |\n"
+            "| --- | --- | --- | --- |\n"
+        ),
+    }
 
     def cell(value: str) -> str:
         # Encode Markdown punctuation too, so test names remain literal table cells.
@@ -30,37 +37,41 @@ def failed_test_table(summary: dict, available_bytes: int) -> str:
         return f"\n\n{count} failed test execution(s) omitted due to the annotation size limit."
 
     def render_row(case: dict) -> str:
-        cells = [
-            cell(case.get(key, ""))
-            for key in ("suite", "test_file", "test_case", "platform", "status")
-        ]
+        cells = [cell(case.get("status", ""))]
+        if case.get("report_kind") != "ctest":
+            cells.append(cell(f"{case.get('suite', '')}::{case.get('test_file', '')}"))
+        cells.append(cell(case.get("test_case", "")))
         reason = " ".join((case.get("reason") or "").split())
         if len(reason) > MAX_FAILURE_REASON_CHARS:
             reason = reason[: MAX_FAILURE_REASON_CHARS - 1] + "…"
         cells.append(cell(reason) if reason else "—")
-        if url := case.get("source_xml_url"):
-            url = escape(url, quote=True).replace("|", "&#124;")
-            cells.append(f'<a href="{url}" target="_blank" rel="noopener noreferrer">XML</a>')
-        else:
-            cells.append("—")
         return "| " + " | ".join(cells) + " |\n"
 
-    rendered_rows = [render_row(case) for case in cases]
-    row_sizes = [len(row.encode("utf-8")) for row in rendered_rows]
-    size = len(header.encode("utf-8"))
-    if size + sum(row_sizes) <= available_bytes:
-        return header + "".join(rendered_rows)
+    groups: dict[str, list[str]] = {kind: [] for kind in headers}
+    for case in cases:
+        kind = "ctest" if case.get("report_kind") == "ctest" else "test"
+        groups[kind].append(render_row(case))
+    full_table = "".join(headers[kind] + "".join(rows) for kind, rows in groups.items() if rows)
+    if len(full_table.encode("utf-8")) <= available_bytes:
+        return full_table
 
-    rows = []
-    for row, row_bytes in zip(rendered_rows, row_sizes):
-        remaining = len(cases) - len(rows) - 1
-        notice_bytes = len(omitted_notice(remaining).encode("utf-8")) if remaining else 0
-        if size + row_bytes + notice_bytes <= available_bytes:
-            rows.append(row)
-            size += row_bytes
+    parts = []
+    size = 0
+    shown = 0
+    for kind, rows in groups.items():
+        header = headers[kind]
+        for row in rows:
+            addition = header + row
+            row_bytes = len(addition.encode("utf-8"))
+            notice_bytes = len(omitted_notice(len(cases) - shown - 1).encode("utf-8"))
+            if size + row_bytes + notice_bytes <= available_bytes:
+                parts.append(addition)
+                size += row_bytes
+                shown += 1
+                header = ""
 
-    table = header + "".join(rows) if rows else ""
-    omitted = len(cases) - len(rows)
+    table = "".join(parts)
+    omitted = len(cases) - shown
     if omitted:
         table += omitted_notice(omitted)
     return table if len(table.encode("utf-8")) <= available_bytes else ""

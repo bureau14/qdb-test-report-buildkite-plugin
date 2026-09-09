@@ -21,11 +21,11 @@ def test_failed_test_table(scope):
         "failed_test_cases": [failed_case(), failed_case("Class::error", "ERRORED", "windows")],
     }
     body = build_annotation_body("Tests", summary, None, scope=scope)
-    assert (
-        "| Suite | Test file | Test case | Target | Status | Failure reason | JUnit XML |" in body
-    )
-    assert "| suite | tests.xml | Class::test | linux | FAILED |" in body
-    assert "| suite | tests.xml | Class::error | windows | ERRORED |" in body
+    assert "| Status | Suite::file | Test case | Failure reason |" in body
+    assert "| FAILED | suite::tests.xml | Class::test |" in body
+    assert "| ERRORED | suite::tests.xml | Class::error |" in body
+    assert "Target" not in body
+    assert "CTest" not in body
     assert "omitted" not in body
 
 
@@ -44,11 +44,7 @@ def test_failed_test_table_fills_byte_budget():
         "failed_test_cases": [case] * 20000,
     }
     body = build_annotation_body("Tests", summary, "https://example.com/report")
-    row = (
-        "| suite | tests.xml | Class::測試🙂 | linux | FAILED | Expected 測試🙂 | "
-        '<a href="https://example.com/job/tests.xml" target="_blank" '
-        'rel="noopener noreferrer">XML</a> |\n'
-    )
+    row = "| FAILED | suite::tests.xml | Class::測試🙂 | Expected 測試🙂 |\n"
     shown = body.count(row)
     assert 0 < shown < 20000
     assert f"{20000 - shown} failed test execution(s) omitted" in body
@@ -58,7 +54,7 @@ def test_failed_test_table_fills_byte_budget():
     assert len((body + row).encode("utf-8")) > annotations.MAX_ANNOTATION_BYTES
 
 
-def test_failed_test_table_escapes_reason_and_exact_xml_link():
+def test_failed_test_table_escapes_reason_and_omits_xml_link():
     case = failed_case()
     case.update(
         reason="Expected <value> | **actual**\r\nsecond line",
@@ -66,10 +62,9 @@ def test_failed_test_table_escapes_reason_and_exact_xml_link():
     )
     body = build_annotation_body("Tests", {"failed_test_cases": [case]}, None)
     assert "Expected &lt;value&gt; &#124; &#42;&#42;actual&#42;&#42; second line" in body
-    assert (
-        '<a href="https://example.com/job/tests.xml?a=1&amp;b=&quot;x&#124;y&quot;" '
-        'target="_blank" rel="noopener noreferrer">XML</a>'
-    ) in body
+    assert "<a " not in body
+    assert "JUnit XML" not in body
+    assert "https://example.com/job/tests.xml" not in body
 
 
 def test_failed_test_table_caps_reason():
@@ -85,7 +80,7 @@ def test_failed_test_table_missing_reason_and_xml_link(fields):
     case = failed_case()
     case.update(fields)
     body = build_annotation_body("Tests", {"failed_test_cases": [case]}, None)
-    assert "| FAILED | — | — |\n" in body
+    assert "| FAILED | suite::tests.xml | Class::test | — |\n" in body
     assert "<a " not in body
 
 
@@ -101,7 +96,7 @@ def test_failed_test_table_skips_oversized_row_and_keeps_later_cases():
         "failed_test_cases": [failed_case("x" * annotations.MAX_ANNOTATION_BYTES), failed_case()],
     }
     body = build_annotation_body("Tests", summary, None)
-    assert "| suite | tests.xml | Class::test | linux | FAILED |" in body
+    assert "| FAILED | suite::tests.xml | Class::test |" in body
     assert "1 failed test execution(s) omitted" in body
     assert len(body.encode("utf-8")) <= annotations.MAX_ANNOTATION_BYTES
 
@@ -112,6 +107,43 @@ def test_failed_test_table_without_room_for_rows(monkeypatch):
     assert "1 failed test execution(s) omitted" in body
     assert "| Suite |" not in body
     assert len(body.encode("utf-8")) <= 150
+
+
+def test_failed_test_tables_split_ctest_from_detailed_tests():
+    detailed = failed_case()
+    ctest = dict(failed_case("ctest_binary"), report_kind="ctest", reason="Timeout")
+    body = build_annotation_body("Tests", {"failed_test_cases": [ctest, detailed]}, None)
+    ctest_table, detailed_table = body.split("### Failed test cases — Boost.Test / test-runner")
+    assert "### Failed test cases — CTest" in ctest_table
+    assert "| FAILED | suite::tests.xml | Class::test | — |" in detailed_table
+    assert "| Status | Test case | Failure reason |" in ctest_table
+    assert "| FAILED | ctest&#95;binary | Timeout |" in ctest_table
+    for redundant in ("suite", "tests.xml", "Target", "JUnit XML", "Class::test"):
+        assert redundant not in ctest_table
+
+
+def test_failed_test_tables_share_byte_budget(monkeypatch):
+    detailed = failed_case()
+    ctest = dict(failed_case("binary"), report_kind="ctest", reason="Timeout")
+    summary = {"failed_test_cases": [detailed, ctest]}
+    complete = build_annotation_body("Tests", summary, None)
+    monkeypatch.setattr(annotations, "MAX_ANNOTATION_BYTES", len(complete.encode("utf-8")))
+    assert build_annotation_body("Tests", summary, None) == complete
+    summary["failed_test_cases"].insert(0, failed_case("x" * 1000))
+    monkeypatch.setattr(annotations, "MAX_ANNOTATION_BYTES", len(complete.encode("utf-8")) + 100)
+    limited = build_annotation_body("Tests", summary, None)
+    assert "Boost.Test / test-runner" in limited
+    assert "### Failed test cases — CTest" in limited
+    assert "1 failed test execution(s) omitted" in limited
+    assert len(limited.encode("utf-8")) <= annotations.MAX_ANNOTATION_BYTES
+
+
+def test_ctest_only_does_not_render_detailed_table():
+    case = dict(failed_case("binary"), report_kind="ctest")
+    body = build_annotation_body("Tests", {"failed_test_cases": [case]}, None)
+    assert "### Failed test cases — CTest" in body
+    assert "Boost.Test" not in body
+    assert "Suite::file" not in body
 
 
 @pytest.mark.parametrize("scope", ["build", "job"])
