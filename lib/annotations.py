@@ -16,13 +16,13 @@ def failed_test_table(summary: dict, available_bytes: int) -> str:
     headers = {
         "ctest": (
             "\n\n### Failed test cases — CTest\n\n"
-            "| Status | Test case | Failure reason |\n"
-            "| --- | --- | --- |\n"
+            "| Test case | Failure reason | Execution time |\n"
+            "| --- | --- | ---: |\n"
         ),
         "test": (
             "\n\n### Failed test cases — Boost.Test / test-runner\n\n"
-            "| Status | Suite::file | Test case | Failure reason |\n"
-            "| --- | --- | --- | --- |\n"
+            "| Suite::file | Test case | Failure reason | Execution time |\n"
+            "| --- | --- | --- | ---: |\n"
         ),
     }
 
@@ -37,14 +37,18 @@ def failed_test_table(summary: dict, available_bytes: int) -> str:
         return f"\n\n{count} failed test execution(s) omitted due to the annotation size limit."
 
     def render_row(case: dict) -> str:
-        cells = [cell(case.get("status", ""))]
+        cells = []
         if case.get("report_kind") != "ctest":
             cells.append(cell(f"{case.get('suite', '')}::{case.get('test_file', '')}"))
         cells.append(cell(case.get("test_case", "")))
         reason = " ".join((case.get("reason") or "").split())
+        if case.get("status") == "ERRORED":
+            reason = f"ERRORED: {reason or '—'}"
         if len(reason) > MAX_FAILURE_REASON_CHARS:
             reason = reason[: MAX_FAILURE_REASON_CHARS - 1] + "…"
         cells.append(cell(reason) if reason else "—")
+        duration = case.get("duration_seconds")
+        cells.append(f"{duration:.3f} s" if duration is not None else "—")
         return "| " + " | ".join(cells) + " |\n"
 
     groups: dict[str, list[str]] = {kind: [] for kind in headers}

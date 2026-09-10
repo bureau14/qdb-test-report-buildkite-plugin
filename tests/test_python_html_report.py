@@ -1009,6 +1009,7 @@ def test_cli_writes_summary_json(tmp_path):
                 "platform": "linux",
                 "status": "FAILED",
                 "reason": "f",
+                "duration_seconds": 0.0,
                 "source_xml_url": None,
             }
         ],
@@ -1052,8 +1053,8 @@ def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
     summary = json.loads(summary_path.read_text())
     assert len(summary["failed_test_cases"]) == 2
     body = build_annotation_body("Tests", summary, None)
-    assert "| FAILED | suite::tests | S::bad | Expected 42 |" in body
-    assert "| ERRORED | suite::tests | S::bad | Timeout |" in body
+    assert "| suite::tests | S::bad | Expected 42 |" in body
+    assert "| suite::tests | S::bad | ERRORED: Timeout |" in body
     assert "<a " not in body
     assert "S::pass" not in body
     assert "S::skip" not in body
@@ -1074,7 +1075,7 @@ def test_summary_distinguishes_ctest_and_test_runner_reports(tmp_path):
     runner = write(
         tmp_path / "runner.xml",
         junit_xml(
-            '<testcase name="query"><failure message="Expected rows"/></testcase>',
+            '<testcase name="query" time="0.125"><failure message="Expected rows"/></testcase>',
             suite_name="qdb_test_runner",
         ),
     )
@@ -1103,9 +1104,9 @@ def test_summary_distinguishes_ctest_and_test_runner_reports(tmp_path):
     ]
     body = build_annotation_body("Tests", summary, None)
     ctest_table, detailed_table = body.split("### Failed test cases — Boost.Test / test-runner")
-    assert "qdb&#95;test&#95;runner::runner | query | Expected rows" in detailed_table
+    assert "qdb&#95;test&#95;runner::runner | query | Expected rows | 0.125 s |" in detailed_table
     assert "suite::boost | same::same | Assertion" in detailed_table
-    assert "| FAILED | binary | Timeout |" in ctest_table
+    assert "| binary | Timeout | 1.000 s |\n" in ctest_table
     assert "binary::binary" not in ctest_table
     assert "custom-build-name" not in ctest_table
 

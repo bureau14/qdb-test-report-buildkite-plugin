@@ -18,12 +18,15 @@ def test_failed_test_table(scope):
     summary = {
         "logical_tests": 2,
         "status_counts": {"FAILED": 1, "ERRORED": 1},
-        "failed_test_cases": [failed_case(), failed_case("Class::error", "ERRORED", "windows")],
+        "failed_test_cases": [
+            dict(failed_case(), duration_seconds=1.234),
+            dict(failed_case("Class::error", "ERRORED", "windows"), duration_seconds=0),
+        ],
     }
     body = build_annotation_body("Tests", summary, None, scope=scope)
-    assert "| Status | Suite::file | Test case | Failure reason |" in body
-    assert "| FAILED | suite::tests.xml | Class::test |" in body
-    assert "| ERRORED | suite::tests.xml | Class::error |" in body
+    assert "| Suite::file | Test case | Failure reason | Execution time |" in body
+    assert "| suite::tests.xml | Class::test | — | 1.234 s |\n" in body
+    assert "| suite::tests.xml | Class::error | ERRORED: — | 0.000 s |\n" in body
     assert "Target" not in body
     assert "CTest" not in body
     assert "omitted" not in body
@@ -44,7 +47,7 @@ def test_failed_test_table_fills_byte_budget():
         "failed_test_cases": [case] * 20000,
     }
     body = build_annotation_body("Tests", summary, "https://example.com/report")
-    row = "| FAILED | suite::tests.xml | Class::測試🙂 | Expected 測試🙂 |\n"
+    row = "| suite::tests.xml | Class::測試🙂 | Expected 測試🙂 | — |\n"
     shown = body.count(row)
     assert 0 < shown < 20000
     assert f"{20000 - shown} failed test execution(s) omitted" in body
@@ -67,12 +70,15 @@ def test_failed_test_table_escapes_reason_and_omits_xml_link():
     assert "https://example.com/job/tests.xml" not in body
 
 
-def test_failed_test_table_caps_reason():
-    case = failed_case()
+@pytest.mark.parametrize("status", ["FAILED", "ERRORED"])
+def test_failed_test_table_caps_reason(status):
+    case = failed_case(status=status)
     case["reason"] = "測" * 1000
     body = build_annotation_body("Tests", {"failed_test_cases": [case]}, None)
-    assert "測" * (annotations.MAX_FAILURE_REASON_CHARS - 1) + "…" in body
-    assert "測" * annotations.MAX_FAILURE_REASON_CHARS not in body
+    prefix = "ERRORED: " if status == "ERRORED" else ""
+    reason_length = annotations.MAX_FAILURE_REASON_CHARS - len(prefix) - 1
+    assert prefix + "測" * reason_length + "…" in body
+    assert "測" * (reason_length + 1) not in body
 
 
 @pytest.mark.parametrize("fields", [{}, {"reason": None, "source_xml_url": None}])
@@ -80,7 +86,7 @@ def test_failed_test_table_missing_reason_and_xml_link(fields):
     case = failed_case()
     case.update(fields)
     body = build_annotation_body("Tests", {"failed_test_cases": [case]}, None)
-    assert "| FAILED | suite::tests.xml | Class::test | — |\n" in body
+    assert "| suite::tests.xml | Class::test | — | — |\n" in body
     assert "<a " not in body
 
 
@@ -96,7 +102,7 @@ def test_failed_test_table_skips_oversized_row_and_keeps_later_cases():
         "failed_test_cases": [failed_case("x" * annotations.MAX_ANNOTATION_BYTES), failed_case()],
     }
     body = build_annotation_body("Tests", summary, None)
-    assert "| FAILED | suite::tests.xml | Class::test |" in body
+    assert "| suite::tests.xml | Class::test |" in body
     assert "1 failed test execution(s) omitted" in body
     assert len(body.encode("utf-8")) <= annotations.MAX_ANNOTATION_BYTES
 
@@ -115,9 +121,9 @@ def test_failed_test_tables_split_ctest_from_detailed_tests():
     body = build_annotation_body("Tests", {"failed_test_cases": [ctest, detailed]}, None)
     ctest_table, detailed_table = body.split("### Failed test cases — Boost.Test / test-runner")
     assert "### Failed test cases — CTest" in ctest_table
-    assert "| FAILED | suite::tests.xml | Class::test | — |" in detailed_table
-    assert "| Status | Test case | Failure reason |" in ctest_table
-    assert "| FAILED | ctest&#95;binary | Timeout |" in ctest_table
+    assert "| suite::tests.xml | Class::test | — |" in detailed_table
+    assert "| Test case | Failure reason | Execution time |" in ctest_table
+    assert "| ctest&#95;binary | Timeout |" in ctest_table
     for redundant in ("suite", "tests.xml", "Target", "JUnit XML", "Class::test"):
         assert redundant not in ctest_table
 

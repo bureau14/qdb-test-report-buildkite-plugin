@@ -118,6 +118,7 @@ def generate_html_report(
                     "platform": execution.platform,
                     "status": execution.status,
                     "reason": execution.reason,
+                    "duration_seconds": execution.duration_seconds,
                     "source_xml_url": execution.source_xml_url,
                 }
                 for suite in report.suites.values()
