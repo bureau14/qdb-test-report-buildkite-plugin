@@ -44,13 +44,15 @@ def test_failed_test_table_fills_byte_budget():
     case.update(reason="Expected 測試🙂", source_xml_url="https://example.com/job/tests.xml")
     summary = {
         "warnings": ["Warning with unicode: ⚠"],
-        "failed_test_cases": [case] * 20000,
+        "failed_test_cases": [
+            dict(case, test_case=f"Class::測試🙂{index:05d}") for index in range(20000)
+        ],
     }
     body = build_annotation_body("Tests", summary, "https://example.com/report")
-    row = "| suite::tests.xml | Class::測試🙂 | Expected 測試🙂 | — |\n"
-    shown = body.count(row)
+    row = "| suite::tests.xml | Class::測試🙂00000 | Expected 測試🙂 | — |\n"
+    shown = body.count("| suite::tests.xml | Class::測試🙂")
     assert 0 < shown < 20000
-    assert f"{20000 - shown} failed test execution(s) omitted" in body
+    assert f"{20000 - shown} failed test case(s) omitted" in body
     assert "Warning with unicode: ⚠" in body
     assert "Open full report</a>" in body
     assert len(body.encode("utf-8")) <= annotations.MAX_ANNOTATION_BYTES
@@ -103,14 +105,14 @@ def test_failed_test_table_skips_oversized_row_and_keeps_later_cases():
     }
     body = build_annotation_body("Tests", summary, None)
     assert "| suite::tests.xml | Class::test |" in body
-    assert "1 failed test execution(s) omitted" in body
+    assert "1 failed test case(s) omitted" in body
     assert len(body.encode("utf-8")) <= annotations.MAX_ANNOTATION_BYTES
 
 
 def test_failed_test_table_without_room_for_rows(monkeypatch):
     monkeypatch.setattr(annotations, "MAX_ANNOTATION_BYTES", 150)
     body = build_annotation_body("Tests", {"failed_test_cases": [failed_case()]}, None)
-    assert "1 failed test execution(s) omitted" in body
+    assert "1 failed test case(s) omitted" in body
     assert "| Suite |" not in body
     assert len(body.encode("utf-8")) <= 150
 
@@ -140,8 +142,44 @@ def test_failed_test_tables_share_byte_budget(monkeypatch):
     limited = build_annotation_body("Tests", summary, None)
     assert "Boost.Test / test-runner" in limited
     assert "### Failed test cases — CTest" in limited
-    assert "1 failed test execution(s) omitted" in limited
+    assert "1 failed test case(s) omitted" in limited
     assert len(limited.encode("utf-8")) <= annotations.MAX_ANNOTATION_BYTES
+
+
+@pytest.mark.parametrize("kind", ["test", "ctest"])
+def test_failed_test_table_keeps_first_reported_target(kind, monkeypatch):
+    first = dict(
+        failed_case(platform="windows"), report_kind=kind, reason="First reason", duration_seconds=2
+    )
+    second = dict(
+        first, platform="linux", status="ERRORED", reason="Later reason", duration_seconds=9
+    )
+    if kind == "ctest":
+        second.update(suite="another-build-name", test_file="another-ctest-file")
+    summary = {"failed_test_cases": [first, second]}
+    body = build_annotation_body("Tests", summary, None)
+    assert body.count("Class::test") == 1
+    assert "| First reason | 2.000 s |" in body
+    assert "Later reason" not in body
+    assert "ERRORED:" not in body
+    assert "omitted" not in body
+    assert len(summary["failed_test_cases"]) == 2
+
+    monkeypatch.setattr(annotations, "MAX_ANNOTATION_BYTES", 150)
+    limited = build_annotation_body("Tests", summary, None)
+    assert "1 failed test case(s) omitted" in limited
+
+
+def test_failed_test_table_preserves_distinct_test_identities():
+    case = failed_case()
+    cases = [
+        case,
+        dict(case, suite="other-suite"),
+        dict(case, test_file="other-file"),
+        dict(case, report_kind="ctest"),
+    ]
+    body = build_annotation_body("Tests", {"failed_test_cases": cases}, None)
+    assert body.count("Class::test") == 4
 
 
 def test_ctest_only_does_not_render_detailed_table():

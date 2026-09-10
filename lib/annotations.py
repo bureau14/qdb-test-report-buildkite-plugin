@@ -9,7 +9,16 @@ MAX_FAILURE_REASON_CHARS = 240
 
 
 def failed_test_table(summary: dict, available_bytes: int) -> str:
-    cases = summary.get("failed_test_cases", [])
+    cases = []
+    seen = set()
+    for case in summary.get("failed_test_cases", []):
+        kind = "ctest" if case.get("report_kind") == "ctest" else "test"
+        identity = (kind, case.get("test_case", ""))
+        if kind != "ctest":
+            identity += (case.get("suite", ""), case.get("test_file", ""))
+        if identity not in seen:
+            seen.add(identity)
+            cases.append(case)
     if not cases:
         return ""
 
@@ -34,7 +43,7 @@ def failed_test_table(summary: dict, available_bytes: int) -> str:
         return value
 
     def omitted_notice(count: int) -> str:
-        return f"\n\n{count} failed test execution(s) omitted due to the annotation size limit."
+        return f"\n\n{count} failed test case(s) omitted due to the annotation size limit."
 
     def render_row(case: dict) -> str:
         cells = []

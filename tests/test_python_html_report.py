@@ -1054,7 +1054,8 @@ def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
     assert len(summary["failed_test_cases"]) == 2
     body = build_annotation_body("Tests", summary, None)
     assert "| suite::tests | S::bad | Expected 42 |" in body
-    assert "| suite::tests | S::bad | ERRORED: Timeout |" in body
+    assert body.count("| suite::tests | S::bad |") == 1
+    assert "ERRORED: Timeout" not in body
     assert "<a " not in body
     assert "S::pass" not in body
     assert "S::skip" not in body
