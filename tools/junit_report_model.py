@@ -282,6 +282,11 @@ def testcase_reason_and_output(testcase: ET.Element, status: str) -> tuple[str |
             reason = specific_reason_from_text(node_text) or raw_message or node.attrib.get("type")
 
     for output_name in ("system-out", "system-err"):
+        # Detailed stderr can dominate the static report; retain it in report only where it
+        # diagnoses a failed execution, while keeping system-out available for all test statuses.
+        # Full stderr is always available in XML attached with the report
+        if output_name == "system-err" and status not in {"FAILED", "ERRORED"}:
+            continue
         output_node = testcase.find(output_name)
         if output_node is not None and output_node.text and output_node.text.strip():
             output_text = output_node.text.strip()
