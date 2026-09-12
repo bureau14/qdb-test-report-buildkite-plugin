@@ -1,3 +1,5 @@
+from html import unescape
+
 import annotations
 import pytest
 from annotations import build_annotation_body, get_annotation_style, get_job_annotation_style
@@ -24,12 +26,35 @@ def test_failed_test_table(scope):
         ],
     }
     body = build_annotation_body("Tests", summary, None, scope=scope)
-    assert "| Suite::file | Test case | Failure reason | Execution time |" in body
+    assert "| Suite / report | Test case | Failure reason | Execution time |" in body
     assert "| suite::tests.xml | Class::test | — | 1.234 s |\n" in body
     assert "| suite::tests.xml | Class::error | ERRORED: — | 0.000 s |\n" in body
     assert "Target" not in body
     assert "CTest" not in body
     assert "omitted" not in body
+
+
+@pytest.mark.parametrize(
+    "suite, report, label",
+    [
+        (
+            "qdb_integration_test_query_transient_single",
+            "qdb_integration_test_query_transient_single",
+            "qdb_integration_test_query_transient_single",
+        ),
+        ("shared_suite", "executable_a", "shared_suite::executable_a"),
+    ],
+)
+def test_failed_test_table_suite_report_display(suite, report, label):
+    case = dict(
+        failed_case(), suite=suite, test_file=report, reason="Assertion", duration_seconds=1
+    )
+    original = case.copy()
+    body = unescape(build_annotation_body("Tests", {"failed_test_cases": [case]}, None))
+    assert f"| {label} | Class::test | Assertion | 1.000 s |\n" in body
+    assert "| Suite / report | Test case | Failure reason | Execution time |" in body
+    assert "Source" not in body
+    assert case == original
 
 
 def test_failed_test_table_escapes_test_names():
@@ -171,7 +196,7 @@ def test_failed_test_table_keeps_first_reported_target(kind, monkeypatch):
 
 
 def test_failed_test_table_preserves_distinct_test_identities():
-    case = failed_case()
+    case = dict(failed_case(), suite="report", test_file="report")
     cases = [
         case,
         dict(case, suite="other-suite"),
@@ -180,6 +205,9 @@ def test_failed_test_table_preserves_distinct_test_identities():
     ]
     body = build_annotation_body("Tests", {"failed_test_cases": cases}, None)
     assert body.count("Class::test") == 4
+    assert "| report | Class::test |" in body
+    assert "| report::other-file | Class::test |" in body
+    assert "| other-suite::report | Class::test |" in body
 
 
 def test_ctest_only_does_not_render_detailed_table():
@@ -187,7 +215,7 @@ def test_ctest_only_does_not_render_detailed_table():
     body = build_annotation_body("Tests", {"failed_test_cases": [case]}, None)
     assert "### Failed test cases — CTest" in body
     assert "Boost.Test" not in body
-    assert "Suite::file" not in body
+    assert "Suite / report" not in body
 
 
 @pytest.mark.parametrize("scope", ["build", "job"])

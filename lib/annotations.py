@@ -30,7 +30,7 @@ def failed_test_table(summary: dict, available_bytes: int) -> str:
         ),
         "test": (
             "\n\n### Failed test cases — Boost.Test / test-runner\n\n"
-            "| Suite::file | Test case | Failure reason | Execution time |\n"
+            "| Suite / report | Test case | Failure reason | Execution time |\n"
             "| --- | --- | --- | ---: |\n"
         ),
     }
@@ -48,7 +48,9 @@ def failed_test_table(summary: dict, available_bytes: int) -> str:
     def render_row(case: dict) -> str:
         cells = []
         if case.get("report_kind") != "ctest":
-            cells.append(cell(f"{case.get('suite', '')}::{case.get('test_file', '')}"))
+            suite = case.get("suite", "")
+            report = case.get("test_file", "")
+            cells.append(cell(suite if suite == report else f"{suite}::{report}"))
         cells.append(cell(case.get("test_case", "")))
         reason = " ".join((case.get("reason") or "").split())
         if case.get("status") == "ERRORED":
