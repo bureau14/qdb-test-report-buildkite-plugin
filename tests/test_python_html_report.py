@@ -375,6 +375,36 @@ def test_junit_xml_filename_match_limits_source_artifacts_and_falls_back_to_pid_
     ]
 
 
+def test_build_report_matches_source_artifacts_once_per_junit_file(tmp_path, monkeypatch):
+    import junit_report_model
+
+    junit = tmp_path / "linux" / "qdb_auth_test.xml"
+    write(
+        junit,
+        junit_xml(
+            '<testcase name="qdb_test_process_id" time="0"><system-out>90560</system-out></testcase>',
+            '<testcase classname="acl" name="data_size" time="0.1"/>',
+            '<testcase classname="acl" name="permissions" time="0.1"/>',
+        ),
+    )
+    calls = []
+
+    def matching_artifacts(qdb_pid, artifacts, junit_filename_stem):
+        calls.append((qdb_pid, artifacts, junit_filename_stem))
+        return []
+
+    monkeypatch.setattr(junit_report_model, "source_artifacts_for_junit", matching_artifacts)
+
+    junit_report_model.build_report(
+        "artifact matching",
+        [("linux", junit)],
+        source_job_id="job-1",
+        source_artifacts_by_job_id={"job-1": []},
+    )
+
+    assert calls == [("90560", [], "qdb_auth_test")]
+
+
 def test_qdb_process_id_metadata_matches_only_its_uploaded_json_log(tmp_path):
     from junit_report_model import ArtifactLink, build_report
     from report_data import report_to_report_ui_data

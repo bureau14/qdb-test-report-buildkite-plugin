@@ -577,12 +577,17 @@ def build_report(
             source_xml_url=source_xml_url,
             malformed_junit_xml=malformed_junit_xml,
         )
-        for execution in file_executions:
-            execution.source_artifacts = source_artifacts_for_junit(
-                execution.qdb_process_id,
+        if file_executions:
+            first_execution = file_executions[0]
+            # The source XML's process ID and filename apply to every testcase,
+            # so match its artifacts once rather than rescanning them per testcase.
+            matching_artifacts = source_artifacts_for_junit(
+                first_execution.qdb_process_id,
                 (source_artifacts_by_job_id or {}).get(effective_source_job_id or "", []),
-                execution.test_file,
+                first_execution.test_file,
             )
+            for execution in file_executions:
+                execution.source_artifacts = matching_artifacts
         total_raw_executions += len(file_executions)
         for execution in file_executions:
             suite = suites.get(execution.suite_name)
