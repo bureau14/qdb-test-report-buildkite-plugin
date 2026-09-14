@@ -305,6 +305,85 @@ def test_artifact_link_value_displays_uploaded_relative_path():
     )
 
 
+def test_junit_xml_filename_match_limits_source_artifacts_and_falls_back_to_pid_matching(tmp_path):
+    from junit_report_model import ArtifactLink, build_report
+
+    linux = tmp_path / "linux"
+    write(
+        linux / "qdb_aggregation_test.xml",
+        junit_xml(
+            '<testcase name="qdb_test_process_id" time="0"><system-out>90560</system-out></testcase>',
+            '<testcase classname="aggregation" name="works" time="0.1"/>',
+            suite_name="qdb_test_runner",
+        ),
+    )
+    write(
+        linux / "qdb_cluster_test.xml",
+        junit_xml(
+            '<testcase name="qdb_test_process_id" time="0"><system-out>90560</system-out></testcase>',
+            '<testcase classname="cluster" name="works" time="0.1"/>',
+            suite_name="qdb_test_runner",
+        ),
+    )
+    aggregation_log = ArtifactLink(
+        name="Server logs",
+        relative_path="logs/qdb_aggregation_test-server.log",
+        key="artifacts/logs/qdb_aggregation_test-server.log",
+        url=None,
+        size_bytes=123,
+    )
+    auth_log = ArtifactLink(
+        name="Server logs",
+        relative_path="logs/qdb_auth_test-server.log",
+        key="artifacts/logs/qdb_auth_test-server.log",
+        url=None,
+        size_bytes=456,
+    )
+    matching_pid_log = ArtifactLink(
+        name="QDB test logs",
+        relative_path="logs/qdb_test_log_pid_90560_1724412755000000000.json",
+        key="artifacts/logs/qdb_test_log_pid_90560_1724412755000000000.json",
+        url=None,
+        size_bytes=789,
+    )
+    other_pid_log = ArtifactLink(
+        name="QDB test logs",
+        relative_path="logs/qdb_test_log_pid_81234_1724412755000000000.json",
+        key="artifacts/logs/qdb_test_log_pid_81234_1724412755000000000.json",
+        url=None,
+        size_bytes=321,
+    )
+
+    report = build_report(
+        "suite artifacts",
+        [("linux", linux)],
+        source_job_id="job-1",
+        source_artifacts_by_job_id={
+            "job-1": [aggregation_log, auth_log, matching_pid_log, other_pid_log]
+        },
+    )
+
+    aggregation_execution = (
+        report.suites["qdb_test_runner"]
+        .test_files["qdb_aggregation_test"]
+        .logical_tests["aggregation::works"]
+        .executions["linux"]
+    )
+    cluster_execution = (
+        report.suites["qdb_test_runner"]
+        .test_files["qdb_cluster_test"]
+        .logical_tests["cluster::works"]
+        .executions["linux"]
+    )
+
+    assert aggregation_execution.source_artifacts == [aggregation_log, matching_pid_log]
+    assert cluster_execution.source_artifacts == [
+        aggregation_log,
+        auth_log,
+        matching_pid_log,
+    ]
+
+
 def test_qdb_process_id_metadata_matches_only_its_uploaded_json_log(tmp_path):
     from junit_report_model import ArtifactLink, build_report
     from report_data import report_to_report_ui_data

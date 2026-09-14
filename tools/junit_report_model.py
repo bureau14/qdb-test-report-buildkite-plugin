@@ -376,17 +376,29 @@ def is_qdb_test_log(artifact: ArtifactLink) -> bool:
 
 
 def source_artifacts_for_junit(
-    qdb_pid: str | None, artifacts: list[ArtifactLink]
+    qdb_pid: str | None, artifacts: list[ArtifactLink], junit_filename_stem: str | None = None
 ) -> list[ArtifactLink]:
     non_qdb_logs = [artifact for artifact in artifacts if not is_qdb_test_log(artifact)]
-    if not qdb_pid:
-        return non_qdb_logs
-    return non_qdb_logs + [
+    matching_pid_artifacts = [
         artifact
         for artifact in artifacts
         if (match := QDB_TEST_LOG_NAME_RE.fullmatch(Path(artifact.relative_path).name))
+        and qdb_pid
         and match.group(1) == qdb_pid
     ]
+    if junit_filename_stem:
+        matching_junit_artifacts = [
+            artifact
+            for artifact in artifacts
+            if junit_filename_stem.casefold() in Path(artifact.relative_path).name.casefold()
+        ]
+        if matching_junit_artifacts:
+            return matching_junit_artifacts + [
+                artifact
+                for artifact in matching_pid_artifacts
+                if artifact not in matching_junit_artifacts
+            ]
+    return non_qdb_logs + matching_pid_artifacts
 
 
 def iter_junit_suites(root: ET.Element) -> list[ET.Element]:
@@ -557,16 +569,12 @@ def build_report(
             source_xml_url=source_xml_url,
             malformed_junit_xml=malformed_junit_xml,
         )
-        qdb_pid = next(
-            (execution.qdb_process_id for execution in file_executions if execution.qdb_process_id),
-            None,
-        )
-        matching_artifacts = source_artifacts_for_junit(
-            qdb_pid,
-            (source_artifacts_by_job_id or {}).get(effective_source_job_id or "", []),
-        )
         for execution in file_executions:
-            execution.source_artifacts = matching_artifacts
+            execution.source_artifacts = source_artifacts_for_junit(
+                execution.qdb_process_id,
+                (source_artifacts_by_job_id or {}).get(effective_source_job_id or "", []),
+                execution.test_file,
+            )
         total_raw_executions += len(file_executions)
         for execution in file_executions:
             suite = suites.get(execution.suite_name)

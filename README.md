@@ -193,7 +193,7 @@ prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/
 prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/artifacts/<artifact-name-slug>/<relative-artifact-path>
 ```
 
-The job `summary.json` includes an `artifacts` array with uploaded artifact keys, public URLs when `ARTIFACTS_DOMAIN` is configured, sizes, and warnings for configured artifact inputs that produced no files. Job and aggregate HTML reports render these links in the report-level Artifacts section and in each test leaf's Source section beside the Buildkite job/JUnit XML links. The JUnit XML link targets the raw uploaded object and retains its `attachment` disposition.
+The job `summary.json` includes an `artifacts` array with uploaded artifact keys, public URLs when `ARTIFACTS_DOMAIN` is configured, sizes, and warnings for configured artifact inputs that produced no files. Job and aggregate HTML reports render these links in the report-level Artifacts section and in each test leaf's Source section beside the Buildkite job/JUnit XML links. When an artifact filename contains the JUnit XML filename stem, only matching artifacts are displayed for that XML file, alongside any matching QDB process-ID log; if none match, the existing QDB process-ID matching behavior is used. The JUnit XML link targets the raw uploaded object and retains its `attachment` disposition.
 
 Aggregate mode discovers XML and job summaries under the current build's variants prefix:
 
