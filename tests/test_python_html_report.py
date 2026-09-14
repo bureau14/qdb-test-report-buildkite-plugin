@@ -108,7 +108,7 @@ def test_junit_report_model_imports_without_datetime_utc(tmp_path):
 def test_junit_report_omits_successful_test_stderr_from_embedded_output():
     import xml.etree.ElementTree as ET
 
-    from junit_report_model import testcase_reason_and_output
+    from junit_report_model import OMITTED_SUCCESSFUL_STDERR_MESSAGE, testcase_reason_and_output
 
     successful = ET.fromstring(
         "<testcase><system-out>passing stdout</system-out>"
@@ -120,7 +120,10 @@ def test_junit_report_omits_successful_test_stderr_from_embedded_output():
         "<system-err>failing stderr</system-err></testcase>"
     )
 
-    assert testcase_reason_and_output(successful, "SUCCESSFUL") == (None, "passing stdout")
+    assert testcase_reason_and_output(successful, "SUCCESSFUL") == (
+        None,
+        f"passing stdout\n\n{OMITTED_SUCCESSFUL_STDERR_MESSAGE}",
+    )
     assert testcase_reason_and_output(skipped, "SKIPPED") == (None, None)
     assert testcase_reason_and_output(failed, "FAILED") == (
         "failure details",

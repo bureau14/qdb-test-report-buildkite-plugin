@@ -24,6 +24,9 @@ UUID_RE = re.compile(
 QDB_PROCESS_ID_TESTCASE = "qdb_test_process_id"
 QDB_TEST_LOG_NAME_RE = re.compile(r"^qdb_test_log_pid_(\d+)_.+\.json$")
 MAX_EMBEDDED_TEST_OUTPUT_BYTES = 256 * 1024
+OMITTED_SUCCESSFUL_STDERR_MESSAGE = (
+    "[Standard error is available in the JUnit XML but is not displayed because this test passed.]"
+)
 
 
 def log_info(message: str) -> None:
@@ -282,14 +285,18 @@ def testcase_reason_and_output(testcase: ET.Element, status: str) -> tuple[str |
             reason = specific_reason_from_text(node_text) or raw_message or node.attrib.get("type")
 
     for output_name in ("system-out", "system-err"):
+        output_node = testcase.find(output_name)
+        output_text = (
+            output_node.text.strip() if output_node is not None and output_node.text else None
+        )
         # Detailed stderr can dominate the static report; retain it in report only where it
         # diagnoses a failed execution, while keeping system-out available for all test statuses.
-        # Full stderr is always available in XML attached with the report
+        # Full stderr is available from the JUnit XML in the test's Source section.
         if output_name == "system-err" and status not in {"FAILED", "ERRORED"}:
+            if status == "SUCCESSFUL" and output_text:
+                output_parts.append(OMITTED_SUCCESSFUL_STDERR_MESSAGE)
             continue
-        output_node = testcase.find(output_name)
-        if output_node is not None and output_node.text and output_node.text.strip():
-            output_text = output_node.text.strip()
+        if output_text:
             output_parts.append(output_text)
             if reason is None and status == "SKIPPED":
                 reason = output_text.splitlines()[0]
