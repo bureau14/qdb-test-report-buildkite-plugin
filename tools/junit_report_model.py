@@ -370,18 +370,43 @@ def is_qdb_test_log(artifact: ArtifactLink) -> bool:
     return QDB_TEST_LOG_NAME_RE.fullmatch(Path(artifact.relative_path).name) is not None
 
 
+def artifact_matches_junit_filename(artifact: ArtifactLink, junit_filename_stem: str) -> bool:
+    artifact_name = Path(artifact.relative_path).name
+    # A substring match leaks logs from similarly prefixed suites, such as a
+    # transient_single report receiving transient_single_parallelism logs. Match
+    # the whole XML stem and allow only ordinary filename extensions after it.
+    return (
+        re.fullmatch(
+            rf"{re.escape(junit_filename_stem)}(?:\.[^.]+)*", artifact_name, flags=re.IGNORECASE
+        )
+        is not None
+    )
+
+
 def source_artifacts_for_junit(
-    qdb_pid: str | None, artifacts: list[ArtifactLink]
+    qdb_pid: str | None, artifacts: list[ArtifactLink], junit_filename_stem: str | None = None
 ) -> list[ArtifactLink]:
     non_qdb_logs = [artifact for artifact in artifacts if not is_qdb_test_log(artifact)]
-    if not qdb_pid:
-        return non_qdb_logs
-    return non_qdb_logs + [
+    matching_pid_artifacts = [
         artifact
         for artifact in artifacts
         if (match := QDB_TEST_LOG_NAME_RE.fullmatch(Path(artifact.relative_path).name))
+        and qdb_pid
         and match.group(1) == qdb_pid
     ]
+    if junit_filename_stem:
+        matching_junit_artifacts = [
+            artifact
+            for artifact in artifacts
+            if artifact_matches_junit_filename(artifact, junit_filename_stem)
+        ]
+        if matching_junit_artifacts:
+            return matching_junit_artifacts + [
+                artifact
+                for artifact in matching_pid_artifacts
+                if artifact not in matching_junit_artifacts
+            ]
+    return non_qdb_logs + matching_pid_artifacts
 
 
 def iter_junit_suites(root: ET.Element) -> list[ET.Element]:
@@ -552,16 +577,17 @@ def build_report(
             source_xml_url=source_xml_url,
             malformed_junit_xml=malformed_junit_xml,
         )
-        qdb_pid = next(
-            (execution.qdb_process_id for execution in file_executions if execution.qdb_process_id),
-            None,
-        )
-        matching_artifacts = source_artifacts_for_junit(
-            qdb_pid,
-            (source_artifacts_by_job_id or {}).get(effective_source_job_id or "", []),
-        )
-        for execution in file_executions:
-            execution.source_artifacts = matching_artifacts
+        if file_executions:
+            first_execution = file_executions[0]
+            # The source XML's process ID and filename apply to every testcase,
+            # so match its artifacts once rather than rescanning them per testcase.
+            matching_artifacts = source_artifacts_for_junit(
+                first_execution.qdb_process_id,
+                (source_artifacts_by_job_id or {}).get(effective_source_job_id or "", []),
+                first_execution.test_file,
+            )
+            for execution in file_executions:
+                execution.source_artifacts = matching_artifacts
         total_raw_executions += len(file_executions)
         for execution in file_executions:
             suite = suites.get(execution.suite_name)
