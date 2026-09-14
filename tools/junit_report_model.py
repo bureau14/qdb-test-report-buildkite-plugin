@@ -281,13 +281,16 @@ def testcase_reason_and_output(testcase: ET.Element, status: str) -> tuple[str |
         else:
             reason = specific_reason_from_text(node_text) or raw_message or node.attrib.get("type")
 
-    for output_name in ("system-out", "system-err"):
-        output_node = testcase.find(output_name)
-        if output_node is not None and output_node.text and output_node.text.strip():
-            output_text = output_node.text.strip()
-            output_parts.append(output_text)
-            if reason is None and status == "SKIPPED":
-                reason = output_text.splitlines()[0]
+    # Detailed stdout and stderr can dominate the static report, so retain them only where
+    # they diagnose a failed execution. Full output remains available in the JUnit XML.
+    if status in {"FAILED", "ERRORED"}:
+        for output_name in ("system-out", "system-err"):
+            output_node = testcase.find(output_name)
+            output_text = (
+                output_node.text.strip() if output_node is not None and output_node.text else None
+            )
+            if output_text:
+                output_parts.append(output_text)
 
     output = "\n\n".join(output_parts) if output_parts else None
     return reason, cap_embedded_test_output(output) if output else None

@@ -105,6 +105,29 @@ def test_junit_report_model_imports_without_datetime_utc(tmp_path):
     assert result.stdout.strip().endswith("Z")
 
 
+def test_junit_report_omits_successful_test_stdout_and_stderr_from_embedded_output():
+    import xml.etree.ElementTree as ET
+
+    from junit_report_model import testcase_reason_and_output
+
+    successful = ET.fromstring(
+        "<testcase><system-out>passing stdout</system-out>"
+        "<system-err>passing stderr</system-err></testcase>"
+    )
+    skipped = ET.fromstring("<testcase><system-err>skipped stderr</system-err></testcase>")
+    failed = ET.fromstring(
+        "<testcase><failure>failure details</failure><system-out>failing stdout</system-out>"
+        "<system-err>failing stderr</system-err></testcase>"
+    )
+
+    assert testcase_reason_and_output(successful, "SUCCESSFUL") == (None, None)
+    assert testcase_reason_and_output(skipped, "SKIPPED") == (None, None)
+    assert testcase_reason_and_output(failed, "FAILED") == (
+        "failure details",
+        "failure details\n\nfailing stdout\n\nfailing stderr",
+    )
+
+
 def test_large_report_generation_preserves_summary_and_filters_tree(tmp_path):
     from junit_report_model import build_report
     from report_data import report_to_report_ui_data
