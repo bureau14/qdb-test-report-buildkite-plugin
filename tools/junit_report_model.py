@@ -375,6 +375,19 @@ def is_qdb_test_log(artifact: ArtifactLink) -> bool:
     return QDB_TEST_LOG_NAME_RE.fullmatch(Path(artifact.relative_path).name) is not None
 
 
+def artifact_matches_junit_filename(artifact: ArtifactLink, junit_filename_stem: str) -> bool:
+    artifact_name = Path(artifact.relative_path).name
+    # A substring match leaks logs from similarly prefixed suites, such as a
+    # transient_single report receiving transient_single_parallelism logs. Match
+    # the whole XML stem and allow only ordinary filename extensions after it.
+    return (
+        re.fullmatch(
+            rf"{re.escape(junit_filename_stem)}(?:\.[^.]+)*", artifact_name, flags=re.IGNORECASE
+        )
+        is not None
+    )
+
+
 def source_artifacts_for_junit(
     qdb_pid: str | None, artifacts: list[ArtifactLink], junit_filename_stem: str | None = None
 ) -> list[ArtifactLink]:
@@ -390,7 +403,7 @@ def source_artifacts_for_junit(
         matching_junit_artifacts = [
             artifact
             for artifact in artifacts
-            if junit_filename_stem.casefold() in Path(artifact.relative_path).name.casefold()
+            if artifact_matches_junit_filename(artifact, junit_filename_stem)
         ]
         if matching_junit_artifacts:
             return matching_junit_artifacts + [

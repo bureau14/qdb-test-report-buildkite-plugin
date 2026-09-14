@@ -327,10 +327,17 @@ def test_junit_xml_filename_match_limits_source_artifacts_and_falls_back_to_pid_
     )
     aggregation_log = ArtifactLink(
         name="Server logs",
-        relative_path="logs/qdb_aggregation_test-server.log",
-        key="artifacts/logs/qdb_aggregation_test-server.log",
+        relative_path="logs/qdb_aggregation_test.tar.gz",
+        key="artifacts/logs/qdb_aggregation_test.tar.gz",
         url=None,
         size_bytes=123,
+    )
+    aggregation_parallelism_log = ArtifactLink(
+        name="Server logs",
+        relative_path="logs/qdb_aggregation_test_parallelism.tar.gz",
+        key="artifacts/logs/qdb_aggregation_test_parallelism.tar.gz",
+        url=None,
+        size_bytes=234,
     )
     auth_log = ArtifactLink(
         name="Server logs",
@@ -359,7 +366,13 @@ def test_junit_xml_filename_match_limits_source_artifacts_and_falls_back_to_pid_
         [("linux", linux)],
         source_job_id="job-1",
         source_artifacts_by_job_id={
-            "job-1": [aggregation_log, auth_log, matching_pid_log, other_pid_log]
+            "job-1": [
+                aggregation_log,
+                aggregation_parallelism_log,
+                auth_log,
+                matching_pid_log,
+                other_pid_log,
+            ]
         },
     )
 
@@ -379,6 +392,7 @@ def test_junit_xml_filename_match_limits_source_artifacts_and_falls_back_to_pid_
     assert aggregation_execution.source_artifacts == [aggregation_log, matching_pid_log]
     assert cluster_execution.source_artifacts == [
         aggregation_log,
+        aggregation_parallelism_log,
         auth_log,
         matching_pid_log,
     ]
