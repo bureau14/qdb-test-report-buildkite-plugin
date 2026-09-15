@@ -107,6 +107,26 @@ def generate_html_report(
             "logical_status_counts": dict(report.logical_status_counts),
             "root_status": report.root_status,
             "malformed_junit_xml": report.malformed_junit_xml,
+            "failed_test_cases": [
+                {
+                    "suite": execution.suite_name,
+                    "test_file": execution.test_file,
+                    "test_case": (
+                        execution.name if execution.report_kind == "ctest" else execution.logical_id
+                    ),
+                    "report_kind": execution.report_kind,
+                    "platform": execution.platform,
+                    "status": execution.status,
+                    "reason": execution.reason,
+                    "duration_seconds": execution.duration_seconds,
+                    "source_xml_url": execution.source_xml_url,
+                }
+                for suite in report.suites.values()
+                for test_file in suite.test_files.values()
+                for logical in test_file.logical_tests.values()
+                for execution in logical.executions.values()
+                if execution.status in ("FAILED", "ERRORED")
+            ],
         }
         if artifact_metadata is not None:
             summary["artifacts"] = artifact_metadata

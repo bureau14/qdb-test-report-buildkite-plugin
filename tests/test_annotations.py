@@ -1,4 +1,246 @@
+from html import unescape
+
+import annotations
+import pytest
 from annotations import build_annotation_body, get_annotation_style, get_job_annotation_style
+
+
+def failed_case(name="Class::test", status="FAILED", platform="linux"):
+    return {
+        "suite": "suite",
+        "test_file": "tests.xml",
+        "test_case": name,
+        "platform": platform,
+        "status": status,
+    }
+
+
+@pytest.mark.parametrize("scope", ["build", "job"])
+def test_failed_test_table(scope):
+    summary = {
+        "logical_tests": 2,
+        "status_counts": {"FAILED": 1, "ERRORED": 1},
+        "failed_test_cases": [
+            dict(failed_case(), duration_seconds=1.234),
+            dict(failed_case("Class::error", "ERRORED", "windows"), duration_seconds=0),
+        ],
+    }
+    body = build_annotation_body("Tests", summary, None, scope=scope)
+    assert "| Suite / report | Test case | Failure reason | Execution time |" in body
+    assert "| suite::tests.xml | Class::test | — | 1.234 s |\n" in body
+    assert "| suite::tests.xml | Class::error | ERRORED: — | 0.000 s |\n" in body
+    assert "Target" not in body
+    assert "CTest" not in body
+    assert "omitted" not in body
+
+
+@pytest.mark.parametrize(
+    "suite, report, label",
+    [
+        (
+            "qdb_integration_test_query_transient_single",
+            "qdb_integration_test_query_transient_single",
+            "qdb_integration_test_query_transient_single",
+        ),
+        ("shared_suite", "executable_a", "shared_suite::executable_a"),
+    ],
+)
+def test_failed_test_table_suite_report_display(suite, report, label):
+    case = dict(
+        failed_case(), suite=suite, test_file=report, reason="Assertion", duration_seconds=1
+    )
+    original = case.copy()
+    body = unescape(build_annotation_body("Tests", {"failed_test_cases": [case]}, None))
+    assert f"| {label} | Class::test | Assertion | 1.000 s |\n" in body
+    assert "| Suite / report | Test case | Failure reason | Execution time |" in body
+    assert "Source" not in body
+    assert case == original
+
+
+def test_failed_test_table_escapes_test_names():
+    summary = {"failed_test_cases": [failed_case("<script>&|`*_[x]~\\\r\nnext")]}
+    body = build_annotation_body("Tests", summary, None)
+    assert "&lt;script&gt;&amp;&#124;&#96;&#42;&#95;&#91;x&#93;&#126;&#92; next" in body
+    assert "<script>" not in body
+
+
+def test_failed_test_table_fills_byte_budget():
+    case = failed_case("Class::測試🙂")
+    case.update(reason="Expected 測試🙂", source_xml_url="https://example.com/job/tests.xml")
+    summary = {
+        "warnings": ["Warning with unicode: ⚠"],
+        "failed_test_cases": [
+            dict(case, test_case=f"Class::測試🙂{index:05d}") for index in range(20000)
+        ],
+    }
+    body = build_annotation_body("Tests", summary, "https://example.com/report")
+    row = "| suite::tests.xml | Class::測試🙂00000 | Expected 測試🙂 | — |\n"
+    shown = body.count("| suite::tests.xml | Class::測試🙂")
+    assert 0 < shown < 20000
+    assert f"{20000 - shown} failed test case(s) omitted" in body
+    assert "Warning with unicode: ⚠" in body
+    assert "Open full report</a>" in body
+    assert len(body.encode("utf-8")) <= annotations.MAX_ANNOTATION_BYTES
+    assert len((body + row).encode("utf-8")) > annotations.MAX_ANNOTATION_BYTES
+
+
+def test_failed_test_table_escapes_reason_and_omits_xml_link():
+    case = failed_case()
+    case.update(
+        reason="Expected <value> | **actual**\r\nsecond line",
+        source_xml_url='https://example.com/job/tests.xml?a=1&b="x|y"',
+    )
+    body = build_annotation_body("Tests", {"failed_test_cases": [case]}, None)
+    assert "Expected &lt;value&gt; &#124; &#42;&#42;actual&#42;&#42; second line" in body
+    assert "<a " not in body
+    assert "JUnit XML" not in body
+    assert "https://example.com/job/tests.xml" not in body
+
+
+@pytest.mark.parametrize("status", ["FAILED", "ERRORED"])
+def test_failed_test_table_caps_reason(status):
+    case = failed_case(status=status)
+    case["reason"] = "測" * 1000
+    body = build_annotation_body("Tests", {"failed_test_cases": [case]}, None)
+    prefix = "ERRORED: " if status == "ERRORED" else ""
+    reason_length = annotations.MAX_FAILURE_REASON_CHARS - len(prefix) - 1
+    assert prefix + "測" * reason_length + "…" in body
+    assert "測" * (reason_length + 1) not in body
+
+
+@pytest.mark.parametrize("fields", [{}, {"reason": None, "source_xml_url": None}])
+def test_failed_test_table_missing_reason_and_xml_link(fields):
+    case = failed_case()
+    case.update(fields)
+    body = build_annotation_body("Tests", {"failed_test_cases": [case]}, None)
+    assert "| suite::tests.xml | Class::test | — | — |\n" in body
+    assert "<a " not in body
+
+
+def test_failed_test_table_keeps_all_rows_at_exact_limit(monkeypatch):
+    summary = {"failed_test_cases": [failed_case(), failed_case("other")]}
+    full_body = build_annotation_body("Tests", summary, None)
+    monkeypatch.setattr(annotations, "MAX_ANNOTATION_BYTES", len(full_body.encode("utf-8")))
+    assert build_annotation_body("Tests", summary, None) == full_body
+
+
+def test_failed_test_table_skips_oversized_row_and_keeps_later_cases():
+    summary = {
+        "failed_test_cases": [failed_case("x" * annotations.MAX_ANNOTATION_BYTES), failed_case()],
+    }
+    body = build_annotation_body("Tests", summary, None)
+    assert "| suite::tests.xml | Class::test |" in body
+    assert "1 failed test case(s) omitted" in body
+    assert len(body.encode("utf-8")) <= annotations.MAX_ANNOTATION_BYTES
+
+
+def test_failed_test_table_without_room_for_rows(monkeypatch):
+    monkeypatch.setattr(annotations, "MAX_ANNOTATION_BYTES", 150)
+    body = build_annotation_body("Tests", {"failed_test_cases": [failed_case()]}, None)
+    assert "1 failed test case(s) omitted" in body
+    assert "| Suite |" not in body
+    assert len(body.encode("utf-8")) <= 150
+
+
+def test_failed_test_tables_split_ctest_from_detailed_tests():
+    detailed = failed_case()
+    ctest = dict(failed_case("ctest_binary"), report_kind="ctest", reason="Timeout")
+    body = build_annotation_body("Tests", {"failed_test_cases": [ctest, detailed]}, None)
+    ctest_table, detailed_table = body.split("### Failed test cases — Boost.Test / test-runner")
+    assert "### Failed test cases — CTest" in ctest_table
+    assert "| suite::tests.xml | Class::test | — |" in detailed_table
+    assert "| Test case | Failure reason | Execution time |" in ctest_table
+    assert "| ctest&#95;binary | Timeout |" in ctest_table
+    for redundant in ("suite", "tests.xml", "Target", "JUnit XML", "Class::test"):
+        assert redundant not in ctest_table
+
+
+def test_failed_test_tables_share_byte_budget(monkeypatch):
+    detailed = failed_case()
+    ctest = dict(failed_case("binary"), report_kind="ctest", reason="Timeout")
+    summary = {"failed_test_cases": [detailed, ctest]}
+    complete = build_annotation_body("Tests", summary, None)
+    monkeypatch.setattr(annotations, "MAX_ANNOTATION_BYTES", len(complete.encode("utf-8")))
+    assert build_annotation_body("Tests", summary, None) == complete
+    summary["failed_test_cases"].insert(0, failed_case("x" * 1000))
+    monkeypatch.setattr(annotations, "MAX_ANNOTATION_BYTES", len(complete.encode("utf-8")) + 100)
+    limited = build_annotation_body("Tests", summary, None)
+    assert "Boost.Test / test-runner" in limited
+    assert "### Failed test cases — CTest" in limited
+    assert "1 failed test case(s) omitted" in limited
+    assert len(limited.encode("utf-8")) <= annotations.MAX_ANNOTATION_BYTES
+
+
+@pytest.mark.parametrize("kind", ["test", "ctest"])
+def test_failed_test_table_keeps_first_reported_target(kind, monkeypatch):
+    first = dict(
+        failed_case(platform="windows"), report_kind=kind, reason="First reason", duration_seconds=2
+    )
+    second = dict(
+        first, platform="linux", status="ERRORED", reason="Later reason", duration_seconds=9
+    )
+    if kind == "ctest":
+        second.update(suite="another-build-name", test_file="another-ctest-file")
+    summary = {"failed_test_cases": [first, second]}
+    body = build_annotation_body("Tests", summary, None)
+    assert body.count("Class::test") == 1
+    assert "| First reason | 2.000 s |" in body
+    assert "Later reason" not in body
+    assert "ERRORED:" not in body
+    assert "omitted" not in body
+    assert len(summary["failed_test_cases"]) == 2
+
+    monkeypatch.setattr(annotations, "MAX_ANNOTATION_BYTES", 150)
+    limited = build_annotation_body("Tests", summary, None)
+    assert "1 failed test case(s) omitted" in limited
+
+
+def test_failed_test_table_preserves_distinct_test_identities():
+    case = dict(failed_case(), suite="report", test_file="report")
+    cases = [
+        case,
+        dict(case, suite="other-suite"),
+        dict(case, test_file="other-file"),
+        dict(case, report_kind="ctest"),
+    ]
+    body = build_annotation_body("Tests", {"failed_test_cases": cases}, None)
+    assert body.count("Class::test") == 4
+    assert "| report | Class::test |" in body
+    assert "| report::other-file | Class::test |" in body
+    assert "| other-suite::report | Class::test |" in body
+
+
+def test_ctest_only_does_not_render_detailed_table():
+    case = dict(failed_case("binary"), report_kind="ctest")
+    body = build_annotation_body("Tests", {"failed_test_cases": [case]}, None)
+    assert "### Failed test cases — CTest" in body
+    assert "Boost.Test" not in body
+    assert "Suite / report" not in body
+
+
+@pytest.mark.parametrize("scope", ["build", "job"])
+def test_annotation_sends_large_utf8_body_via_stdin(monkeypatch, scope):
+    calls = []
+    monkeypatch.setattr(
+        annotations.subprocess, "run", lambda *args, **kwargs: calls.append((args, kwargs))
+    )
+    body = "測試🙂" * 50000
+    annotations.create_buildkite_annotation(body, "tests", "error", 10, scope=scope)
+    args, kwargs = calls[0]
+    expected = [
+        "buildkite-agent",
+        "annotate",
+        "--context",
+        "tests",
+        "--style",
+        "error",
+        "--priority",
+        "10",
+    ]
+    if scope == "job":
+        expected += ["--scope", "job"]
+    assert args == (expected,)
+    assert kwargs == {"input": body.encode("utf-8"), "check": True}
 
 
 def test_build_annotation_body_multi_target():

@@ -2,6 +2,94 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from html import escape
+
+MAX_ANNOTATION_BYTES = 1024 * 1024
+MAX_FAILURE_REASON_CHARS = 240
+
+
+def failed_test_table(summary: dict, available_bytes: int) -> str:
+    cases = []
+    seen = set()
+    for case in summary.get("failed_test_cases", []):
+        kind = "ctest" if case.get("report_kind") == "ctest" else "test"
+        identity = (kind, case.get("test_case", ""))
+        if kind != "ctest":
+            identity += (case.get("suite", ""), case.get("test_file", ""))
+        if identity not in seen:
+            seen.add(identity)
+            cases.append(case)
+    if not cases:
+        return ""
+
+    headers = {
+        "ctest": (
+            "\n\n### Failed test cases — CTest\n\n"
+            "| Test case | Failure reason | Execution time |\n"
+            "| --- | --- | ---: |\n"
+        ),
+        "test": (
+            "\n\n### Failed test cases — Boost.Test / test-runner\n\n"
+            "| Suite / report | Test case | Failure reason | Execution time |\n"
+            "| --- | --- | --- | ---: |\n"
+        ),
+    }
+
+    def cell(value: str) -> str:
+        # Encode Markdown punctuation too, so test names remain literal table cells.
+        value = escape(" ".join(value.split()))
+        for char in "\\|`*_[]~":
+            value = value.replace(char, f"&#{ord(char)};")
+        return value
+
+    def omitted_notice(count: int) -> str:
+        return f"\n\n{count} failed test case(s) omitted due to the annotation size limit."
+
+    def render_row(case: dict) -> str:
+        cells = []
+        if case.get("report_kind") != "ctest":
+            suite = case.get("suite", "")
+            report = case.get("test_file", "")
+            cells.append(cell(suite if suite == report else f"{suite}::{report}"))
+        cells.append(cell(case.get("test_case", "")))
+        reason = " ".join((case.get("reason") or "").split())
+        if case.get("status") == "ERRORED":
+            reason = f"ERRORED: {reason or '—'}"
+        if len(reason) > MAX_FAILURE_REASON_CHARS:
+            reason = reason[: MAX_FAILURE_REASON_CHARS - 1] + "…"
+        cells.append(cell(reason) if reason else "—")
+        duration = case.get("duration_seconds")
+        cells.append(f"{duration:.3f} s" if duration is not None else "—")
+        return "| " + " | ".join(cells) + " |\n"
+
+    groups: dict[str, list[str]] = {kind: [] for kind in headers}
+    for case in cases:
+        kind = "ctest" if case.get("report_kind") == "ctest" else "test"
+        groups[kind].append(render_row(case))
+    full_table = "".join(headers[kind] + "".join(rows) for kind, rows in groups.items() if rows)
+    if len(full_table.encode("utf-8")) <= available_bytes:
+        return full_table
+
+    parts = []
+    size = 0
+    shown = 0
+    for kind, rows in groups.items():
+        header = headers[kind]
+        for row in rows:
+            addition = header + row
+            row_bytes = len(addition.encode("utf-8"))
+            notice_bytes = len(omitted_notice(len(cases) - shown - 1).encode("utf-8"))
+            if size + row_bytes + notice_bytes <= available_bytes:
+                parts.append(addition)
+                size += row_bytes
+                shown += 1
+                header = ""
+
+    table = "".join(parts)
+    omitted = len(cases) - shown
+    if omitted:
+        table += omitted_notice(omitted)
+    return table if len(table.encode("utf-8")) <= available_bytes else ""
 
 
 def get_annotation_warnings(summary: dict, scope: str = "build") -> list[str]:
@@ -91,6 +179,7 @@ def build_annotation_body(
         body += f"\n\n❌ Malformed JUnit XML\n\n{malformed_lines}"
     if html_url:
         body += f'\n\n<a href="{html_url}" target="_blank" rel="noopener noreferrer">Open full report</a>'
+    body += failed_test_table(summary, MAX_ANNOTATION_BYTES - len(body.encode("utf-8")))
     return body
 
 
@@ -147,7 +236,6 @@ def create_buildkite_annotation(
     args = [
         "buildkite-agent",
         "annotate",
-        body,
         "--context",
         context,
         "--style",
@@ -160,6 +248,6 @@ def create_buildkite_annotation(
         args.append("job")
 
     try:
-        subprocess.run(args, check=True)
+        subprocess.run(args, input=body.encode("utf-8"), check=True)
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         print(f"WARNING: failed to create Buildkite annotation: {exc}", file=sys.stderr)

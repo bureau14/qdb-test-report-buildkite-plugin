@@ -84,6 +84,7 @@ class TestcaseExecution:
     output: str | None = None
     source_artifacts: list[ArtifactLink] = field(default_factory=list)
     qdb_process_id: str | None = None
+    report_kind: str = "test"
 
 
 @dataclass
@@ -456,6 +457,13 @@ def parse_junit_file(
             log_warn(f"empty testsuite file={path} platform={platform} suite={suite_name}")
         for testcase in suite_testcases:
             logical_id, classname, name = logical_test_identity(testcase, source_id)
+            # CTest has no generator marker, but emits these suite attributes,
+            # execution statuses, and identical class/test names.
+            is_ctest = (
+                {"disabled", "hostname", "timestamp"} <= suite.attrib.keys()
+                and testcase.attrib.get("status") in {"run", "fail", "notrun", "disabled"}
+                and classname == name
+            )
             status = testcase_status(testcase)
             reason, output = testcase_reason_and_output(testcase, status)
             executions.append(
@@ -477,6 +485,7 @@ def parse_junit_file(
                     output=output,
                     source_artifacts=source_artifacts or [],
                     qdb_process_id=source_qdb_process_id,
+                    report_kind="ctest" if is_ctest else "test",
                 )
             )
     status_counts = Counter(execution.status for execution in executions)
