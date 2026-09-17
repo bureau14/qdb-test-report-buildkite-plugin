@@ -938,19 +938,16 @@ def test_report_caps_large_output_and_points_to_full_junit_xml(tmp_path):
     from junit_report_model import MAX_EMBEDDED_TEST_OUTPUT_BYTES, build_report
     from report_data import report_to_report_ui_data
 
-    test_output = (
-        "begin\n"
-        + ("middle line\n" * (MAX_EMBEDDED_TEST_OUTPUT_BYTES // 4))
-    ).rstrip("\n")
+    test_output = ("begin\n" + ("middle line\n" * (MAX_EMBEDDED_TEST_OUTPUT_BYTES // 4))).rstrip(
+        "\n"
+    )
 
     linux = tmp_path / "linux"
     write(
         linux / "junit.xml",
         junit_xml(
             '<testcase classname="Smoke" name="fails" time="0.01">'
-            '<failure message="failure"><![CDATA['
-            + test_output
-            + "]]></failure>"
+            '<failure message="failure"><![CDATA[' + test_output + "]]></failure>"
             "</testcase>"
         ),
     )
