@@ -938,13 +938,18 @@ def test_report_caps_large_output_and_points_to_full_junit_xml(tmp_path):
     from junit_report_model import MAX_EMBEDDED_TEST_OUTPUT_BYTES, build_report
     from report_data import report_to_report_ui_data
 
+    test_output = (
+        "begin\n"
+        + ("middle line\n" * (MAX_EMBEDDED_TEST_OUTPUT_BYTES // 4))
+    ).rstrip("\n")
+
     linux = tmp_path / "linux"
     write(
         linux / "junit.xml",
         junit_xml(
             '<testcase classname="Smoke" name="fails" time="0.01">'
-            '<failure message="failure"><![CDATA[begin\n'
-            + ("middle line\n" * (MAX_EMBEDDED_TEST_OUTPUT_BYTES // 4))
+            '<failure message="failure"><![CDATA['
+            + test_output
             + "]]></failure>"
             "</testcase>"
         ),
@@ -962,9 +967,14 @@ def test_report_caps_large_output_and_points_to_full_junit_xml(tmp_path):
         if block["type"] == "pre"
     )
 
-    assert len(pre_content.encode("utf-8")) <= MAX_EMBEDDED_TEST_OUTPUT_BYTES
-    assert pre_content.startswith("begin\n")
-    assert "Output truncated from" in pre_content
+    encoded_output = test_output.encode("utf-8")
+    expected_tail = encoded_output[-MAX_EMBEDDED_TEST_OUTPUT_BYTES:].decode(
+        "utf-8", errors="ignore"
+    )
+
+    assert pre_content.endswith(expected_tail)
+    assert not pre_content.endswith(test_output)
+    assert f"Output truncated from {len(encoded_output)} bytes." in pre_content
     assert "Inspect the full JUnit XML for complete output." in pre_content
 
 
