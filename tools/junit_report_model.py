@@ -51,10 +51,11 @@ def cap_embedded_test_output(output: str) -> str:
         f"[Output truncated from {len(encoded_output)} bytes. "
         "Inspect the full JUnit XML for complete output.]\n\n"
     )
-    # Cap test output to last MAX_EMBEDDED_TEST_OUTPUT_BYTES of the test output
-    preview = encoded_output[-MAX_EMBEDDED_TEST_OUTPUT_BYTES:].decode("utf-8", errors="ignore")
-    return f"{message}{preview}"
+    message_bytes = message.encode("utf-8")
+    preview_bytes = MAX_EMBEDDED_TEST_OUTPUT_BYTES - len(message_bytes)
 
+    preview = encoded_output[-preview_bytes:].decode("utf-8", errors="ignore")
+    return f"{message}{preview}"
 
 @dataclass
 class ArtifactLink:
