@@ -57,6 +57,7 @@ def cap_embedded_test_output(output: str) -> str:
     preview = encoded_output[-preview_bytes:].decode("utf-8", errors="ignore")
     return f"{message}{preview}"
 
+
 @dataclass
 class ArtifactLink:
     name: str
