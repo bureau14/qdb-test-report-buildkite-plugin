@@ -280,3 +280,26 @@ The standalone converter writes progress and summary details to stderr. Empty XM
 ## Licensing and Attribution
 
 - This project includes a vendored and modified version of the **Open Test Reporting (OTR) UI**, licensed under the **Apache License 2.0**. The original license is at `ui/LICENSE.md`.
+
+### QDB executable metadata
+
+Boost.Test producers can put a single versioned JSON record in the suite-level
+`<system-out>` (not in a testcase):
+
+```text
+QDB_TEST_METADATA {"version":1,"pid":90560,"log_path":"test_log/qdb_test_log_pid_90560_1724412755000000000.json"}
+```
+
+`pid` is a positive integer. Omit `log_path` when the executable has no JSON
+logger. The path uses `/` separators and is relative to `PROJECT_ROOT`, or the
+producer's working directory when `PROJECT_ROOT` is unset. Configure artifact
+uploads so their recorded relative paths match; the existing
+`test_log/qdb_test_log_pid_*.json` glob preserves this path.
+
+The report matches the explicit path only against artifacts from the XML's
+originating job. A missing upload produces a warning, without falling back to
+another file with the same PID. Without a path, PID matching remains available.
+Older reports using the `qdb_test_process_id` testcase remain supported. Invalid
+or unsupported metadata is ignored with a warning; conflicting records are not
+assigned to cases. The linked JSON is the whole executable's log, shared by its
+cases, and does not create an extra testcase.

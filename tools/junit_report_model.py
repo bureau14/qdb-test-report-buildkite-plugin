@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import argparse
 import glob
+import json
 import re
 import sys
 import xml.etree.ElementTree as ET
 from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 STATUS_ORDER = ["SUCCESSFUL", "SKIPPED", "FAILED", "ERRORED"]
 STATUS_SEVERITY = {"SUCCESSFUL": 0, "SKIPPED": 1, "FAILED": 2, "ERRORED": 3}
@@ -86,6 +87,7 @@ class TestcaseExecution:
     output: str | None = None
     source_artifacts: list[ArtifactLink] = field(default_factory=list)
     qdb_process_id: str | None = None
+    qdb_log_path: str | None = None
     report_kind: str = "test"
 
 
@@ -372,12 +374,60 @@ def qdb_process_id(root: ET.Element) -> str | None:
     return None
 
 
+def normalized_artifact_path(path: str) -> str:
+    return str(PurePosixPath(path.replace("\\", "/")))
+
+
+def qdb_metadata(root: ET.Element) -> tuple[str | None, str | None]:
+    """Read executable metadata from suite output, never from individual cases."""
+    records: set[tuple[str, str | None]] = set()
+    marker = "QDB_TEST_METADATA "
+    for suite in iter_junit_suites(root):
+        for child in suite:
+            if local_name(child) != "system-out":
+                continue
+            for line in (child.text or "").splitlines():
+                _, found, payload = line.partition(marker)
+                if not found:
+                    continue
+                try:
+                    record = json.loads(payload)
+                except ValueError:
+                    log_warn("ignoring malformed QDB_TEST_METADATA JSON")
+                    continue
+                if (
+                    not isinstance(record, dict)
+                    or type(record.get("version")) is not int
+                    or record["version"] != 1
+                    or type(record.get("pid")) is not int
+                    or record["pid"] <= 0
+                ):
+                    log_warn("ignoring unsupported or invalid QDB_TEST_METADATA")
+                    continue
+                log_path = record.get("log_path")
+                if "log_path" in record and (not isinstance(log_path, str) or not log_path):
+                    log_warn("ignoring QDB_TEST_METADATA with invalid log_path")
+                    continue
+                records.add((str(record["pid"]), log_path))
+    if len(records) == 1:
+        return records.pop()
+    if records:
+        log_warn("conflicting QDB_TEST_METADATA records; ignoring executable metadata")
+        return None, None
+    return qdb_process_id(root), None
+
+
 def is_qdb_test_log(artifact: ArtifactLink) -> bool:
-    return QDB_TEST_LOG_NAME_RE.fullmatch(Path(artifact.relative_path).name) is not None
+    return (
+        QDB_TEST_LOG_NAME_RE.fullmatch(
+            PurePosixPath(normalized_artifact_path(artifact.relative_path)).name
+        )
+        is not None
+    )
 
 
 def artifact_matches_junit_filename(artifact: ArtifactLink, junit_filename_stem: str) -> bool:
-    artifact_name = Path(artifact.relative_path).name
+    artifact_name = PurePosixPath(normalized_artifact_path(artifact.relative_path)).name
     # A substring match leaks logs from similarly prefixed suites, such as a
     # transient_single report receiving transient_single_parallelism logs. Match
     # the whole XML stem and allow only ordinary filename extensions after it.
@@ -390,16 +440,33 @@ def artifact_matches_junit_filename(artifact: ArtifactLink, junit_filename_stem:
 
 
 def source_artifacts_for_junit(
-    qdb_pid: str | None, artifacts: list[ArtifactLink], junit_filename_stem: str | None = None
+    qdb_pid: str | None,
+    artifacts: list[ArtifactLink],
+    junit_filename_stem: str | None = None,
+    qdb_log_path: str | None = None,
 ) -> list[ArtifactLink]:
     non_qdb_logs = [artifact for artifact in artifacts if not is_qdb_test_log(artifact)]
-    matching_pid_artifacts = [
-        artifact
-        for artifact in artifacts
-        if (match := QDB_TEST_LOG_NAME_RE.fullmatch(Path(artifact.relative_path).name))
-        and qdb_pid
-        and match.group(1) == qdb_pid
-    ]
+    if qdb_log_path is not None:
+        expected_path = normalized_artifact_path(qdb_log_path)
+        matching_qdb_artifacts = [
+            artifact
+            for artifact in artifacts
+            if normalized_artifact_path(artifact.relative_path) == expected_path
+        ]
+        if not matching_qdb_artifacts:
+            log_warn(f"QDB JSON log was not uploaded for this job: {qdb_log_path}")
+    else:
+        matching_qdb_artifacts = [
+            artifact
+            for artifact in artifacts
+            if (
+                match := QDB_TEST_LOG_NAME_RE.fullmatch(
+                    PurePosixPath(normalized_artifact_path(artifact.relative_path)).name
+                )
+            )
+            and qdb_pid
+            and match.group(1) == qdb_pid
+        ]
     if junit_filename_stem:
         matching_junit_artifacts = [
             artifact
@@ -409,10 +476,12 @@ def source_artifacts_for_junit(
         if matching_junit_artifacts:
             return matching_junit_artifacts + [
                 artifact
-                for artifact in matching_pid_artifacts
+                for artifact in matching_qdb_artifacts
                 if artifact not in matching_junit_artifacts
             ]
-    return non_qdb_logs + matching_pid_artifacts
+    return non_qdb_logs + [
+        artifact for artifact in matching_qdb_artifacts if artifact not in non_qdb_logs
+    ]
 
 
 def iter_junit_suites(root: ET.Element) -> list[ET.Element]:
@@ -447,7 +516,7 @@ def parse_junit_file(
             malformed_junit_xml.append(malformed)
         return []
     executions: list[TestcaseExecution] = []
-    source_qdb_process_id = qdb_process_id(root)
+    source_qdb_process_id, source_qdb_log_path = qdb_metadata(root)
     suites = iter_junit_suites(root)
     if not suites:
         log_warn(f"no testsuite elements found file={path} platform={platform}")
@@ -487,6 +556,7 @@ def parse_junit_file(
                     output=output,
                     source_artifacts=source_artifacts or [],
                     qdb_process_id=source_qdb_process_id,
+                    qdb_log_path=source_qdb_log_path,
                     report_kind="ctest" if is_ctest else "test",
                 )
             )
@@ -593,12 +663,13 @@ def build_report(
         )
         if file_executions:
             first_execution = file_executions[0]
-            # The source XML's process ID and filename apply to every testcase,
+            # The source XML's executable metadata applies to every testcase,
             # so match its artifacts once rather than rescanning them per testcase.
             matching_artifacts = source_artifacts_for_junit(
                 first_execution.qdb_process_id,
                 (source_artifacts_by_job_id or {}).get(effective_source_job_id or "", []),
                 first_execution.test_file,
+                qdb_log_path=first_execution.qdb_log_path,
             )
             for execution in file_executions:
                 execution.source_artifacts = matching_artifacts

@@ -412,7 +412,8 @@ def test_build_report_matches_source_artifacts_once_per_junit_file(tmp_path, mon
     )
     calls = []
 
-    def matching_artifacts(qdb_pid, artifacts, junit_filename_stem):
+    def matching_artifacts(qdb_pid, artifacts, junit_filename_stem, qdb_log_path=None):
+        assert qdb_log_path is None
         calls.append((qdb_pid, artifacts, junit_filename_stem))
         return []
 
