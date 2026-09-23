@@ -262,6 +262,22 @@ def suite_duration(suite: TestSuite) -> float:
 
 def execution_sections(execution: TestcaseExecution, generated_at: str) -> list[dict[str, Any]]:
     sections: list[dict[str, Any]] = []
+    if execution.execution_metadata:
+        metadata = execution.execution_metadata
+        content = {
+            "Execution ID": metadata["execution_id"],
+            "Status": metadata["status"],
+            "JUnit": metadata["junit"],
+        }
+        if "exit_code" in metadata:
+            content["Exit code"] = metadata["exit_code"]
+        for i, process in enumerate(metadata["processes"], 1):
+            content[f"Process {i}"] = (
+                f"{process['role']}: PID {process['pid']} ({process.get('pid_namespace', 'native')})"
+            )
+        if metadata.get("warnings"):
+            content["Artifact warnings"] = "\n".join(metadata["warnings"])
+        sections.append(kvp_section("Execution", content))
     if execution.reason:
         sections.append(reason_section(execution.reason))
     if execution.output:

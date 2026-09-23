@@ -33,6 +33,9 @@ configuration:
         junit_input_path:
           type: string
           description: Local JUnit XML file, directory, or glob.
+        manifest_input_path:
+          type: string
+          description: Checkout-relative execution manifest file or glob. Manifest paths are authoritative for artifact association.
         fail_on_test_failures:
           type: boolean
           description: Exit 64 when the generated job report contains failed or errored tests; default true.

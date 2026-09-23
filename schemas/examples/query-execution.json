@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "execution_id": "query-transient-1",
+  "name": "query-transient",
+  "junit": "test-reports/query-transient.xml",
+  "status": "completed",
+  "exit_code": 0,
+  "processes": [
+    {
+      "role": "runner",
+      "pid": 1234,
+      "pid_namespace": "native"
+    },
+    {
+      "role": "server",
+      "pid": 5678,
+      "pid_namespace": "shell"
+    }
+  ],
+  "artifacts": [
+    {
+      "role": "runner-log",
+      "path": "test_log/query-transient-1/runner.json"
+    },
+    {
+      "role": "server-logs",
+      "path": "test-reports/server-logs/query-transient.tar.gz"
+    }
+  ]
+}

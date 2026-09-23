@@ -32,6 +32,7 @@ class PluginConfig:
     only_failures: bool
     annotate: bool
     fail_on_test_failures: bool
+    manifest_input_path: Path | None = None
     junit_input_path: Path | None = None
     commit: str | None = None
     repo: str | None = None
@@ -176,6 +177,7 @@ def load_plugin_config() -> PluginConfig:
         artifacts = []
         platforms = []
 
+    manifest_input_path_raw = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_MANIFEST_INPUT_PATH")
     return PluginConfig(
         scope=scope,
         title=title,
@@ -190,6 +192,7 @@ def load_plugin_config() -> PluginConfig:
         only_failures=only_failures,
         annotate=annotate,
         fail_on_test_failures=fail_on_test_failures,
+        manifest_input_path=Path(manifest_input_path_raw) if manifest_input_path_raw else None,
         junit_input_path=junit_input_path,
         commit=commit,
         repo=repo,

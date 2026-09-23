@@ -7,7 +7,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List
 
 # Add tools to path so we can import junit_html_report tool
 tools_path = str(Path(__file__).parent.parent / "tools")
@@ -22,6 +22,7 @@ from annotations import (
     get_job_annotation_style,
 )
 from artifact_inputs import ArtifactFile, collect_artifact_files, slugify_artifact_name
+from execution_manifest import load_manifests, local_path, validate_manifest
 from git_links import build_commit_url
 from junit_report_model import ArtifactLink
 from object_store import (
@@ -36,7 +37,7 @@ from object_store import (
     resolve_object_auth,
     upload_file,
 )
-from plugin_config import PlatformConfig, PluginConfig, load_plugin_config
+from plugin_config import ArtifactConfig, PlatformConfig, PluginConfig, load_plugin_config
 from report_downloads import (
     DownloadedJobXml,
     collect_full_scope_job_summaries,
@@ -67,7 +68,7 @@ class XmlSourceLink:
     url: str | None
 
 
-ArtifactMetadata = list[dict[str, Any]]
+ArtifactMetadata = List[Dict[str, Any]]
 
 
 def log(message: str) -> None:
@@ -193,6 +194,7 @@ def run_report_generation(
     artifacts: list[ArtifactLink] | None = None,
     artifact_metadata: ArtifactMetadata | None = None,
     xml_source_links: dict[Path, XmlSourceLink] | None = None,
+    manifest_sources: list[dict] | None = None,
 ) -> GenerationResult:
     """
     Runs the HTML report generator and returns the paths to the generated report files.
@@ -215,6 +217,7 @@ def run_report_generation(
         artifacts=artifacts,
         artifact_metadata=artifact_metadata,
         xml_source_links={path: link.url for path, link in (xml_source_links or {}).items()},
+        manifest_sources=manifest_sources,
         only_failures=config.only_failures,
         fail_on_test_failures=False,
     )
@@ -375,6 +378,8 @@ def main() -> int:
             job_artifacts_metadata: ArtifactMetadata = []
             source_artifacts_by_job_id: dict[str, list[ArtifactLink]] = {}
             report_artifacts: list[ArtifactLink] = []
+            manifest_sources: list[dict] = []
+            execution_records: list[dict] = []
             xml_source_links: dict[Path, XmlSourceLink] = {}
             if config.scope == "aggregate":
                 store_context = resolve_object_store_context()
@@ -393,7 +398,28 @@ def main() -> int:
                     log_fn=log,
                 )
 
-                if not downloaded_xml:
+                # Discover every job, including executions that crashed before writing XML.
+                job_summaries = collect_full_scope_job_summaries(
+                    cfg=store_context.store_cfg,
+                    auth=store_context.auth,
+                    bucket=store_context.bucket,
+                    destination_prefix=store_context.prefix,
+                    project_id=config.project_id,
+                    git_ref=config.git_ref,
+                    build_id=config.build_id,
+                    output_dir=staging_root / "downloaded-summaries",
+                )
+                if not job_summaries and downloaded_xml:
+                    job_summaries = collect_full_scope_job_summaries_for_xml(
+                        cfg=store_context.store_cfg,
+                        auth=store_context.auth,
+                        bucket=store_context.bucket,
+                        downloaded_xml=downloaded_xml,
+                        output_dir=staging_root / "downloaded-summaries",
+                    )
+                if not downloaded_xml and not any(
+                    s.get("execution_manifests") for s in job_summaries.values()
+                ):
                     log("No JUnit XML was found for this aggregate test report.")
                     if config.annotate:
                         create_buildkite_annotation(
@@ -413,7 +439,16 @@ def main() -> int:
                     f"{aggregate_counts['jobs']} jobs, "
                     f"{aggregate_counts['files']} XML files."
                 )
-                variant_names = sorted({item.variant for item in downloaded_xml})
+                variant_names = sorted(
+                    {item.variant for item in downloaded_xml}
+                    | {
+                        str(summary["variant"])
+                        for summary in job_summaries.values()
+                        if summary.get("execution_manifests")
+                    }
+                )
+                for variant in variant_names:
+                    (full_scope_xml_stage_root / variant).mkdir(parents=True, exist_ok=True)
                 config = replace(
                     config,
                     platforms=[
@@ -431,25 +466,6 @@ def main() -> int:
                     )
                     for item in downloaded_xml
                 ]
-                log("Discovering aggregate job summary manifests")
-                job_summaries = collect_full_scope_job_summaries_for_xml(
-                    cfg=store_context.store_cfg,
-                    auth=store_context.auth,
-                    bucket=store_context.bucket,
-                    downloaded_xml=downloaded_xml,
-                    output_dir=staging_root / "downloaded-summaries",
-                )
-                if not job_summaries:
-                    job_summaries = collect_full_scope_job_summaries(
-                        cfg=store_context.store_cfg,
-                        auth=store_context.auth,
-                        bucket=store_context.bucket,
-                        destination_prefix=store_context.prefix,
-                        project_id=config.project_id,
-                        git_ref=config.git_ref,
-                        build_id=config.build_id,
-                        output_dir=staging_root / "downloaded-summaries",
-                    )
                 for summary in job_summaries.values():
                     artifacts = summary.get("artifacts", [])
                     job_id = str(summary.get("job_id", ""))
@@ -461,6 +477,20 @@ def main() -> int:
                         }
                     )
                     source_artifacts_by_job_id[job_id] = artifact_links_from_metadata(artifacts)
+                    for record in summary.get("execution_manifests", []):
+                        data = validate_manifest(record["manifest"])
+                        variant = str(summary["variant"])
+                        manifest_sources.append(
+                            {
+                                "platform": variant,
+                                "job_id": job_id,
+                                **record,
+                                "junit_local": str(
+                                    full_scope_xml_stage_root / variant / job_id / data["junit"]
+                                ),
+                            }
+                        )
+
                 artifact_file_count = sum(
                     len(artifact.get("files", []))
                     for summary in job_summaries.values()
@@ -476,15 +506,67 @@ def main() -> int:
             else:
                 if config.junit_input_path is None or config.variant is None:
                     raise ValueError("scope=job requires variant and junit_input_path")
-                xml_uploads = collect_job_xml_uploads(config.junit_input_path, config.variant)
+                root = Path.cwd().resolve()
+                execution_records = load_manifests(config.manifest_input_path, root)
+                try:
+                    xml_uploads = collect_job_xml_uploads(config.junit_input_path, config.variant)
+                except FileNotFoundError:
+                    if not execution_records:
+                        raise
+                    xml_uploads = []
+                if execution_records:
+                    uploads = {item.local_path.resolve(): item for item in xml_uploads}
+                    for record in execution_records:
+                        path = local_path(root, record["manifest"]["junit"])
+                        manifest_sources.append(
+                            {
+                                "platform": config.variant,
+                                "job_id": config.job_id,
+                                **record,
+                                "junit_local": str(path),
+                            }
+                        )
+                        if path.is_file():
+                            uploads[path] = XmlUpload(
+                                local_path=path, object_relative_path=record["manifest"]["junit"]
+                            )
+                    # Preserve checkout-relative paths in storage as well as manifests.
+                    xml_uploads = [
+                        XmlUpload(
+                            local_path=path, object_relative_path=path.relative_to(root).as_posix()
+                        )
+                        for path in uploads
+                    ]
                 store_context = resolve_object_store_context()
                 xml_source_links = build_job_xml_source_links(config, xml_uploads, store_context)
                 artifact_files = collect_artifact_files(config.artifacts)
+                configured_artifact_names = {file.config.name for file in artifact_files}
+                explicit_files = {}
+                for record in execution_records:
+                    entries = [
+                        {"role": "Execution manifest", "path": record["path"]},
+                        *record["manifest"]["artifacts"],
+                    ]
+                    for entry in entries:
+                        path = local_path(root, entry["path"])
+                        if path.is_file():
+                            explicit_files[path] = ArtifactFile(
+                                config=ArtifactConfig(name=entry["role"], input_path=path),
+                                local_path=path,
+                                relative_path=entry["path"],
+                            )
+                artifact_files = [
+                    file
+                    for file in artifact_files
+                    if file.local_path.resolve() not in explicit_files
+                ] + list(explicit_files.values())
                 if artifact_files:
                     artifact_metadata = upload_extra_artifacts(
                         config, artifact_files, store_context
                     )
-                uploaded_artifact_names = {item["name"] for item in artifact_metadata}
+                uploaded_artifact_names = {
+                    item["name"] for item in artifact_metadata
+                } | configured_artifact_names
                 for artifact in config.artifacts:
                     if artifact.name not in uploaded_artifact_names:
                         artifact_metadata.append(
@@ -516,6 +598,7 @@ def main() -> int:
                 artifacts=report_artifacts if config.scope == "job" else [],
                 artifact_metadata=artifact_metadata if config.scope == "job" else None,
                 xml_source_links=xml_source_links,
+                manifest_sources=manifest_sources,
             )
             if config.scope == "aggregate":
                 add_summary_metadata(
@@ -525,6 +608,9 @@ def main() -> int:
                 )
 
             summary = json.loads(generation.summary_path.read_text())
+            if config.scope == "job" and execution_records:
+                summary["execution_manifests"] = execution_records
+                generation.summary_path.write_text(json.dumps(summary, indent=2))
             if config.scope == "job" and add_command_failure_warning(
                 summary, os.environ.get("BUILDKITE_COMMAND_EXIT_STATUS")
             ):

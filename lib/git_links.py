@@ -24,7 +24,7 @@ def build_commit_url(repo: str | None, commit: str | None) -> str | None:
 
 def _normalize_repo_url(repo: str) -> tuple[str, str] | None:
     if repo.startswith("git@") and ":" in repo:
-        host, path = repo.removeprefix("git@").split(":", 1)
+        host, path = repo[len("git@") :].split(":", 1)
         return _clean_host_path(host, path)
 
     parsed = urlparse(repo)
@@ -37,7 +37,8 @@ def _normalize_repo_url(repo: str) -> tuple[str, str] | None:
 def _clean_host_path(host: str, path: str) -> tuple[str, str] | None:
     host = host.strip().lower()
     path = path.strip().rstrip("/")
-    path = path.removesuffix(".git")
+    if path.endswith(".git"):
+        path = path[: -len(".git")]
     if not host or not path or "/" not in path:
         return None
     return host, path

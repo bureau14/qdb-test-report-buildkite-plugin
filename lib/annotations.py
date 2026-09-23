@@ -171,7 +171,8 @@ def build_annotation_body(
             file = item.get("file", "<unknown>")
             platform = item.get("platform", "<unknown>")
             label = f"{file} ({platform})"
-            if url := item.get("url"):
+            url = item.get("url")
+            if url:
                 label = f'<a href="{url}" target="_blank" rel="noopener noreferrer">{label}</a>'
             return f"- {label}: {item.get('error', 'invalid XML')}"
 

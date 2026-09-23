@@ -7,14 +7,15 @@ VENV_DIR="${PLUGIN_DIR}/.venv"
 TEST_REPORT_PY="${PLUGIN_DIR}/lib/test_report_plugin.py"
 
 _find_python3() {
-  if [[ -n "${QDB_CICD_AGENT_PYTHON3:-}" ]] && [[ -x "${QDB_CICD_AGENT_PYTHON3}" ]]; then
+  if [[ -n "${QDB_CICD_AGENT_PYTHON3:-}" ]] && [[ -x "${QDB_CICD_AGENT_PYTHON3}" ]] \
+     && "${QDB_CICD_AGENT_PYTHON3}" -c "import sys; sys.exit(0 if sys.version_info >= (3, 7) else 1)" 2>/dev/null; then
     echo "${QDB_CICD_AGENT_PYTHON3}"
     return
   fi
 
   for cmd in python3 python; do
     if command -v "$cmd" &>/dev/null \
-       && "$cmd" -c "import sys; sys.exit(0 if sys.version_info >= (3,) else 1)" 2>/dev/null; then
+       && "$cmd" -c "import sys; sys.exit(0 if sys.version_info >= (3, 7) else 1)" 2>/dev/null; then
       echo "$cmd"
       return
     fi
@@ -23,7 +24,7 @@ _find_python3() {
   if [[ -n "${SYSTEMROOT:-}" ]]; then
     for dir in /c/Python3.*-64 /c/Python3.*-32 /c/Python3*; do
       if [[ -x "${dir}/python.exe" ]] \
-         && "${dir}/python.exe" -c "import sys; sys.exit(0 if sys.version_info >= (3,) else 1)" 2>/dev/null; then
+         && "${dir}/python.exe" -c "import sys; sys.exit(0 if sys.version_info >= (3, 7) else 1)" 2>/dev/null; then
         echo "${dir}/python.exe"
         return
       fi

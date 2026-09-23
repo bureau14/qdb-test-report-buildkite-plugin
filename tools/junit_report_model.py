@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
+from execution_manifest import manifest_artifacts, validate_manifest
+
 STATUS_ORDER = ["SUCCESSFUL", "SKIPPED", "FAILED", "ERRORED"]
 STATUS_SEVERITY = {"SUCCESSFUL": 0, "SKIPPED": 1, "FAILED": 2, "ERRORED": 3}
 
@@ -89,6 +91,7 @@ class TestcaseExecution:
     qdb_process_id: str | None = None
     qdb_log_path: str | None = None
     report_kind: str = "test"
+    execution_metadata: dict | None = None
 
 
 @dataclass
@@ -252,7 +255,7 @@ def specific_reason_from_text(text: str | None) -> str | None:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     for line in lines:
         if line.startswith("- message:"):
-            return line.removeprefix("- message:").strip()
+            return line[len("- message:") :].strip()
     for line in lines:
         if line not in {"ASSERTION FAILURE:", "Failures detected in:"}:
             return line
@@ -364,8 +367,8 @@ def qdb_process_id(root: ET.Element) -> str | None:
         for testcase in root.iter()
         if local_name(testcase) == "testcase"
         and testcase.attrib.get("name") == QDB_PROCESS_ID_TESTCASE
-        and (value := testcase_system_out(testcase)) is not None
-        and value.isdecimal()
+        for value in (testcase_system_out(testcase),)
+        if value is not None and value.isdecimal()
     }
     if len(values) == 1:
         return values.pop()
@@ -459,13 +462,12 @@ def source_artifacts_for_junit(
         matching_qdb_artifacts = [
             artifact
             for artifact in artifacts
-            if (
-                match := QDB_TEST_LOG_NAME_RE.fullmatch(
+            for match in (
+                QDB_TEST_LOG_NAME_RE.fullmatch(
                     PurePosixPath(normalized_artifact_path(artifact.relative_path)).name
-                )
+                ),
             )
-            and qdb_pid
-            and match.group(1) == qdb_pid
+            if match and qdb_pid and match.group(1) == qdb_pid
         ]
     if junit_filename_stem:
         matching_junit_artifacts = [
@@ -584,6 +586,7 @@ def build_report(
     source_artifacts_by_job_id: dict[str, list[ArtifactLink]] | None = None,
     artifacts: list[ArtifactLink] | None = None,
     xml_source_links: dict[Path, str | None] | None = None,
+    manifest_sources: list[dict] | None = None,
 ) -> Report:
     log_info(f"Start JUnit report model build title={title!r} platforms={len(platform_specs)}")
     suites: OrderedDict[str, TestSuite] = OrderedDict()
@@ -605,7 +608,7 @@ def build_report(
                 xml_file.relative_to(
                     input_path.parent if input_path.is_file() else input_path
                 ).as_posix()
-                if input_path.is_dir()
+                if not has_glob_magic(input_path) and input_path.is_dir()
                 else xml_file.name
             )
             # Strip UUIDs and the platform name from the source_id components.
@@ -639,6 +642,28 @@ def build_report(
                 )
             )
 
+    manifests_by_path = {}
+    for source in manifest_sources or []:
+        validate_manifest(source["manifest"])
+        path = Path(source["junit_local"]).resolve()
+        if path in manifests_by_path:
+            raise ValueError(f"multiple manifests claim the same JUnit file: {path}")
+        manifests_by_path[path] = source
+    discovered_paths = {item[1].resolve() for item in all_files_to_process}
+    for path, source in manifests_by_path.items():
+        if path not in discovered_paths:
+            job_id = source["job_id"]
+            all_files_to_process.append(
+                (
+                    source["platform"],
+                    path,
+                    source["manifest"]["junit"],
+                    job_id,
+                    f"{build_url}#{job_id}" if build_url and job_id else None,
+                    (xml_source_links or {}).get(path),
+                )
+            )
+
     if not all_files_to_process:
         log_warn("No JUnit XML files discovered across all platforms")
 
@@ -652,16 +677,74 @@ def build_report(
         source_job_url,
         source_xml_url,
     ) in all_files_to_process:
-        file_executions = parse_junit_file(
-            xml_file,
-            platform,
-            source_id,
-            source_job_id=effective_source_job_id,
-            source_job_url=source_job_url,
-            source_xml_url=source_xml_url,
-            malformed_junit_xml=malformed_junit_xml,
+        manifest_source = manifests_by_path.get(xml_file.resolve())
+        if manifest_source:
+            effective_source_job_id = manifest_source["job_id"]
+        file_executions = (
+            parse_junit_file(
+                xml_file,
+                platform,
+                source_id,
+                source_job_id=effective_source_job_id,
+                source_job_url=source_job_url,
+                source_xml_url=source_xml_url,
+                malformed_junit_xml=malformed_junit_xml,
+            )
+            if xml_file.is_file()
+            else []
         )
-        if file_executions:
+        if manifest_source:
+            data = manifest_source["manifest"]
+            matching_artifacts, warnings = manifest_artifacts(
+                data,
+                (source_artifacts_by_job_id or {}).get(effective_source_job_id or "", []),
+                manifest_source["path"],
+            )
+            for warning in warnings:
+                log_warn(f"{data['name']}: {warning}")
+            reason = None
+            if not file_executions:
+                reason = "JUnit report is missing, malformed, empty, or contains no testcases."
+            elif data["status"] in ("running", "aborted"):
+                reason = f"Execution did not complete: {data['status']}"
+            elif data.get("exit_code", 0) != 0 and not any(
+                e.status in ("FAILED", "ERRORED") for e in file_executions
+            ):
+                reason = f"Execution exited with status {data['exit_code']} although JUnit reports no failures."
+            if reason:
+                if data.get("error"):
+                    reason += " " + data["error"]
+                file_executions.append(
+                    TestcaseExecution(
+                        platform=platform,
+                        source_file=xml_file,
+                        source_id=source_id,
+                        test_file=data["name"],
+                        source_job_id=effective_source_job_id,
+                        source_job_url=source_job_url,
+                        source_xml_url=source_xml_url,
+                        suite_name=file_executions[0].suite_name
+                        if file_executions
+                        else data["name"],
+                        classname="execution",
+                        name="Execution infrastructure",
+                        logical_id="__execution_infrastructure__",
+                        status="ERRORED",
+                        duration_seconds=0,
+                        reason=reason,
+                        report_kind="execution",
+                    )
+                )
+            for execution in file_executions:
+                execution.source_artifacts = matching_artifacts
+                execution.execution_metadata = dict(data, warnings=warnings)
+                execution.qdb_process_id = next(
+                    (str(p["pid"]) for p in data["processes"] if p["role"] == "runner"), None
+                )
+                execution.qdb_log_path = next(
+                    (a["path"] for a in data["artifacts"] if a["role"] == "runner-log"), None
+                )
+        elif file_executions:
             first_execution = file_executions[0]
             # The source XML's executable metadata applies to every testcase,
             # so match its artifacts once rather than rescanning them per testcase.

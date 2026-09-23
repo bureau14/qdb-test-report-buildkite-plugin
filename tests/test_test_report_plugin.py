@@ -1352,3 +1352,81 @@ def test_main_aggregate_renders_job_manifest_artifacts_in_html(monkeypatch, tmp_
     assert "qdb_aggregation_test" in node_names
     assert "aggregation.correlation" in node_names
     assert "double_identical_high_covariance" in node_names
+
+
+@pytest.mark.parametrize(
+    "xml_content",
+    [None, "<testsuite>", '<testsuite name="suite"><testcase name="ok"/></testsuite>'],
+)
+def test_manifest_job_and_aggregate_preserve_artifacts_without_valid_junit(
+    monkeypatch, tmp_path, xml_content
+):
+    from object_store import PublishedObject
+
+    monkeypatch.chdir(tmp_path)
+    metadata = {
+        "version": 1,
+        "execution_id": "run-1",
+        "name": "query",
+        "junit": "test-reports/query.xml",
+        "status": "failed",
+        "exit_code": 7,
+        "processes": [{"role": "runner", "pid": 123}],
+        "artifacts": [{"role": "runner-log", "path": "logs/runner.json"}],
+    }
+    (tmp_path / "test-metadata").mkdir()
+    (tmp_path / "test-metadata/run.json").write_text(json.dumps(metadata))
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs/runner.json").write_text("{}")
+    if xml_content is not None:
+        (tmp_path / "test-reports").mkdir()
+        (tmp_path / metadata["junit"]).write_text(xml_content)
+    environment = {
+        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE": "Tests",
+        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_ANNOTATE": "false",
+        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT": "linux",
+        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_JUNIT_INPUT_PATH": "test-reports/*.xml",
+        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_MANIFEST_INPUT_PATH": "test-metadata/*.json",
+        "BUILDKITE_PIPELINE_SLUG": "project",
+        "BUILDKITE_BUILD_ID": "build-1",
+        "BUILDKITE_JOB_ID": "job-1",
+        "BUILDKITE_BRANCH": "main",
+    }
+    monkeypatch.setattr("os.environ", environment)
+    uploaded = {}
+
+    def fake_upload(cfg, auth, bucket, key, local_path, **kwargs):
+        uploaded[key] = local_path.read_text(encoding="utf-8")
+        return PublishedObject(
+            bucket, key, "https://reports.example.com/" + key, local_path.stat().st_size
+        )
+
+    monkeypatch.setattr("test_report_plugin.upload_file", fake_upload)
+    assert main() != 0
+    job_summary = json.loads(
+        next(value for key, value in uploaded.items() if key.endswith("/summary.json"))
+    )
+    assert job_summary["status_counts"]["ERRORED"] == 1
+    assert job_summary["execution_manifests"] == [
+        {"path": "test-metadata/run.json", "manifest": metadata}
+    ]
+    files = [f for artifact in job_summary["artifacts"] for f in artifact["files"]]
+    assert {f["relative_path"] for f in files} == {"logs/runner.json", "test-metadata/run.json"}
+    log_url = next(f["url"] for f in files if f["relative_path"] == "logs/runner.json")
+
+    # Simulate an aggregate download with no XML, as after a runner crash.
+    monkeypatch.setattr("test_report_plugin.collect_full_scope_xml", lambda **kwargs: [])
+    monkeypatch.setattr(
+        "test_report_plugin.collect_full_scope_job_summaries",
+        lambda **kwargs: {"job-1": dict(job_summary, variant="linux", job_id="job-1")},
+    )
+    monkeypatch.setattr("os.environ", {k: v for k, v in environment.items() if "_JOB_" not in k})
+    uploaded.clear()
+    assert main() == 0
+    aggregate_summary = json.loads(
+        next(value for key, value in uploaded.items() if key.endswith("/summary.json"))
+    )
+    assert aggregate_summary["status_counts"]["ERRORED"] == 1
+    html = next(value for key, value in uploaded.items() if key.endswith("/index.html"))
+    assert log_url in html
+    assert "run-1" in html

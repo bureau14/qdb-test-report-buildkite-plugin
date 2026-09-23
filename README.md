@@ -26,7 +26,8 @@ The plugin exits `64` when `job.fail_on_test_failures` is true and the generated
 
 ## Requirements
 
-- **Python 3** must be available on the host agent (`python3` in `PATH`).
+- **Python 3.7 or newer** must be available on the host agent (`python3` in `PATH`).
+- Manifest validation uses pure-Python fastjsonschema; no Rust compiler is required. Python 3.7 agents use the compatible Boto3 1.33 series, while newer agents retain normal dependency resolution.
 - The agent must have IAM permissions (S3) or SSM-stored R2 credentials configured. See [Backend configuration](#backend-configuration).
 - Test jobs must write JUnit XML before the `post-command` hook runs.
 - Aggregate steps must depend on the test/reporting jobs whose uploaded XML they should include.
@@ -170,6 +171,7 @@ plugins:
 | --- | --- | :---: | --- |
 | `variant` | string | ✓ | Test variant name and object-store grouping, for example `linux-haswell-release`. |
 | `junit_input_path` | string | ✓ | Local JUnit XML file, directory, or glob to read from the test job. |
+| `manifest_input_path` | string | | Optional execution manifest file or glob; enables exact-path artifact uploads and incomplete-execution reporting. |
 | `fail_on_test_failures` | boolean |  | Exit `64` when the generated job report contains failed or errored tests. Default: `true`. |
 | `artifacts` | array |  | Optional additional artifact groups to upload and link from the report. Each item requires `name` and `input_path`. Missing files warn but do not fail. |
 
@@ -303,3 +305,41 @@ Older reports using the `qdb_test_process_id` testcase remain supported. Invalid
 or unsupported metadata is ignored with a warning; conflicting records are not
 assigned to cases. The linked JSON is the whole executable's log, shared by its
 cases, and does not create an extra testcase.
+
+## Execution manifests
+
+The job.manifest_input_path option accepts a checkout-relative file or glob, for
+example test-metadata/*.json. The versioned contract is
+[execution-manifest-v1.schema.json](schemas/execution-manifest-v1.schema.json);
+a complete producer example is in [schemas/examples](schemas/examples).
+
+A launcher owns one manifest per JUnit destination. It writes the initial running
+record **before** launching the test, and atomically replaces it with completed,
+failed, or aborted plus the exit code after execution and cleanup. On a retry
+it replaces that destination's manifest and results; execution_id identifies the
+new invocation. A forced kill may leave running, which the reporter treats as an
+incomplete execution. Artifact paths can be declared before files exist, allowing
+server archives to be packaged afterward.
+
+Paths use forward slashes and are relative to the checkout root, not the manifest
+directory. Absolute paths, traversal, duplicate JUnit claims, and symlinks escaping
+the checkout are rejected. Every declared file that exists is uploaded automatically;
+no artifact glob is needed for managed executions. Missing required artifacts are
+shown in execution details; optional crash dumps can set required to false.
+The original manifest is uploaded as an attachment too.
+
+For a manifested report, matching uses the originating CI job and exact artifact
+path only. PID and JUnit filename inference are disabled. Processes, exit status,
+and execution ID appear in the report's Execution section. Server PIDs may use a
+shell PID namespace on Windows; they are descriptive, never matching keys.
+
+Missing, empty or malformed JUnit creates an infrastructure error with the
+execution's available attachments. A nonzero exit with otherwise successful JUnit,
+or an unfinished/aborted execution, is also visible. Aggregate reports discover
+job summaries even when the job uploaded no XML. Validated manifests are retained
+in those summaries so aggregate reports preserve the same associations.
+
+Reports without a manifest retain the legacy JUnit metadata / PID / filename
+fallbacks during migration. Unsupported manifest versions or invalid manifests
+fail validation instead of silently falling back. Producers should validate their
+fixtures against this schema before changing the contract.

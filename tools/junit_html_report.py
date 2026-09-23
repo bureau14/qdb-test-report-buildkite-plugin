@@ -73,6 +73,7 @@ def generate_html_report(
     artifacts: list[ArtifactLink] | None = None,
     artifact_metadata: list[dict[str, Any]] | None = None,
     xml_source_links: dict[Path, str | None] | None = None,
+    manifest_sources: list[dict] | None = None,
     only_failures: bool = False,
     fail_on_test_failures: bool = False,
 ) -> int:
@@ -85,6 +86,7 @@ def generate_html_report(
         source_artifacts_by_job_id=source_artifacts_by_job_id,
         artifacts=artifacts,
         xml_source_links=xml_source_links,
+        manifest_sources=manifest_sources,
     )
     data = report_to_report_ui_data(
         report, execution_name=execution_name, only_failures=only_failures

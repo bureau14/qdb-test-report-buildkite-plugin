@@ -13,3 +13,14 @@ steps:
       - docker#v5.13.0:
           image: "python:3.14-slim"
           chown: true
+
+
+  - label: "Test Python 3.7 compatibility"
+    command: |
+      python -m pip install --upgrade "pip<24.1"
+      python -m pip install --only-binary=:all: -r lib/requirements.txt "pytest==7.4.4"
+      python -m pytest -q
+    plugins:
+      - docker#v5.13.0:
+          image: "python:3.7-slim"
+          chown: true
