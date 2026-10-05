@@ -357,14 +357,17 @@ def testcase_system_out(testcase: ET.Element) -> str | None:
 
 
 def qdb_process_id(root: ET.Element) -> str | None:
-    values = {
-        value
-        for testcase in root.iter()
-        if local_name(testcase) == "testcase"
-        and testcase.attrib.get("name") == QDB_PROCESS_ID_TESTCASE
-        and (value := testcase_system_out(testcase)) is not None
-        and value.isdecimal()
-    }
+    values = set()
+    for testcase in root.iter():
+        if (
+            local_name(testcase) == "testcase"
+            and testcase.attrib.get("name") == QDB_PROCESS_ID_TESTCASE
+            and (output := testcase_system_out(testcase)) is not None
+        ):
+            value = output.splitlines()[0].strip()
+            if value.isdecimal():
+                values.add(value)
+
     if len(values) == 1:
         return values.pop()
     if values:
