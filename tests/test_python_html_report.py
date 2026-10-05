@@ -493,6 +493,58 @@ def test_qdb_process_id_metadata_matches_only_its_uploaded_json_log(tmp_path):
     assert [leaf["sourceArtifacts"] for leaf in leaves] == [[0], [0]]
 
 
+def test_qdb_process_id_verbose_cdata_matches_only_its_uploaded_json_log(tmp_path):
+    from junit_report_model import ArtifactLink, build_report
+    from report_data import report_to_report_ui_data
+
+    junit = write(
+        tmp_path / "qdb_auth_test.xml",
+        junit_xml(
+            """<testcase assertions="1" name="qdb_test_process_id" time="3.5e-05">
+<system-out>
+<![CDATA[ 25543 ]]>
+<![CDATA[ INFO:
+- file   : log_pid_test_case.cpp
+- line   : 22
+- message: check !pid.empty() has passed
+
+ ]]>
+</system-out>
+</testcase>""",
+            '<testcase classname="acl" name="data_size" time="0.1"/>',
+        ),
+    )
+    matching_log, other_log = [
+        ArtifactLink(
+            name="QDB test logs",
+            relative_path=f"test_log/qdb_test_log_pid_{pid}_1724412755000000000.json",
+            key=f"artifacts/test_log/qdb_test_log_pid_{pid}_1724412755000000000.json",
+            url=f"https://reports.example/qdb_test_log_pid_{pid}_1724412755000000000.json",
+            size_bytes=123,
+        )
+        for pid in ("25543", "22")
+    ]
+
+    report = build_report(
+        "PID report",
+        [("linux", junit)],
+        source_job_id="job-1",
+        source_artifacts_by_job_id={"job-1": [matching_log, other_log]},
+    )
+
+    execution = (
+        report.suites["suite"]
+        .test_files["qdb_auth_test"]
+        .logical_tests["acl::data_size"]
+        .executions["linux"]
+    )
+    assert execution.qdb_process_id == "25543"
+    assert execution.source_artifacts == [matching_log]
+    ui_data = report_to_report_ui_data(report)[0]
+    assert ui_data["sourceTables"]["qdbProcessIds"] == ["25543"]
+    assert [artifact["url"] for artifact in ui_data["sourceArtifactTable"]] == [matching_log.url]
+
+
 def test_report_summary_ui_does_not_show_raw_testcases(tmp_path):
     from junit_report_model import build_report
     from report_data import report_to_report_ui_data
