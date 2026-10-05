@@ -357,7 +357,6 @@ def testcase_system_out(testcase: ET.Element) -> str | None:
 
 
 def qdb_process_id(root: ET.Element) -> str | None:
-    # Verbose Boost.Test output appends diagnostics after the standalone PID line.
     values = {
         value
         for testcase in root.iter()
