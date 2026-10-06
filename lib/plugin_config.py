@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from report_logging import validate_log_level
+
 
 @dataclass(frozen=True)
 class PlatformConfig:
@@ -38,6 +40,7 @@ class PluginConfig:
     artifacts: list[ArtifactConfig] = field(default_factory=list)
     aggregate_download_parallel: int = 32
     aggregate_download_concurrency: int = 4
+    log_level: str = "error"
 
 
 def _get_env(key: str, default: str | None = None) -> str | None:
@@ -141,6 +144,7 @@ def load_plugin_config() -> PluginConfig:
 
     only_failures = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_ONLY_FAILURES", False)
     annotate = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_ANNOTATE", True)
+    log_level = validate_log_level(_get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_LOG_LEVEL", "error"))
     aggregate_download_parallel = _get_int_env(
         "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_DOWNLOAD_PARALLEL", 32
     )
@@ -196,4 +200,5 @@ def load_plugin_config() -> PluginConfig:
         artifacts=artifacts,
         aggregate_download_parallel=aggregate_download_parallel,
         aggregate_download_concurrency=aggregate_download_concurrency,
+        log_level=log_level,
     )

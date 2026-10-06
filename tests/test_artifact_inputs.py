@@ -57,6 +57,9 @@ def test_collect_artifact_files_supports_directory_recursively(tmp_path):
 
 
 def test_collect_artifact_files_missing_path_warns_and_continues(tmp_path, capsys):
+    from report_logging import configure_logging
+
+    configure_logging("warning")
     artifact = ArtifactConfig(name="Missing logs", input_path=tmp_path / "missing")
 
     assert collect_artifact_files([artifact]) == []
@@ -65,6 +68,9 @@ def test_collect_artifact_files_missing_path_warns_and_continues(tmp_path, capsy
 
 
 def test_collect_artifact_files_empty_glob_warns_and_continues(tmp_path, monkeypatch, capsys):
+    from report_logging import configure_logging
+
+    configure_logging("warning")
     monkeypatch.chdir(tmp_path)
     artifact = ArtifactConfig(name="Test logs", input_path=Path("test-logs-*.tar.gz"))
 
