@@ -21,8 +21,18 @@ if [[ -d "${VENV_DIR}" ]]; then
   rm -rf "${VENV_DIR}"
 fi
 
-echo "~~~ :python: Setting up qdb-test-report plugin"
+PIP_QUIET_ARGS=(--quiet --quiet)
+case "$(plugin_read_config LOG_LEVEL error)" in
+  debug|DEBUG|info|INFO)
+    echo "~~~ :python: Setting up qdb-test-report plugin"
+    PIP_QUIET_ARGS=(--quiet)
+    ;;
+  warning|WARNING)
+    PIP_QUIET_ARGS=(--quiet)
+    ;;
+esac
 "${PYTHON3_CMD}" -m venv --upgrade-deps "${VENV_DIR}"
-"${VENV_BIN}/python" -m pip install --quiet \
+"${VENV_BIN}/python" -m pip install "${PIP_QUIET_ARGS[@]}" \
+  --disable-pip-version-check \
   --retries 3 \
   -r "${REQUIREMENTS}"

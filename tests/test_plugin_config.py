@@ -37,6 +37,21 @@ def test_load_plugin_config_job_block_minimal(monkeypatch):
     assert cfg.annotate is True
     assert cfg.fail_on_test_failures is True
     assert cfg.artifacts == []
+    assert cfg.log_level == "error"
+
+
+@pytest.mark.parametrize("level", ["debug", "info", "warning", "error", "fatal", "INFO"])
+def test_load_plugin_config_log_level(monkeypatch, level):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "My Report")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_LOG_LEVEL", level)
+    assert load_plugin_config().log_level == level.lower()
+
+
+def test_load_plugin_config_rejects_invalid_log_level(monkeypatch):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "My Report")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_LOG_LEVEL", "verbose")
+    with pytest.raises(ValueError, match="log_level must be one of"):
+        load_plugin_config()
 
 
 def test_load_plugin_config_job_artifacts(monkeypatch):

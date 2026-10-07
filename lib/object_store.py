@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +29,7 @@ import boto3
 from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 from botocore.exceptions import ClientError
+from report_logging import logger
 
 # ---------------------------------------------------------------------------
 # Timeout / retry constants
@@ -94,12 +94,12 @@ class ObjectInfo:
 
 
 def die(msg: str) -> None:
-    print(f"[test-report] ERROR: {msg}", file=sys.stderr)
+    logger.fatal(msg)
     raise SystemExit(1)
 
 
 def log(msg: str) -> None:
-    print(f"[test-report] {msg}", file=sys.stderr)
+    logger.warning(msg)
 
 
 def _with_retry(fn, description: str):
@@ -118,7 +118,7 @@ def _with_retry(fn, description: str):
             raise
         except Exception as exc:
             if attempt == MAX_RETRIES:
-                log(f"  FAILED after {MAX_RETRIES} attempts: {description}")
+                logger.error(f"  FAILED after {MAX_RETRIES} attempts: {description}")
                 raise
             sleep = min(BACKOFF_BASE * (2 ** (attempt - 1)), BACKOFF_CAP)
             log(f"  attempt {attempt}/{MAX_RETRIES} failed for {description}: {exc}")

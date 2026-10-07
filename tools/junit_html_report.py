@@ -5,21 +5,23 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
+import logging
+import time
 from pathlib import Path
 from typing import Any
 
 from html_report_writer import DEFAULT_TEMPLATE, write_html_report
 from junit_report_model import ArtifactLink, build_report, format_counts, parse_platform_arg
 from report_data import report_to_report_ui_data
+from report_logging import LOG_LEVELS, configure_logging, logger
 
 
 def log(message: str) -> None:
-    print(f"INFO  {message}", file=sys.stderr)
+    logger.info(message)
 
 
 def warn(message: str) -> None:
-    print(f"WARN  {message}", file=sys.stderr)
+    logger.warning(message)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,6 +47,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--build-url", help="Buildkite build URL metadata")
     parser.add_argument("--commit-url", help="Git commit URL metadata")
+    parser.add_argument(
+        "--log-level",
+        choices=LOG_LEVELS,
+        default="error",
+        help="Minimum output severity (default: error)",
+    )
     parser.add_argument(
         "--only-failures",
         action="store_true",
@@ -75,7 +83,10 @@ def generate_html_report(
     xml_source_links: dict[Path, str | None] | None = None,
     only_failures: bool = False,
     fail_on_test_failures: bool = False,
+    log_level: str = "error",
 ) -> int:
+    configure_logging(log_level)
+    started = time.monotonic()
     report = build_report(
         title=title,
         platform_specs=platform_specs,
@@ -86,13 +97,19 @@ def generate_html_report(
         artifacts=artifacts,
         xml_source_links=xml_source_links,
     )
+    parsed = time.monotonic()
+    log(f"Built JUnit report model in {parsed - started:.1f}s")
     data = report_to_report_ui_data(
         report, execution_name=execution_name, only_failures=only_failures
     )
+    serialized = time.monotonic()
+    log(f"Created HTML UI data in {serialized - parsed:.1f}s")
     output_path = write_html_report(data, output, template)
-    log(
-        f"Wrote HTML report output={output_path} bytes={output_path.stat().st_size}",
-    )
+    if logger.isEnabledFor(logging.INFO):
+        log(
+            f"Wrote HTML report output={output_path} bytes={output_path.stat().st_size} "
+            f"in {time.monotonic() - serialized:.1f}s",
+        )
 
     if summary_json:
         summary = {
@@ -134,15 +151,16 @@ def generate_html_report(
         summary_json.write_text(json.dumps(summary, indent=2))
         log(f"Wrote summary JSON output={summary_json}")
 
-    log(
-        f"Final summary: raw_testcases={report.raw_testcases} suites={len(report.suites)} "
-        f"logical_tests={report.logical_test_count} platform_executions={report.platform_execution_count} "
-        f"status_counts={format_counts(report.status_counts)} root_status={report.root_status}",
-    )
+    if logger.isEnabledFor(logging.INFO):
+        log(
+            f"Final summary: raw_testcases={report.raw_testcases} suites={len(report.suites)} "
+            f"logical_tests={report.logical_test_count} platform_executions={report.platform_execution_count} "
+            f"status_counts={format_counts(report.status_counts)} root_status={report.root_status}",
+        )
 
     failed_or_errored = report.status_counts["FAILED"] + report.status_counts["ERRORED"]
     if fail_on_test_failures and failed_or_errored:
-        log(
+        logger.error(
             f"Exiting with {failed_or_errored} failed/errored test execution(s) (code 64)",
         )
         return 64
@@ -164,9 +182,10 @@ def main(argv: list[str] | None = None) -> int:
             commit_url=args.commit_url,
             only_failures=args.only_failures,
             fail_on_test_failures=args.fail_on_test_failures,
+            log_level=args.log_level,
         )
     except Exception as exc:  # noqa: BLE001 - CLI guard
-        warn(f"error: {exc}")
+        logger.fatal("Report generation failed: %s", exc)
         return 1
 
 
