@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from plugin_config import ArtifactConfig
-from report_logging import logger
+from report_logging import logger, traced
 
 
 @dataclass(frozen=True)
@@ -84,6 +84,7 @@ def _collect_for_artifact(config: ArtifactConfig) -> list[ArtifactFile]:
     return []
 
 
+@traced("job.artifacts.discover")
 def collect_artifact_files(configs: list[ArtifactConfig]) -> list[ArtifactFile]:
     seen_slugs: dict[str, str] = {}
     for config in configs:

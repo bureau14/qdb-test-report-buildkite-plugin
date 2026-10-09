@@ -43,7 +43,7 @@ from report_downloads import (
     collect_full_scope_job_summaries_for_xml,
     collect_full_scope_xml,
 )
-from report_logging import configure_logging, logger
+from report_logging import configure_logging, logger, trace, traced
 from report_paths import build_report_location
 from xml_inputs import XmlUpload, collect_job_xml_uploads
 
@@ -87,6 +87,7 @@ def aggregate_discovery_counts(
     return {"variants": len(variants), "jobs": len(jobs), "files": len(downloaded_xml)}
 
 
+@traced("summary.metadata")
 def add_summary_metadata(
     summary_path: Path,
     *,
@@ -186,6 +187,7 @@ def build_zero_xml_annotation_body(title: str) -> str:
     )
 
 
+@traced("report.generate")
 def run_report_generation(
     config: PluginConfig,
     output_dir: Path,
@@ -227,6 +229,7 @@ def run_report_generation(
     )
 
 
+@traced("store.resolve")
 def resolve_object_store_context() -> ObjectStoreContext:
     _s3, ssm = aws_clients()
     store_cfg = load_store_config(ssm)
@@ -241,6 +244,7 @@ def guessed_content_type(path: Path) -> str:
     return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 
 
+@traced("artifacts.upload")
 def upload_extra_artifacts(
     config: PluginConfig,
     artifact_files: list[ArtifactFile],
@@ -294,6 +298,7 @@ def upload_extra_artifacts(
     return list(grouped.values())
 
 
+@traced("report.upload")
 def upload_report_artifacts(
     config: PluginConfig,
     generation: GenerationResult,
@@ -368,7 +373,10 @@ def main() -> int:
         config = load_plugin_config()
         configure_logging(config.log_level)
 
-        with tempfile.TemporaryDirectory(prefix="test-report-") as tmp_dir_str:
+        with (
+            trace("plugin.total", scope=config.scope),
+            tempfile.TemporaryDirectory(prefix="test-report-") as tmp_dir_str,
+        ):
             staging_root = Path(tmp_dir_str)
             full_scope_xml_stage_root = staging_root / "downloaded-xml"
 

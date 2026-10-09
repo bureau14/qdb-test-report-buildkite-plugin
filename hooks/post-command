@@ -19,7 +19,7 @@ case "$(plugin_read_config LOG_LEVEL error)" in
 esac
 
 set +e
-run_test_report_py
+plugin_trace_command hook.report run_test_report_py
 status=$?
 set -e
 

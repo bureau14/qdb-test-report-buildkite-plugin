@@ -18,6 +18,7 @@ Config resolution
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass
@@ -29,7 +30,7 @@ import boto3
 from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 from botocore.exceptions import ClientError
-from report_logging import logger
+from report_logging import logger, trace, traced
 
 # ---------------------------------------------------------------------------
 # Timeout / retry constants
@@ -113,7 +114,10 @@ def _with_retry(fn, description: str):
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            return fn()
+            with trace(
+                "store.attempt", level=logging.DEBUG, operation=description, attempt=attempt
+            ):
+                return fn()
         except (KeyboardInterrupt, SystemExit):
             raise
         except Exception as exc:
@@ -123,9 +127,11 @@ def _with_retry(fn, description: str):
             sleep = min(BACKOFF_BASE * (2 ** (attempt - 1)), BACKOFF_CAP)
             log(f"  attempt {attempt}/{MAX_RETRIES} failed for {description}: {exc}")
             log(f"  retrying in {sleep}s...")
-            time.sleep(sleep)
+            with trace("store.backoff", operation=description, attempt=attempt, sleep_s=sleep):
+                time.sleep(sleep)
 
 
+@traced("store.aws_clients")
 def aws_clients():
     """Return (s3, ssm) clients for config resolution and listing only.
     Per-transfer clients are created separately in each worker thread."""
@@ -149,7 +155,10 @@ def _ssm_get_optional(ssm, name: str, with_decryption: bool = True) -> str | Non
     so IAM misconfigurations surface explicitly."""
 
     try:
-        return ssm.get_parameter(Name=name, WithDecryption=with_decryption)["Parameter"]["Value"]
+        with trace("store.ssm_parameter", level=logging.DEBUG, parameter=name):
+            return ssm.get_parameter(Name=name, WithDecryption=with_decryption)["Parameter"][
+                "Value"
+            ]
     except ClientError as exc:
         response = getattr(exc, "response", {})
         code = response.get("Error", {}).get("Code")
@@ -176,6 +185,7 @@ def _env_or_ssm(ssm, env_name: str, ssm_name: str, with_decryption: bool = True)
     )
 
 
+@traced("store.config")
 def load_store_config(ssm) -> StoreConfig:
     """Resolve backend config: env vars → SSM → defaults.
     For R2, endpoint URL defaults to https://{account_id}.r2.cloudflarestorage.com."""
@@ -299,6 +309,7 @@ def resolve_object_auth(cfg: StoreConfig) -> ObjectAuth:
     return ObjectAuth()
 
 
+@traced("store.client", level=logging.DEBUG)
 def _s3_client(cfg: StoreConfig, auth: ObjectAuth):
     """Create a per-thread S3 client. Called inside each worker because boto3 clients
     are not thread-safe (shared connection pool + credential state would race).
@@ -344,6 +355,7 @@ def internal_url(cfg: StoreConfig, key: str) -> str | None:
 public_url = internal_url
 
 
+@traced("store.list")
 def list_objects(
     cfg: StoreConfig,
     auth: ObjectAuth,
@@ -395,7 +407,8 @@ def download_file(
     def _do():
         s3_client = client or _s3_client(cfg, auth)
         config = transfer_config or TransferConfig(max_concurrency=concurrency)
-        return s3_client.download_file(bucket, key, str(path), Config=config)
+        with trace("store.download", level=logging.DEBUG, key=key):
+            return s3_client.download_file(bucket, key, str(path), Config=config)
 
     _with_retry(_do, key)
 
@@ -427,7 +440,8 @@ def upload_file(
             Config=None,
         )
 
-    _with_retry(_do, key)
+    with trace("store.upload", key=key, bytes=size_bytes):
+        _with_retry(_do, key)
     return PublishedObject(
         bucket=bucket,
         key=key,

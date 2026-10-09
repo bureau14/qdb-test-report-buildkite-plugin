@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from html import escape
 
-from report_logging import logger
+from report_logging import logger, traced
 
 MAX_ANNOTATION_BYTES = 1024 * 1024
 MAX_FAILURE_REASON_CHARS = 240
@@ -131,6 +131,7 @@ def get_malformed_junit_xml(summary: dict) -> list[dict]:
     return list(summary.get("malformed_junit_xml", []))
 
 
+@traced("annotation.render")
 def build_annotation_body(
     title: str, summary: dict, html_url: str | None, scope: str = "build"
 ) -> str:
@@ -228,6 +229,7 @@ def get_job_annotation_style(summary: dict) -> str:
     return style
 
 
+@traced("annotation.publish")
 def create_buildkite_annotation(
     body: str, context: str, style: str, priority: int, scope: str = "build"
 ):
