@@ -28,6 +28,7 @@ from object_store import (
     ObjectAuth,
     PublishedObject,
     StoreConfig,
+    UploadRequest,
     aws_clients,
     internal_url,
     key_join,
@@ -35,6 +36,7 @@ from object_store import (
     parse_s3,
     resolve_object_auth,
     upload_file,
+    upload_files,
 )
 from plugin_config import PlatformConfig, PluginConfig, load_plugin_config
 from report_downloads import (
@@ -260,24 +262,29 @@ def upload_extra_artifacts(
         variant=config.variant,
     )
 
-    grouped: dict[str, dict[str, Any]] = {}
-    for artifact_file in artifact_files:
-        artifact = artifact_file.config
-        slug = slugify_artifact_name(artifact.name)
-        key = key_join(location.artifact_prefix, slug, artifact_file.relative_path)
-        log(
-            f"Uploading additional artifact {artifact.name} {artifact_file.relative_path} "
-            f"to s3://{store_context.bucket}/{key}"
-        )
-        published = upload_file(
-            store_context.store_cfg,
-            store_context.auth,
-            store_context.bucket,
-            key,
-            artifact_file.local_path,
-            content_type=guessed_content_type(artifact_file.local_path),
+    requests = [
+        UploadRequest(
+            key=key_join(
+                location.artifact_prefix,
+                slugify_artifact_name(item.config.name),
+                item.relative_path,
+            ),
+            local_path=item.local_path,
+            content_type=guessed_content_type(item.local_path),
             content_disposition="attachment",
         )
+        for item in artifact_files
+    ]
+    published_files = upload_files(
+        store_context.store_cfg,
+        store_context.auth,
+        store_context.bucket,
+        requests,
+        parallel=config.upload_parallel,
+    )
+    grouped: dict[str, dict[str, Any]] = {}
+    for artifact_file, published in zip(artifact_files, published_files):
+        artifact = artifact_file.config
         entry = grouped.setdefault(
             artifact.name,
             {
@@ -324,23 +331,28 @@ def upload_report_artifacts(
         variant=config.variant,
     )
 
-    results = {}
-
-    # HTML
-    log(f"Uploading HTML report to s3://{bucket}/{location.html_key}")
-    results["html"] = upload_file(
-        store_cfg,
-        auth,
-        bucket,
-        location.html_key,
-        generation.html_path,
-        content_type="text/html; charset=utf-8",
-        content_disposition="inline",
+    requests = [
+        UploadRequest(
+            key=location.html_key,
+            local_path=generation.html_path,
+            content_type="text/html; charset=utf-8",
+            content_disposition="inline",
+        )
+    ]
+    job_xml = xml_uploads if config.scope == "job" else []
+    requests.extend(
+        UploadRequest(
+            key=key_join(location.xml_prefix, xml.object_relative_path),
+            local_path=xml.local_path,
+            content_type="application/xml",
+            content_disposition="attachment",
+        )
+        for xml in job_xml
     )
-
-    # Summary JSON
+    published = upload_files(store_cfg, auth, bucket, requests, parallel=config.upload_parallel)
+    # Publish the discovery manifest only after all HTML/XML uploads succeed.
     log(f"Uploading summary JSON to s3://{bucket}/{location.summary_key}")
-    results["summary"] = upload_file(
+    summary = upload_file(
         store_cfg,
         auth,
         bucket,
@@ -349,21 +361,10 @@ def upload_report_artifacts(
         content_type="application/json",
         content_disposition="inline",
     )
-
-    # XMLs
-    if config.scope == "job":
-        for xml in xml_uploads:
-            key = key_join(location.xml_prefix, xml.object_relative_path)
-            log(f"Uploading JUnit XML {xml.object_relative_path} to s3://{bucket}/{key}")
-            results[f"xml:{xml.object_relative_path}"] = upload_file(
-                store_cfg,
-                auth,
-                bucket,
-                key,
-                xml.local_path,
-                content_type="application/xml",
-                content_disposition="attachment",
-            )
+    results = {"html": published[0], "summary": summary}
+    results.update(
+        (f"xml:{xml.object_relative_path}", result) for xml, result in zip(job_xml, published[1:])
+    )
 
     return results
 

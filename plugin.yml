@@ -28,6 +28,10 @@ configuration:
       enum: [debug, info, warning, error, fatal]
       default: error
       description: Minimum message severity; defaults to quiet output (error and fatal only). Use info for progress or debug for per-file details.
+    upload_parallel:
+      type: integer
+      minimum: 1
+      description: Maximum concurrent file uploads with one reused client per worker. Defaults to the agent's logical CPU count; use 1 for serial uploads.
     job:
       type: object
       description: Per-job report and raw JUnit XML upload configuration.
