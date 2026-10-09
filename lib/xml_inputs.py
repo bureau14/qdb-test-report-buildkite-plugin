@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from plugin_config import PlatformConfig
-from report_logging import logger
+from report_logging import logger, traced
 
 
 @dataclass(frozen=True)
@@ -48,6 +48,7 @@ def _collect_uploads_for_path(path: Path, prefix: str = "") -> list[XmlUpload]:
     return uploads
 
 
+@traced("job.xml.discover")
 def collect_job_xml_uploads(junit_input_path: Path, variant: str) -> list[XmlUpload]:
     """Collect job-scope JUnit XML files relative to the configured input path."""
 

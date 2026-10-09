@@ -18,6 +18,7 @@ from object_store import (
     key_join,
     list_objects,
 )
+from report_logging import logger, traced
 
 
 @dataclass(frozen=True)
@@ -192,6 +193,7 @@ def find_job_summary_objects(
     return found
 
 
+@traced("aggregate.xml")
 def collect_full_scope_xml(
     *,
     cfg: StoreConfig,
@@ -287,6 +289,7 @@ def collect_full_scope_xml(
     return [item for item in downloaded if item is not None]
 
 
+@traced("aggregate.summaries.fallback")
 def collect_full_scope_job_summaries(
     *,
     cfg: StoreConfig,
@@ -331,6 +334,7 @@ def _summary_key_from_xml_key(key: str) -> str | None:
     return key.split(marker, 1)[0] + "/summary.json"
 
 
+@traced("aggregate.summaries.direct")
 def collect_full_scope_job_summaries_for_xml(
     *,
     cfg: StoreConfig,
@@ -358,7 +362,12 @@ def collect_full_scope_job_summaries_for_xml(
         local_path = Path(output_dir) / obj.variant / obj.job_id / "summary.json"
         try:
             download_file(cfg, auth, bucket, obj.key, local_path)
-        except Exception:  # noqa: BLE001, S112 - optional summary sidecar
+        except Exception as exc:  # noqa: BLE001 - optional summary sidecar
+            logger.debug(
+                "Optional summary download skipped key=%s error_type=%s",
+                obj.key,
+                type(exc).__name__,
+            )
             continue
         try:
             summary = json.loads(local_path.read_text(encoding="utf-8"))

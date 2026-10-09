@@ -63,3 +63,22 @@ plugin_read_list() {
 run_test_report_py() {
   "${VENV_BIN}/python" "${TEST_REPORT_PY}" "$@"
 }
+
+plugin_trace_command() {
+  local stage="$1"
+  shift
+  local started=${SECONDS}
+  local status=0
+  local enabled=false
+  case "$(plugin_read_config LOG_LEVEL error)" in
+    debug|DEBUG|info|INFO) enabled=true ;;
+  esac
+  if [[ "$enabled" == true ]]; then
+    echo "INFO  trace start stage=${stage}" >&2
+  fi
+  "$@" || status=$?
+  if [[ "$enabled" == true ]]; then
+    echo "INFO  trace end stage=${stage} wall_s=$((SECONDS - started)) exit_code=${status}" >&2
+  fi
+  return "$status"
+}

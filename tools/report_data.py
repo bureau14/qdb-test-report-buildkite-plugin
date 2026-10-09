@@ -14,6 +14,7 @@ from junit_report_model import (
     TestFile,
     TestSuite,
 )
+from report_logging import traced
 
 STATUS_SORT = {"ERRORED": 0, "FAILED": 1, "ABORTED": 2, "SKIPPED": 3, "SUCCESSFUL": 4}
 
@@ -269,6 +270,7 @@ def execution_sections(execution: TestcaseExecution, generated_at: str) -> list[
     return sections
 
 
+@traced("report.ui_data")
 def report_to_report_ui_data(
     report: Report, execution_name: str | None = None, only_failures: bool = False
 ) -> list[dict[str, Any]]:
