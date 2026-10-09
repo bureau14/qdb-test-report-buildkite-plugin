@@ -18,6 +18,12 @@ function linkHref(value: string): string {
 
 function linkText(value: string): string {
   const [href, text] = value.substring(5).split("\n", 2);
+  const marker = href.indexOf("#zip-member=");
+  if (marker >= 0) {
+    const archive = href.slice(0, marker).split("/").pop();
+    const member = decodeURIComponent(href.slice(marker + 12));
+    return `Download ${archive}\nMember: ${member}`;
+  }
   return text || href;
 }
 </script>
@@ -47,7 +53,9 @@ function linkText(value: string): string {
             rel="noopener noreferrer"
             class="text-blue-600 dark:text-blue-500 hover:underline"
           >
-            <pre class="text-sm whitespace-pre-wrap break-all">{{ linkText(pair[1] as string) }}</pre>
+            <pre class="text-sm whitespace-pre-wrap break-all">{{
+              linkText(pair[1] as string)
+            }}</pre>
           </a>
           <pre v-else class="text-sm whitespace-pre-wrap break-all">{{
             pair[1]

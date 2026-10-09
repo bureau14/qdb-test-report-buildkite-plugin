@@ -201,18 +201,21 @@ Given destination `s3://bucket/prefix`, project `project`, git ref `refs/heads/m
 ```text
 prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/index.html
 prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/summary.json
-prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/xml/<relative-junit-path>.xml
-prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/artifacts/<artifact-name-slug>/<relative-artifact-path>
+prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/xml/junit.zip
+prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/artifacts/logs.zip
 ```
 
-The job `summary.json` includes an `artifacts` array with uploaded artifact keys, public URLs when `ARTIFACTS_DOMAIN` is configured, sizes, and warnings for configured artifact inputs that produced no files. Job and aggregate HTML reports render these links in the report-level Artifacts section and in each test leaf's Source section beside the Buildkite job/JUnit XML links. The JUnit XML link targets the raw uploaded object and retains its `attachment` disposition.
+The job `summary.json` includes an `artifacts` array with ZIP object keys, public URLs when `ARTIFACTS_DOMAIN` is configured, member paths (`archive_member`), uncompressed member sizes, and warnings for configured artifact inputs that produced no files. ZIP links carry a `#zip-member=<encoded-path>` fragment identifying the original file. Job and aggregate HTML reports offer archive downloads and display the relevant member path. JUnit members retain their original relative paths; log members use `<artifact-name-slug>/<relative-artifact-path>`.
 
 Aggregate mode discovers XML and job summaries under the current build's variants prefix:
 
 ```text
 prefix/project/refs/heads/main/reports/builds/build-1/variants/*/jobs/*/xml/**/*.xml
+prefix/project/refs/heads/main/reports/builds/build-1/variants/*/jobs/*/xml/junit.zip
 prefix/project/refs/heads/main/reports/builds/build-1/variants/*/jobs/*/summary.json
 ```
+
+Aggregate mode downloads each JUnit ZIP once and extracts its XML members into the variant/job staging directory. Legacy individual XML uploads remain supported. When both forms exist for a job, its ZIP takes precedence to avoid duplicate results.
 
 The aggregate report is written under:
 
