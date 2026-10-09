@@ -227,17 +227,32 @@ def test_upload_report_artifacts(monkeypatch, tmp_path):
         )
 
     monkeypatch.setattr("test_report_plugin.upload_file", fake_upload_file)
+    monkeypatch.setattr("object_store.upload_file", fake_upload_file)
+    monkeypatch.setattr("object_store.create_s3_client", lambda cfg, auth: MagicMock())
 
     upload_report_artifacts(config, generation, xml_uploads, None)
 
     assert len(uploaded) == 3
-    # XML upload check (index 2 now)
+    xml_upload = next(item for item in uploaded if item[1].endswith("/xml/test.xml"))
     assert (
-        uploaded[2][1]
+        xml_upload[1]
         == "prefix/project/refs/heads/main/reports/builds/1/variants/linux/jobs/123/xml/test.xml"
     )
-    assert uploaded[2][3]["content_type"] == "application/xml"
-    assert uploaded[2][3]["content_disposition"] == "attachment"
+    assert xml_upload[3]["content_type"] == "application/xml"
+    assert xml_upload[3]["content_disposition"] == "attachment"
+    assert uploaded[-1][1].endswith("/summary.json")
+
+    error = RuntimeError("XML upload failed")
+
+    def failed_batch(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr("test_report_plugin.upload_files", failed_batch)
+    uploaded.clear()
+    with pytest.raises(RuntimeError) as caught:
+        upload_report_artifacts(config, generation, xml_uploads, None)
+    assert caught.value is error
+    assert uploaded == []  # A failed batch must not publish summary.json.
 
 
 def test_upload_extra_artifacts_returns_summary_metadata(monkeypatch, tmp_path):
@@ -290,6 +305,8 @@ def test_upload_extra_artifacts_returns_summary_metadata(monkeypatch, tmp_path):
         )
 
     monkeypatch.setattr("test_report_plugin.upload_file", fake_upload_file)
+    monkeypatch.setattr("object_store.upload_file", fake_upload_file)
+    monkeypatch.setattr("object_store.create_s3_client", lambda cfg, auth: MagicMock())
 
     metadata = upload_extra_artifacts(config, [artifact_file], context)
 
@@ -1343,6 +1360,8 @@ def test_main_aggregate_renders_job_manifest_artifacts_in_html(monkeypatch, tmp_
         )
 
     monkeypatch.setattr("test_report_plugin.upload_file", fake_upload_file)
+    monkeypatch.setattr("object_store.upload_file", fake_upload_file)
+    monkeypatch.setattr("object_store.create_s3_client", lambda cfg, auth: MagicMock())
 
     assert main() == 0
     html = uploaded_html.read_text(encoding="utf-8")

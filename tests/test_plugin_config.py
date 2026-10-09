@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,28 @@ def test_load_plugin_config_job_block_minimal(monkeypatch):
     assert cfg.fail_on_test_failures is True
     assert cfg.artifacts == []
     assert cfg.log_level == "error"
+    assert cfg.upload_parallel == (os.cpu_count() or 1)
+
+
+@pytest.mark.parametrize(("cores", "expected"), [(12, 12), (None, 1)])
+def test_upload_parallel_defaults_to_agent_cores(monkeypatch, cores, expected):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setattr("plugin_config.os.cpu_count", lambda: cores)
+    assert load_plugin_config().upload_parallel == expected
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "invalid"])
+def test_upload_parallel_rejects_invalid_values(monkeypatch, value):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_UPLOAD_PARALLEL", value)
+    with pytest.raises(ValueError, match="UPLOAD_PARALLEL"):
+        load_plugin_config()
+
+
+def test_upload_parallel_can_be_configured(monkeypatch):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_UPLOAD_PARALLEL", "128")
+    assert load_plugin_config().upload_parallel == 128
 
 
 @pytest.mark.parametrize("level", ["debug", "info", "warning", "error", "fatal", "INFO"])
