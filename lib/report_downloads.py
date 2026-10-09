@@ -5,9 +5,10 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
-from pathlib import Path
+from dataclasses import dataclass, replace
+from pathlib import Path, PurePosixPath
 from typing import Any
+from zipfile import ZipFile
 
 from boto3.s3.transfer import TransferConfig
 from object_store import (
@@ -28,6 +29,7 @@ class JobXmlObject:
     key: str
     relative_path: str
     size_bytes: int
+    archive_member: str | None = None
 
     @property
     def object_relative_path(self) -> str:
@@ -96,7 +98,7 @@ def build_aggregate_xml_discovery_prefix(
 
 
 def _xml_metadata_from_key(*, prefix: str, key: str, size_bytes: int) -> JobXmlObject | None:
-    if not key.endswith(".xml"):
+    if not (key.endswith((".xml", "/xml/junit.zip"))):
         return None
     relative_to_variants = key[len(prefix) :].lstrip("/") if key.startswith(prefix) else key
     parts = relative_to_variants.split("/", 4)
@@ -160,7 +162,14 @@ def find_job_xml_objects(
         )
         if metadata is not None:
             found.append(metadata)
-    return found
+    archived_jobs = {
+        (obj.variant, obj.job_id) for obj in found if obj.key.endswith("/xml/junit.zip")
+    }
+    return [
+        obj
+        for obj in found
+        if obj.key.endswith("/xml/junit.zip") or (obj.variant, obj.job_id) not in archived_jobs
+    ]
 
 
 def find_job_summary_objects(
@@ -248,8 +257,10 @@ def collect_full_scope_xml(
             thread_state.client = client
         return client
 
-    def _download_one(obj: JobXmlObject) -> DownloadedJobXml:
-        local_path = Path(output_dir) / obj.variant / obj.job_id / obj.relative_path
+    def _download_one(obj: JobXmlObject) -> list[DownloadedJobXml]:
+        job_dir = Path(output_dir) / obj.variant / obj.job_id
+        is_archive = obj.key.endswith("/xml/junit.zip")
+        local_path = job_dir / (".junit.zip" if is_archive else obj.relative_path)
         download_file(
             cfg,
             auth,
@@ -260,9 +271,47 @@ def collect_full_scope_xml(
             client=_thread_client(),
             transfer_config=transfer_config,
         )
-        return DownloadedJobXml(object=obj, local_path=local_path)
+        if not is_archive:
+            return [DownloadedJobXml(object=obj, local_path=local_path)]
+        extracted = []
+        try:
+            with ZipFile(local_path) as archive:
+                seen = set()
+                for member in archive.infolist():
+                    path = PurePosixPath(member.filename)
+                    if (
+                        path.is_absolute()
+                        or ".." in path.parts
+                        or "\\" in member.orig_filename
+                        or ":" in member.filename
+                        or (member.external_attr >> 16) & 0o170000 == 0o120000
+                    ):
+                        raise ValueError(f"Unsafe JUnit archive member: {member.filename!r}")
+                    if member.is_dir() or not member.filename.endswith(".xml"):
+                        continue
+                    relative_path = path.as_posix()
+                    if relative_path in seen:
+                        raise ValueError(f"Duplicate JUnit archive member: {relative_path!r}")
+                    seen.add(relative_path)
+                    target = job_dir / relative_path
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(archive.read(member))
+                    extracted.append(
+                        DownloadedJobXml(
+                            object=replace(
+                                obj,
+                                relative_path=relative_path,
+                                size_bytes=member.file_size,
+                                archive_member=member.filename,
+                            ),
+                            local_path=target,
+                        )
+                    )
+        finally:
+            local_path.unlink(missing_ok=True)
+        return extracted
 
-    downloaded: list[DownloadedJobXml | None] = [None] * len(objects)
+    downloaded: list[list[DownloadedJobXml] | None] = [None] * len(objects)
     download_started = time.monotonic()
     completed = 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -286,7 +335,7 @@ def collect_full_scope_xml(
             f"{len(objects)} files ({_fmt_size(total_bytes)}) in {download_elapsed:.1f}s "
             f"({_fmt_size(int(throughput))}/s)."
         )
-    return [item for item in downloaded if item is not None]
+    return [item for batch in downloaded if batch is not None for item in batch]
 
 
 @traced("aggregate.summaries.fallback")

@@ -1,6 +1,8 @@
 import threading
 import time
+from zipfile import ZipFile, ZipInfo
 
+import pytest
 from object_store import ObjectAuth, StoreConfig
 from report_downloads import (
     JobXmlObject,
@@ -14,6 +16,75 @@ class FakeObject:
     def __init__(self, key, size=1):
         self.key = key
         self.size_bytes = size
+
+
+def test_discovery_prefers_archive_for_job_but_retains_legacy_jobs(monkeypatch):
+    def objects(cfg, auth, bucket, prefix):
+        return [
+            FakeObject(prefix + suffix)
+            for suffix in (
+                "/linux/jobs/job-1/xml/old.xml",
+                "/linux/jobs/job-1/xml/junit.zip",
+                "/linux/jobs/job-2/xml/legacy.xml",
+            )
+        ]
+
+    monkeypatch.setattr("report_downloads.list_objects", objects)
+    found = find_job_xml_objects(
+        cfg=StoreConfig("s3", "s3://bucket"),
+        auth=ObjectAuth(),
+        bucket="bucket",
+        destination_prefix="",
+        project_id="p",
+        git_ref="main",
+        build_id="b",
+    )
+    assert [(obj.job_id, obj.relative_path) for obj in found] == [
+        ("job-1", "junit.zip"),
+        ("job-2", "legacy.xml"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "member", ["nested/results.xml", "../escape.xml", "C:/escape.xml", "nested\\escape.xml"]
+)
+def test_collect_archive_preserves_member_identity_and_rejects_unsafe_paths(
+    monkeypatch, tmp_path, member
+):
+    obj = JobXmlObject("linux", "job-1", "prefix/linux/jobs/job-1/xml/junit.zip", "junit.zip", 10)
+    monkeypatch.setattr("report_downloads.find_job_xml_objects", lambda **kwargs: [obj])
+    monkeypatch.setattr("report_downloads.create_s3_client", lambda *args: object())
+
+    def download(cfg, auth, bucket, key, local_path, **kwargs):
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        with ZipFile(local_path, "w") as archive:
+            info = ZipInfo(member)
+            # ZipInfo normalizes Windows separators; construct an actual unsafe ZIP entry.
+            info.filename = member
+            archive.writestr(info, "<testsuites />")
+
+    monkeypatch.setattr("report_downloads.download_file", download)
+    kwargs = {
+        "cfg": StoreConfig("s3", "s3://bucket"),
+        "auth": ObjectAuth(),
+        "bucket": "bucket",
+        "destination_prefix": "",
+        "project_id": "p",
+        "git_ref": "main",
+        "build_id": "b",
+        "output_dir": tmp_path,
+    }
+    if member != "nested/results.xml":
+        with pytest.raises(ValueError, match="Unsafe"):
+            collect_full_scope_xml(**kwargs)
+        return
+    result = collect_full_scope_xml(**kwargs)
+    assert len(result) == 1
+    assert result[0].object.key == obj.key
+    assert result[0].object.archive_member == member
+    assert result[0].object_relative_path == "linux/job-1/nested/results.xml"
+    assert result[0].local_path.read_text() == "<testsuites />"
+    assert not (tmp_path / "linux/job-1/.junit.zip").exists()
 
 
 def test_build_aggregate_xml_discovery_prefix_matches_build_layout():
