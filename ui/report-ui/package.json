@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "test": "node --test tests/*.test.mjs",
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview"
@@ -11,6 +12,7 @@
   "dependencies": {
     "@lucide/vue": "^1.0.0",
     "@vueuse/core": "^14.0.0",
+    "jszip": "3.10.1",
     "vue": "^3.4.37",
     "vue-easy-lightbox": "^1.19.0",
     "vue-i18n": "^11.0.0",

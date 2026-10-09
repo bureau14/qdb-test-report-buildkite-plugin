@@ -1,6 +1,8 @@
 <!-- Modified from original source: https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/components/details/RenderedBlock.vue -->
 <script setup lang="ts">
 import CodeBlock from "./CodeBlock.vue";
+import ArchiveDownload from "./ArchiveDownload.vue";
+import { archiveMember } from "./archive-download.ts";
 import RenderedSection from "./RenderedSection.vue";
 import { inject } from "vue";
 import { imageHandler } from "./keys.ts";
@@ -18,12 +20,6 @@ function linkHref(value: string): string {
 
 function linkText(value: string): string {
   const [href, text] = value.substring(5).split("\n", 2);
-  const marker = href.indexOf("#zip-member=");
-  if (marker >= 0) {
-    const archive = href.slice(0, marker).split("/").pop();
-    const member = decodeURIComponent(href.slice(marker + 12));
-    return `Download ${archive}\nMember: ${member}`;
-  }
   return text || href;
 }
 </script>
@@ -46,8 +42,15 @@ function linkText(value: string): string {
           {{ pair[0] }}
         </td>
         <td>
+          <ArchiveDownload
+            v-if="
+              (pair[1] as string).startsWith('link:') &&
+              archiveMember(linkHref(pair[1] as string))
+            "
+            :reference="archiveMember(linkHref(pair[1] as string))!"
+          />
           <a
-            v-if="(pair[1] as string).startsWith('link:')"
+            v-else-if="(pair[1] as string).startsWith('link:')"
             :href="linkHref(pair[1] as string)"
             target="_blank"
             rel="noopener noreferrer"

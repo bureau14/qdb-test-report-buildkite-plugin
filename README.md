@@ -205,7 +205,9 @@ prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/
 prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/artifacts/logs.zip
 ```
 
-The job `summary.json` includes an `artifacts` array with ZIP object keys, public URLs when `ARTIFACTS_DOMAIN` is configured, member paths (`archive_member`), uncompressed member sizes, and warnings for configured artifact inputs that produced no files. ZIP links carry a `#zip-member=<encoded-path>` fragment identifying the original file. Job and aggregate HTML reports offer archive downloads and display the relevant member path. JUnit members retain their original relative paths; log members use `<artifact-name-slug>/<relative-artifact-path>`.
+The job `summary.json` includes an `artifacts` array with ZIP object keys, public URLs when `ARTIFACTS_DOMAIN` is configured, member paths (`archive_member`), uncompressed member sizes, and warnings for configured artifact inputs that produced no files. ZIP links carry a `#zip-member=<encoded-path>` fragment identifying the original file. Job and aggregate HTML reports offer individual-file downloads and a ZIP download fallback. JUnit members retain their original relative paths; log members use `<artifact-name-slug>/<relative-artifact-path>`.
+
+Individual-file downloads fetch the whole ZIP on demand and extract only the selected member in the browser. The two most recently used ZIPs are cached; no archives are fetched during report startup. The HTML embeds JSZip, so no CDN or extraction service is required. Fetches use the user's browser credentials and require same-origin access or credentialed CORS when the artifact domain differs. If authentication, network access, or extraction fails, the report displays a retry message and keeps the direct ZIP link available.
 
 Aggregate mode discovers XML and job summaries under the current build's variants prefix:
 
