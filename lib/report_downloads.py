@@ -24,36 +24,13 @@ from object_store import (
 )
 from report_logging import logger, traced
 
-# Limits apply to ZIP-backed JUnit inputs, not downloadable job log archives.
 # Stream member bodies so parallel jobs never allocate whole decompressed XMLs.
-MAX_JUNIT_ARCHIVE_BYTES = 128 * 1024 * 1024
-MAX_JUNIT_ARCHIVE_MEMBERS = 10_000
-MAX_JUNIT_MEMBER_BYTES = 64 * 1024 * 1024
-MAX_JUNIT_EXTRACTED_BYTES = 512 * 1024 * 1024
-MAX_JUNIT_REPORT_BYTES = 2 * 1024 * 1024 * 1024
+# Legitimate verbose test output must not be rejected by size or member-count caps.
 JUNIT_COPY_CHUNK_BYTES = 64 * 1024
 
 
 class InvalidJUnitArchive(ValueError):
-    """An invalid or oversized archive that must not hide other jobs' results."""
-
-
-class ExtractionBudget:
-    """Reserve output bytes across concurrent jobs; failed jobs return their reservation."""
-
-    def __init__(self):
-        self.used = 0
-        self.lock = threading.Lock()
-
-    def reserve(self, size: int) -> None:
-        with self.lock:
-            if self.used + size > MAX_JUNIT_REPORT_BYTES:
-                raise InvalidJUnitArchive("JUnit report extracted-size limit exceeded")
-            self.used += size
-
-    def release(self, size: int) -> None:
-        with self.lock:
-            self.used -= size
+    """An invalid archive that must not hide other jobs' results."""
 
 
 @dataclass(frozen=True)
@@ -237,19 +214,14 @@ def find_job_summary_objects(
 
 
 def extract_junit_archive(
-    obj: JobXmlObject, local_path: Path, job_dir: Path, budget: ExtractionBudget
+    obj: JobXmlObject, local_path: Path, job_dir: Path
 ) -> list[DownloadedJobXml]:
     """Validate then stream into disposable staging; publish only a complete job."""
-    if local_path.stat().st_size > MAX_JUNIT_ARCHIVE_BYTES:
-        raise InvalidJUnitArchive("JUnit archive compressed-size limit exceeded")
     try:
         with ZipFile(local_path) as archive:
             members = archive.infolist()
-            if len(members) > MAX_JUNIT_ARCHIVE_MEMBERS:
-                raise InvalidJUnitArchive("JUnit archive member-count limit exceeded")
             selected = []
             seen = set()
-            total = 0
             for member in members:
                 path = PurePosixPath(member.filename)
                 if (
@@ -266,11 +238,6 @@ def extract_junit_archive(
                 if relative_path in seen:
                     raise InvalidJUnitArchive(f"Duplicate JUnit archive member: {relative_path!r}")
                 seen.add(relative_path)
-                if member.file_size > MAX_JUNIT_MEMBER_BYTES:
-                    raise InvalidJUnitArchive("JUnit archive member-size limit exceeded")
-                total += member.file_size
-                if total > MAX_JUNIT_EXTRACTED_BYTES:
-                    raise InvalidJUnitArchive("JUnit archive extracted-size limit exceeded")
                 selected.append((member, relative_path))
             for _, relative_path in selected:
                 if any(
@@ -280,51 +247,42 @@ def extract_junit_archive(
             if not selected:
                 raise InvalidJUnitArchive("JUnit archive contains no XML members")
 
-            budget.reserve(total)
-            complete = False
-            try:
-                # A late CRC/decompression failure must not leave discoverable partial XML.
-                with tempfile.TemporaryDirectory(
-                    prefix=".junit-extract-", dir=job_dir.parent
-                ) as tmp:
-                    staged = Path(tmp)
-                    for member, relative_path in selected:
-                        target = staged / relative_path
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        size = 0
-                        with archive.open(member) as source, target.open("wb") as output:
-                            while chunk := source.read(JUNIT_COPY_CHUNK_BYTES):
-                                size += len(chunk)
-                                if size > min(member.file_size, MAX_JUNIT_MEMBER_BYTES):
-                                    raise InvalidJUnitArchive(
-                                        "JUnit archive member-size limit exceeded"
-                                    )
-                                output.write(chunk)
-                        if size != member.file_size:
-                            raise InvalidJUnitArchive(
-                                "JUnit archive member size does not match metadata"
-                            )
-                    extracted = []
-                    for member, relative_path in selected:
-                        target = job_dir / relative_path
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        (staged / relative_path).replace(target)
-                        extracted.append(
-                            DownloadedJobXml(
-                                object=replace(
-                                    obj,
-                                    relative_path=relative_path,
-                                    size_bytes=member.file_size,
-                                    archive_member=member.filename,
-                                ),
-                                local_path=target,
-                            )
+            # A late CRC/decompression failure must not leave discoverable partial XML.
+            with tempfile.TemporaryDirectory(prefix=".junit-extract-", dir=job_dir.parent) as tmp:
+                staged = Path(tmp)
+                for member, relative_path in selected:
+                    target = staged / relative_path
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    size = 0
+                    with archive.open(member) as source, target.open("wb") as output:
+                        while chunk := source.read(JUNIT_COPY_CHUNK_BYTES):
+                            size += len(chunk)
+                            if size > member.file_size:
+                                raise InvalidJUnitArchive(
+                                    "JUnit archive member size does not match metadata"
+                                )
+                            output.write(chunk)
+                    if size != member.file_size:
+                        raise InvalidJUnitArchive(
+                            "JUnit archive member size does not match metadata"
                         )
-                    complete = True
-                    return extracted
-            finally:
-                if not complete:
-                    budget.release(total)
+                extracted = []
+                for member, relative_path in selected:
+                    target = job_dir / relative_path
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    (staged / relative_path).replace(target)
+                    extracted.append(
+                        DownloadedJobXml(
+                            object=replace(
+                                obj,
+                                relative_path=relative_path,
+                                size_bytes=member.file_size,
+                                archive_member=member.filename,
+                            ),
+                            local_path=target,
+                        )
+                    )
+                return extracted
     except (BadZipFile, EOFError, RuntimeError, UnicodeDecodeError, zlib.error) as exc:
         raise InvalidJUnitArchive(str(exc)) from exc
 
@@ -371,7 +329,6 @@ def collect_full_scope_xml(
     workers = max(1, min(download_parallel, len(objects)))
     transfer_config = TransferConfig(max_concurrency=download_concurrency)
     thread_state = threading.local()
-    budget = ExtractionBudget()
 
     if log_fn:
         log_fn(
@@ -404,14 +361,12 @@ def collect_full_scope_xml(
             local_path = job_dir / obj.relative_path
             _download_to_path(obj, local_path)
             return [DownloadedJobXml(object=obj, local_path=local_path)]
-        if obj.size_bytes > MAX_JUNIT_ARCHIVE_BYTES:
-            raise InvalidJUnitArchive("JUnit archive compressed-size limit exceeded")
         job_dir.mkdir(parents=True, exist_ok=True)
         # Keep transport staging outside the member namespace, including on Windows.
         with tempfile.TemporaryDirectory(prefix=".junit-download-", dir=job_dir.parent) as tmp:
             local_path = Path(tmp) / "junit.zip"
             _download_to_path(obj, local_path)
-            return extract_junit_archive(obj, local_path, job_dir, budget)
+            return extract_junit_archive(obj, local_path, job_dir)
 
     downloaded: list[list[DownloadedJobXml] | None] = [None] * len(objects)
     download_started = time.monotonic()

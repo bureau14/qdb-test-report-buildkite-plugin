@@ -91,57 +91,56 @@ def test_corrupt_utf8_archive_names_do_not_discard_valid_jobs(archive_store):
         ("MAX_JUNIT_EXTRACTED_BYTES", 4, [("one.xml", "123"), ("two.xml", "45")]),
     ],
 )
-def test_archive_limits_reject_job_without_leaving_xml(
+def test_legacy_archive_limits_do_not_reject_valid_xml(
     monkeypatch, archive_store, limit, value, members
 ):
     add, kwargs = archive_store
     monkeypatch.setattr("report_downloads." + limit, value, raising=False)
-    add("bad", members)
+    add("good", members)
     errors = []
-    assert collect_full_scope_xml(**kwargs, archive_errors=errors) == []
-    assert len(errors) == 1
-    assert "limit" in errors[0]["error"].lower()
-    assert list(kwargs["output_dir"].rglob("*.xml")) == []
+    result = collect_full_scope_xml(**kwargs, archive_errors=errors)
+    assert [(item.relative_path, item.local_path.read_text()) for item in result] == members
+    assert errors == []
 
 
-def test_report_extraction_budget_is_shared_across_jobs(monkeypatch, archive_store):
+def test_legacy_report_budget_does_not_discard_jobs(monkeypatch, archive_store):
     add, kwargs = archive_store
     monkeypatch.setattr("report_downloads.MAX_JUNIT_REPORT_BYTES", 4, raising=False)
     add("first", [("one.xml", "123")])
     add("second", [("two.xml", "45")])
     errors = []
     result = collect_full_scope_xml(**kwargs, archive_errors=errors)
-    assert [item.job_id for item in result] == ["first"]
-    assert len(errors) == 1
-    assert "report" in errors[0]["error"].lower()
+    assert [item.job_id for item in result] == ["first", "second"]
+    assert errors == []
 
 
-def test_parallel_jobs_cannot_overcommit_extraction_budget(monkeypatch, archive_store):
+def test_parallel_jobs_are_not_subject_to_legacy_report_budget(monkeypatch, archive_store):
     add, kwargs = archive_store
-    monkeypatch.setattr("report_downloads.MAX_JUNIT_REPORT_BYTES", 4)
+    monkeypatch.setattr("report_downloads.MAX_JUNIT_REPORT_BYTES", 4, raising=False)
     for job in ("one", "two", "three"):
         add(job, [("results.xml", "12")])
     kwargs["download_parallel"] = 3
     errors = []
     result = collect_full_scope_xml(**kwargs, archive_errors=errors)
-    assert len(result) == 2
-    assert sum(item.local_path.stat().st_size for item in result) == 4
-    assert len(errors) == 1
+    assert [item.job_id for item in result] == ["one", "two", "three"]
+    assert sum(item.local_path.stat().st_size for item in result) == 6
+    assert errors == []
 
 
-def test_actual_archive_size_is_checked_after_download(monkeypatch, archive_store):
+def test_actual_archive_size_does_not_gate_extraction(monkeypatch, archive_store):
     from dataclasses import replace
 
     add, kwargs = archive_store
-    obj = add("bad", [("results.xml", "x")])
-    monkeypatch.setattr("report_downloads.MAX_JUNIT_ARCHIVE_BYTES", 1)
+    obj = add("good", [("results.xml", "x")])
+    monkeypatch.setattr("report_downloads.MAX_JUNIT_ARCHIVE_BYTES", 1, raising=False)
     monkeypatch.setattr(
         "report_downloads.find_job_xml_objects", lambda **kwargs: [replace(obj, size_bytes=1)]
     )
     errors = []
-    assert collect_full_scope_xml(**kwargs, archive_errors=errors) == []
-    assert "compressed-size limit" in errors[0]["error"]
-    assert not (kwargs["output_dir"] / "linux/bad/.junit.zip").exists()
+    result = collect_full_scope_xml(**kwargs, archive_errors=errors)
+    assert result[0].local_path.read_text() == "x"
+    assert errors == []
+    assert not (kwargs["output_dir"] / "linux/good/.junit.zip").exists()
 
 
 @pytest.mark.parametrize("invalid", ["duplicate", "empty", "conflicting"])
@@ -183,7 +182,7 @@ def test_xml_member_directory_does_not_collide_with_download_staging(archive_sto
     assert result[0].local_path.read_text() == "valid"
 
 
-def test_crc_failure_removes_partial_job_and_preserves_report_budget(monkeypatch, archive_store):
+def test_crc_failure_removes_partial_job_and_preserves_valid_jobs(archive_store):
     add, kwargs = archive_store
     buffer = io.BytesIO()
     with ZipFile(buffer, "w", compression=ZIP_STORED) as archive:
@@ -192,12 +191,71 @@ def test_crc_failure_removes_partial_job_and_preserves_report_budget(monkeypatch
     payload = buffer.getvalue().replace(b"bad-content", b"BAD-content", 1)
     add("bad", payload=payload)
     add("good", [("valid.xml", "x" * 15)])
-    monkeypatch.setattr("report_downloads.MAX_JUNIT_REPORT_BYTES", 15, raising=False)
     errors = []
     result = collect_full_scope_xml(**kwargs, archive_errors=errors)
     assert [item.job_id for item in result] == ["good"]
     assert "CRC" in errors[0]["error"]
     assert list((kwargs["output_dir"] / "linux" / "bad").rglob("*.xml")) == []
+
+
+def test_xml_above_64_mib_generates_complete_report(monkeypatch, archive_store, tmp_path):
+    import shutil
+
+    from junit_html_report import generate_html_report
+
+    add, kwargs = archive_store
+    obj = add("large", [("results.xml", "placeholder")])
+    archive_path = tmp_path / "large.zip"
+    with (
+        ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive,
+        archive.open("results.xml", "w") as output,
+    ):
+        output.write(b'<testsuite><testcase name="large"><system-out>')
+        # Stream a real member above the former cap without a giant fixture string.
+        for _ in range(65):
+            output.write(b"x" * (1024 * 1024))
+        output.write(b'</system-out></testcase><testcase name="last"/></testsuite>')
+
+    def download(cfg, auth, bucket, key, local_path, **kwargs):
+        assert key == obj.key
+        shutil.copyfile(archive_path, local_path)
+
+    monkeypatch.setattr("report_downloads.download_file", download)
+    errors = []
+    result = collect_full_scope_xml(**kwargs, archive_errors=errors)
+    assert len(result) == 1
+    assert result[0].local_path.stat().st_size > 64 * 1024 * 1024
+    assert errors == []
+
+    html_path = tmp_path / "index.html"
+    summary_path = tmp_path / "summary.json"
+    assert (
+        generate_html_report(
+            title="Large archive",
+            platform_specs=[("linux", kwargs["output_dir"] / "linux")],
+            output=html_path,
+            summary_json=summary_path,
+            junit_archive_errors=errors,
+        )
+        == 0
+    )
+    summary = json.loads(summary_path.read_text())
+    assert summary["logical_tests"] == 2
+    assert summary["status_counts"]["SUCCESSFUL"] == 2
+    assert summary["root_status"] == "SUCCESSFUL"
+    assert not summary.get("junit_archive_errors")
+    html = html_path.read_text()
+    assert '"name":"last - linux"' in html
+
+
+def test_archive_above_10000_members_retains_all_xml(archive_store):
+    add, kwargs = archive_store
+    members = [(f"{index}.xml", "valid") for index in range(10_001)]
+    add("many", members)
+    errors = []
+    result = collect_full_scope_xml(**kwargs, archive_errors=errors)
+    assert [(item.relative_path, item.local_path.read_text()) for item in result] == members
+    assert errors == []
 
 
 @pytest.mark.parametrize("member", ["../escape.xml", "/escape.xml", "C:/escape.xml"])
