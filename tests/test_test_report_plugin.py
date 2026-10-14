@@ -2,6 +2,7 @@ import json
 import re
 from pathlib import Path
 from unittest.mock import MagicMock
+from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 
 import pytest
 from artifact_inputs import ArtifactConfig, ArtifactFile
@@ -128,9 +129,9 @@ def test_job_xml_source_links_use_uploaded_keys_and_artifacts_domain(tmp_path):
     link = links[xml.resolve()]
     assert link.key == (
         "prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/"
-        "xml/nested/results.xml"
+        "xml/junit.zip"
     )
-    assert link.url == f"https://reports.example.com/{link.key}"
+    assert link.url == f"https://reports.example.com/{link.key}#zip-member=nested%2Fresults.xml"
 
 
 def test_aggregate_xml_source_links_preserve_discovered_keys_and_no_domain(tmp_path):
@@ -176,7 +177,12 @@ def test_upload_report_artifacts(monkeypatch, tmp_path):
         summary_path=summary_path,
     )
 
-    xml_uploads = [XmlUpload(local_path=xml_path, object_relative_path="test.xml")]
+    other_xml = tmp_path / "other.xml"
+    other_xml.write_text("other xml")
+    xml_uploads = [
+        XmlUpload(local_path=xml_path, object_relative_path="test.xml"),
+        XmlUpload(local_path=other_xml, object_relative_path="nested/other.xml"),
+    ]
 
     config = PluginConfig(
         scope="job",
@@ -214,9 +220,13 @@ def test_upload_report_artifacts(monkeypatch, tmp_path):
     )
 
     uploaded = []
+    archive_contents = {}
 
     def fake_upload_file(cfg, auth, bucket, key, local_path, **kwargs):
         uploaded.append((bucket, key, local_path, kwargs))
+        if local_path.suffix == ".zip":
+            with ZipFile(local_path) as archive:
+                archive_contents.update({name: archive.read(name) for name in archive.namelist()})
         from object_store import PublishedObject
 
         return PublishedObject(
@@ -227,17 +237,33 @@ def test_upload_report_artifacts(monkeypatch, tmp_path):
         )
 
     monkeypatch.setattr("test_report_plugin.upload_file", fake_upload_file)
+    monkeypatch.setattr("object_store.upload_file", fake_upload_file)
+    monkeypatch.setattr("object_store.create_s3_client", lambda cfg, auth: MagicMock())
 
     upload_report_artifacts(config, generation, xml_uploads, None)
 
     assert len(uploaded) == 3
-    # XML upload check (index 2 now)
+    xml_upload = next(item for item in uploaded if item[1].endswith("/xml/junit.zip"))
     assert (
-        uploaded[2][1]
-        == "prefix/project/refs/heads/main/reports/builds/1/variants/linux/jobs/123/xml/test.xml"
+        xml_upload[1]
+        == "prefix/project/refs/heads/main/reports/builds/1/variants/linux/jobs/123/xml/junit.zip"
     )
-    assert uploaded[2][3]["content_type"] == "application/xml"
-    assert uploaded[2][3]["content_disposition"] == "attachment"
+    assert xml_upload[3]["content_type"] == "application/zip"
+    assert xml_upload[3]["content_disposition"] == "attachment"
+    assert uploaded[-1][1].endswith("/summary.json")
+    assert archive_contents == {"test.xml": b"xml", "nested/other.xml": b"other xml"}
+
+    error = RuntimeError("XML upload failed")
+
+    def failed_batch(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr("test_report_plugin.upload_files", failed_batch)
+    uploaded.clear()
+    with pytest.raises(RuntimeError) as caught:
+        upload_report_artifacts(config, generation, xml_uploads, None)
+    assert caught.value is error
+    assert uploaded == []  # A failed batch must not publish summary.json.
 
 
 def test_upload_extra_artifacts_returns_summary_metadata(monkeypatch, tmp_path):
@@ -279,9 +305,12 @@ def test_upload_extra_artifacts_returns_summary_metadata(monkeypatch, tmp_path):
         prefix="prefix",
     )
     uploaded = []
+    archive_contents = {}
 
     def fake_upload_file(cfg, auth, bucket, key, local_path, **kwargs):
         uploaded.append((bucket, key, local_path, kwargs))
+        with ZipFile(local_path) as archive:
+            archive_contents.update({name: archive.read(name) for name in archive.namelist()})
         return PublishedObject(
             bucket=bucket,
             key=key,
@@ -290,15 +319,20 @@ def test_upload_extra_artifacts_returns_summary_metadata(monkeypatch, tmp_path):
         )
 
     monkeypatch.setattr("test_report_plugin.upload_file", fake_upload_file)
+    monkeypatch.setattr("object_store.upload_file", fake_upload_file)
+    monkeypatch.setattr("object_store.create_s3_client", lambda cfg, auth: MagicMock())
 
     metadata = upload_extra_artifacts(config, [artifact_file], context)
 
     assert uploaded[0][1] == (
-        "prefix/project/refs/heads/main/reports/builds/1/variants/linux/jobs/123/"
-        "artifacts/test-logs/test-logs-1.tar.gz"
+        "prefix/project/refs/heads/main/reports/builds/1/variants/linux/jobs/123/artifacts/logs.zip"
     )
-    assert uploaded[0][3]["content_type"] == "application/gzip"
+    assert uploaded[0][3]["content_type"] == "application/zip"
     assert uploaded[0][3]["content_disposition"] == "attachment"
+    assert archive_contents == {"test-logs/test-logs-1.tar.gz": b"logs"}
+    logical_key = (
+        "prefix/project/refs/heads/main/reports/builds/1/variants/linux/jobs/123/artifacts/logs.zip"
+    )
     assert metadata == [
         {
             "name": "Test logs",
@@ -306,8 +340,9 @@ def test_upload_extra_artifacts_returns_summary_metadata(monkeypatch, tmp_path):
             "files": [
                 {
                     "relative_path": "test-logs-1.tar.gz",
-                    "key": uploaded[0][1],
-                    "url": f"https://reports.example.com/{uploaded[0][1]}",
+                    "key": logical_key,
+                    "archive_member": "test-logs/test-logs-1.tar.gz",
+                    "url": f"https://reports.example.com/{logical_key}#zip-member=test-logs%2Ftest-logs-1.tar.gz",
                     "size_bytes": 4,
                 }
             ],
@@ -1343,6 +1378,8 @@ def test_main_aggregate_renders_job_manifest_artifacts_in_html(monkeypatch, tmp_
         )
 
     monkeypatch.setattr("test_report_plugin.upload_file", fake_upload_file)
+    monkeypatch.setattr("object_store.upload_file", fake_upload_file)
+    monkeypatch.setattr("object_store.create_s3_client", lambda cfg, auth: MagicMock())
 
     assert main() == 0
     html = uploaded_html.read_text(encoding="utf-8")
@@ -1358,3 +1395,24 @@ def test_main_aggregate_renders_job_manifest_artifacts_in_html(monkeypatch, tmp_
     assert "qdb_aggregation_test" in node_names
     assert "aggregation.correlation" in node_names
     assert "double_identical_high_covariance" in node_names
+
+
+def test_create_zip_preserves_group_paths_and_stores_compressed_logs(tmp_path):
+    from test_report_plugin import create_zip
+
+    log = tmp_path / "log.json"
+    log.write_text("repeated log line" * 1000)
+    compressed = tmp_path / "server.tar.gz"
+    compressed.write_bytes(b"already compressed")
+    output = tmp_path / "logs.zip"
+    create_zip(
+        [(log, "api/log.json"), (log, "other/log.json"), (compressed, "server/server.tar.gz")],
+        output,
+    )
+    with ZipFile(output) as archive:
+        assert archive.namelist() == ["api/log.json", "other/log.json", "server/server.tar.gz"]
+        assert archive.read("api/log.json") == log.read_bytes()
+        assert archive.read("other/log.json") == log.read_bytes()
+        assert archive.read("server/server.tar.gz") == compressed.read_bytes()
+        assert archive.getinfo("api/log.json").compress_type == ZIP_DEFLATED
+        assert archive.getinfo("server/server.tar.gz").compress_type == ZIP_STORED

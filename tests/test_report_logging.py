@@ -1,10 +1,72 @@
 import json
+import logging
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-from report_logging import configure_logging, logger
+from report_logging import configure_logging, logger, trace, traced
+
+
+def test_trace_pairs_nested_stages_and_preserves_exception(monkeypatch, capsys):
+    import report_logging
+
+    configure_logging("info")
+    wall = iter([10.0, 11.0, 13.0, 15.0])
+    cpu = iter([1.0, 1.1, 1.2, 1.3])
+    monkeypatch.setattr(report_logging.time, "perf_counter", lambda: next(wall))
+    monkeypatch.setattr(report_logging.time, "thread_time", lambda: next(cpu))
+    error = RuntimeError("original failure")
+    with pytest.raises(RuntimeError) as caught, trace("outer"), trace("inner"):
+        raise error
+    assert caught.value is error
+    lines = capsys.readouterr().err.splitlines()
+    assert len(lines) == 4
+    outer_id = lines[0].split("id=")[1].split()[0]
+    inner_id = lines[1].split("id=")[1].split()[0]
+    assert outer_id != inner_id
+    assert f"id={inner_id} stage=inner wall_s=2.000 thread_cpu_s=0.100 status=error" in lines[2]
+    assert f"id={outer_id} stage=outer wall_s=5.000 thread_cpu_s=0.300 status=error" in lines[3]
+
+
+def test_disabled_trace_does_not_read_clocks_or_dump_arguments(monkeypatch, capsys):
+    import report_logging
+
+    def unexpected_clock():
+        raise AssertionError("disabled tracing should not read clocks")
+
+    monkeypatch.setattr(report_logging.time, "perf_counter", unexpected_clock)
+    monkeypatch.setattr(report_logging.time, "thread_time", unexpected_clock)
+
+    @traced("example", level=logging.DEBUG)
+    def operation(secret):
+        return secret
+
+    assert operation("private-value") == "private-value"
+    assert capsys.readouterr().err == ""
+
+
+def test_outer_retry_traces_backoff_and_success(monkeypatch, capsys):
+    import object_store
+
+    configure_logging("debug")
+    sleeps = []
+    monkeypatch.setattr(object_store.time, "sleep", sleeps.append)
+    calls = 0
+
+    def flaky():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("transient")
+        return "result"
+
+    assert object_store._with_retry(flaky, "example.xml") == "result"
+    assert sleeps == [object_store.BACKOFF_BASE]
+    output = capsys.readouterr().err
+    assert "stage=store.backoff" in output
+    assert "attempt=1" in output and "attempt=2" in output
+    assert "status=error" in output and "status=ok" in output
 
 
 @pytest.mark.parametrize(

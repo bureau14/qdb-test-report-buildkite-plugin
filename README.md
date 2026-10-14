@@ -164,6 +164,7 @@ plugins:
 | `annotate` | boolean |  | Create Buildkite annotation when a report URL can be built from `ARTIFACTS_DOMAIN`. Default: `true`. |
 | `debug` | boolean |  | Enable bash debug tracing in plugin hooks. Default: `false`. |
 | `log_level` | string |  | Minimum message severity: `debug`, `info`, `warning`, `error`, or `fatal`. Default: `error` (quiet; errors and fatal messages only). |
+| `upload_parallel` | integer |  | Maximum simultaneous file uploads. Defaults to the agent's logical CPU count (or `1` if unavailable); use `1` for serial uploads. Applies to additional artifacts and HTML/XML uploads. |
 
 ### `job` object keys
 
@@ -183,6 +184,14 @@ plugins:
 
 Set `log_level: info` to show progress, listing/download durations, and model/UI/HTML generation timings. Set `log_level: debug` for per-file parsing, test details, and duplicate decisions. Warnings remain in report metadata where applicable even when console output is quiet. `debug: true` independently enables shell tracing and can produce output at any log level.
 
+Timing traces at `info` include environment setup (venv creation/upgrades and dependency installation), object-store configuration, XML discovery/downloads, direct/fallback summary collection, model/UI construction, JSON/HTML/summary writing, uploads, annotations, and the total report invocation. Python traces pair `trace start` and `trace end` by `id` and report `wall_s`, `thread_cpu_s`, and exception status. Shell traces report whole seconds and the command exit code; `hook.report` also includes Python startup/imports and temporary-directory cleanup. `plugin.total` starts after plugin configuration/logging and includes staging cleanup. Nested stages are inclusive, so do not add parent and child durations together. Thread CPU measures only the calling thread, not download workers or subprocesses; a large wall/CPU gap is a clue to waiting, not proof of network latency.
+
+Use `log_level: debug` for individual XML parsing, S3 client creation, SSM requests (parameter names only), download keys, and outer retry attempts. Outer retry sleeps are traced at `info`; boto3's internal retries/timeouts are included in each attempt's wall time. Start with the largest `info` stage, then use its nested stages or `debug` traces to narrow it down. Setup currently recreates the environment on every checkout and summary downloads are serial; timings will show whether these costs matter on your agents. Trace logging preserves the default quiet `error` level and does not log credentials or full function arguments.
+
+Uploads use up to `upload_parallel` workers, defaulting to the agent's logical CPU count and capped by the number of files, each owning a separate boto3 session and reused client. Per-file multipart transfers use no additional transfer threads, keeping simultaneous file uploads bounded. Additional artifacts finish before report generation so their links and metadata are available. HTML and job XML upload concurrently; `summary.json` is published last, after every required file succeeds. Upload failures retain the existing retries, fail the plugin, and cancel queued uploads; uploads already running finish before staging cleanup. Batch traces remain inclusive wall timings, while individual upload traces can overlap and must not be summed to obtain batch elapsed time.
+
+One known source of long waits: a missing optional summary is retried like any other download failure before being skipped. The default outer retry schedule alone sleeps for 375 seconds (6 minutes 15 seconds) across ten attempts, excluding request time and boto3 retries. Serial summary collection can accumulate that delay per missing manifest. Look for `store.backoff` entries inside `aggregate.summaries.direct` to confirm whether this affects a run.
+
 ## Object-store layout
 
 The plugin reuses the same object-store configuration path as the `qdb-artifacts` plugin. Configuration is resolved from `ARTIFACTS_*` environment variables or SSM parameters by `lib/object_store.py`.
@@ -192,18 +201,29 @@ Given destination `s3://bucket/prefix`, project `project`, git ref `refs/heads/m
 ```text
 prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/index.html
 prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/summary.json
-prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/xml/<relative-junit-path>.xml
-prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/artifacts/<artifact-name-slug>/<relative-artifact-path>
+prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/xml/junit.zip
+prefix/project/refs/heads/main/reports/builds/build-1/variants/linux/jobs/job-1/artifacts/logs.zip
 ```
 
-The job `summary.json` includes an `artifacts` array with uploaded artifact keys, public URLs when `ARTIFACTS_DOMAIN` is configured, sizes, and warnings for configured artifact inputs that produced no files. Job and aggregate HTML reports render these links in the report-level Artifacts section and in each test leaf's Source section beside the Buildkite job/JUnit XML links. The JUnit XML link targets the raw uploaded object and retains its `attachment` disposition.
+The job `summary.json` includes an `artifacts` array with ZIP object keys, public URLs when `ARTIFACTS_DOMAIN` is configured, member paths (`archive_member`), uncompressed member sizes, and warnings for configured artifact inputs that produced no files. ZIP links carry a `#zip-member=<encoded-path>` fragment identifying the original file. Job and aggregate HTML reports offer individual-file downloads and a ZIP download fallback. JUnit members retain their original relative paths; log members use `<artifact-name-slug>/<relative-artifact-path>`.
+
+Individual-file downloads fetch the whole ZIP on demand and extract only the selected member in the browser. The two most recently used ZIPs are cached; no archives are fetched during report startup. The HTML embeds JSZip, so no CDN or extraction service is required. Fetches use the user's browser credentials and require same-origin access or credentialed CORS when the artifact domain differs. If authentication, network access, or extraction fails, the report displays a retry message and keeps the direct ZIP link available.
+
+Browser extraction accepts at most 128 MiB of downloaded ZIP data, 10,000 parsed archive entries, and 64 MiB for the selected uncompressed file. Download size is enforced while reading the response, including when `Content-Length` is absent or incorrect. Fetching the archive, including its response body, has a 60-second deadline. Oversized or timed-out downloads show the reason and keep the direct ZIP link available; these limits do not prevent downloading the complete ZIP directly.
 
 Aggregate mode discovers XML and job summaries under the current build's variants prefix:
 
 ```text
 prefix/project/refs/heads/main/reports/builds/build-1/variants/*/jobs/*/xml/**/*.xml
+prefix/project/refs/heads/main/reports/builds/build-1/variants/*/jobs/*/xml/junit.zip
 prefix/project/refs/heads/main/reports/builds/build-1/variants/*/jobs/*/summary.json
 ```
+
+Aggregate mode downloads each JUnit ZIP once and extracts its XML members into the variant/job staging directory. Legacy individual XML uploads remain supported. When both forms exist for a job, its ZIP takes precedence to avoid duplicate results.
+
+JUnit ZIP extraction is streamed in 64 KiB chunks without fixed archive-size, member-count, XML-size, or total-extracted-size caps. Large valid JUnit inputs are included rather than rejected. The browser download limits above apply only to interactive individual-file extraction and do not gate report generation.
+
+Corrupt, empty, unsafe, duplicate-member, or conflicting-path JUnit ZIPs are rejected per job without discarding valid sibling jobs. Partial extraction is removed before report generation. The HTML report and `summary.json` retain the rejected archive's object key, variant, job ID, error, and public download URL when available in `junit_archive_errors`. The report status and annotation are errors, and the plugin exits with status `1` after publishing the usable report—even when all archives were rejected or no public HTML URL is configured. Object-store transport errors still fail the invocation rather than being classified as invalid archive content.
 
 The aggregate report is written under:
 

@@ -1,6 +1,8 @@
 <!-- Modified from original source: https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/components/details/RenderedBlock.vue -->
 <script setup lang="ts">
 import CodeBlock from "./CodeBlock.vue";
+import ArchiveDownload from "./ArchiveDownload.vue";
+import { archiveMember } from "./archive-download.ts";
 import RenderedSection from "./RenderedSection.vue";
 import { inject } from "vue";
 import { imageHandler } from "./keys.ts";
@@ -40,14 +42,23 @@ function linkText(value: string): string {
           {{ pair[0] }}
         </td>
         <td>
+          <ArchiveDownload
+            v-if="
+              (pair[1] as string).startsWith('link:') &&
+              archiveMember(linkHref(pair[1] as string))
+            "
+            :reference="archiveMember(linkHref(pair[1] as string))!"
+          />
           <a
-            v-if="(pair[1] as string).startsWith('link:')"
+            v-else-if="(pair[1] as string).startsWith('link:')"
             :href="linkHref(pair[1] as string)"
             target="_blank"
             rel="noopener noreferrer"
             class="text-blue-600 dark:text-blue-500 hover:underline"
           >
-            <pre class="text-sm whitespace-pre-wrap break-all">{{ linkText(pair[1] as string) }}</pre>
+            <pre class="text-sm whitespace-pre-wrap break-all">{{
+              linkText(pair[1] as string)
+            }}</pre>
           </a>
           <pre v-else class="text-sm whitespace-pre-wrap break-all">{{
             pair[1]

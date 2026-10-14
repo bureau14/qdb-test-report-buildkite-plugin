@@ -41,6 +41,7 @@ class PluginConfig:
     aggregate_download_parallel: int = 32
     aggregate_download_concurrency: int = 4
     log_level: str = "error"
+    upload_parallel: int = field(default_factory=lambda: os.cpu_count() or 1)
 
 
 def _get_env(key: str, default: str | None = None) -> str | None:
@@ -151,6 +152,9 @@ def load_plugin_config() -> PluginConfig:
     aggregate_download_concurrency = _get_int_env(
         "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_DOWNLOAD_CONCURRENCY", 4
     )
+    upload_parallel = _get_int_env(
+        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_UPLOAD_PARALLEL", os.cpu_count() or 1
+    )
 
     variant: str | None
     junit_input_path: Path | None
@@ -201,4 +205,5 @@ def load_plugin_config() -> PluginConfig:
         aggregate_download_parallel=aggregate_download_parallel,
         aggregate_download_concurrency=aggregate_download_concurrency,
         log_level=log_level,
+        upload_parallel=upload_parallel,
     )

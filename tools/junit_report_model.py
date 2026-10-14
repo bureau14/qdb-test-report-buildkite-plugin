@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from report_logging import logger
+from report_logging import logger, traced
 
 STATUS_ORDER = ["SUCCESSFUL", "SKIPPED", "FAILED", "ERRORED"]
 STATUS_SEVERITY = {"SUCCESSFUL": 0, "SKIPPED": 1, "FAILED": 2, "ERRORED": 3}
@@ -126,6 +126,7 @@ class Report:
     duplicates_seen: int = 0
     duplicates_replaced: int = 0
     malformed_junit_xml: list[dict[str, str]] = field(default_factory=list)
+    junit_archive_errors: list[dict[str, str]] = field(default_factory=list)
     artifacts: list[ArtifactLink] = field(default_factory=list)
 
     @property
@@ -187,6 +188,8 @@ class Report:
 
     @property
     def root_status(self) -> str:
+        if self.junit_archive_errors:
+            return "ERRORED"
         return aggregate_status(list(self.status_counts.elements()))
 
 
@@ -198,6 +201,7 @@ def has_glob_magic(path: Path | str) -> bool:
     return any(char in str(path) for char in "*?[]")
 
 
+@traced("model.xml.discover")
 def discover_xml_files(path: Path | str) -> list[Path]:
     """Return XML files for a file, directory, or glob in discovery order."""
     input_path = Path(path)
@@ -426,6 +430,7 @@ def iter_junit_suites(root: ET.Element) -> list[ET.Element]:
     return [element for element in root.iter() if local_name(element) == "testsuite"]
 
 
+@traced("model.xml.parse", level=logging.DEBUG)
 def parse_junit_file(
     path: Path,
     platform: str,
@@ -513,6 +518,7 @@ def parse_junit_file(
     return executions
 
 
+@traced("model.build")
 def build_report(
     title: str,
     platform_specs: list[tuple[str, Path | str]],

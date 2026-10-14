@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from html import escape
 
-from report_logging import logger
+from report_logging import logger, traced
 
 MAX_ANNOTATION_BYTES = 1024 * 1024
 MAX_FAILURE_REASON_CHARS = 240
@@ -131,6 +131,7 @@ def get_malformed_junit_xml(summary: dict) -> list[dict]:
     return list(summary.get("malformed_junit_xml", []))
 
 
+@traced("annotation.render")
 def build_annotation_body(
     title: str, summary: dict, html_url: str | None, scope: str = "build"
 ) -> str:
@@ -178,6 +179,15 @@ def build_annotation_body(
 
         malformed_lines = "\n".join(malformed_line(item) for item in malformed_junit_xml)
         body += f"\n\n❌ Malformed JUnit XML\n\n{malformed_lines}"
+    archive_errors = summary.get("junit_archive_errors", [])
+    if archive_errors:
+        archive_lines = []
+        for item in archive_errors:
+            label = escape(f"{item['file']} ({item['platform']}, job {item['job_id']})")
+            if url := item.get("url"):
+                label = f'<a href="{escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">{label}</a>'
+            archive_lines.append(f"- {label}: {escape(item['error'])}")
+        body += "\n\n❌ JUnit archive errors\n\n" + "\n".join(archive_lines)
     if html_url:
         body += f'\n\n<a href="{html_url}" target="_blank" rel="noopener noreferrer">Open full report</a>'
     body += failed_test_table(summary, MAX_ANNOTATION_BYTES - len(body.encode("utf-8")))
@@ -198,6 +208,7 @@ def get_annotation_style(summary: dict) -> str:
         or errored > 0
         or root_status in ("FAILED", "ERRORED")
         or get_malformed_junit_xml(summary)
+        or summary.get("junit_archive_errors")
     ):
         return "error"
 
@@ -228,6 +239,7 @@ def get_job_annotation_style(summary: dict) -> str:
     return style
 
 
+@traced("annotation.publish")
 def create_buildkite_annotation(
     body: str, context: str, style: str, priority: int, scope: str = "build"
 ):

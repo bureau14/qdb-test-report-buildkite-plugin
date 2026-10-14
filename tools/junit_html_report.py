@@ -13,7 +13,7 @@ from typing import Any
 from html_report_writer import DEFAULT_TEMPLATE, write_html_report
 from junit_report_model import ArtifactLink, build_report, format_counts, parse_platform_arg
 from report_data import report_to_report_ui_data
-from report_logging import LOG_LEVELS, configure_logging, logger
+from report_logging import LOG_LEVELS, configure_logging, logger, trace
 
 
 def log(message: str) -> None:
@@ -81,6 +81,7 @@ def generate_html_report(
     artifacts: list[ArtifactLink] | None = None,
     artifact_metadata: list[dict[str, Any]] | None = None,
     xml_source_links: dict[Path, str | None] | None = None,
+    junit_archive_errors: list[dict[str, str]] | None = None,
     only_failures: bool = False,
     fail_on_test_failures: bool = False,
     log_level: str = "error",
@@ -98,6 +99,7 @@ def generate_html_report(
         xml_source_links=xml_source_links,
     )
     parsed = time.monotonic()
+    report.junit_archive_errors = list(junit_archive_errors or [])
     log(f"Built JUnit report model in {parsed - started:.1f}s")
     data = report_to_report_ui_data(
         report, execution_name=execution_name, only_failures=only_failures
@@ -112,44 +114,49 @@ def generate_html_report(
         )
 
     if summary_json:
-        summary = {
-            "raw_testcases": report.raw_testcases,
-            "suites": len(report.suites),
-            "logical_tests": report.logical_test_count,
-            "platform_executions": report.platform_execution_count,
-            "targets": len(report.platforms),
-            "platforms": report.platforms,
-            "resolved_platforms": report.resolved_platforms,
-            "status_counts": dict(report.status_counts),
-            "logical_status_counts": dict(report.logical_status_counts),
-            "root_status": report.root_status,
-            "malformed_junit_xml": report.malformed_junit_xml,
-            "failed_test_cases": [
-                {
-                    "suite": execution.suite_name,
-                    "test_file": execution.test_file,
-                    "test_case": (
-                        execution.name if execution.report_kind == "ctest" else execution.logical_id
-                    ),
-                    "report_kind": execution.report_kind,
-                    "platform": execution.platform,
-                    "status": execution.status,
-                    "reason": execution.reason,
-                    "duration_seconds": execution.duration_seconds,
-                    "source_xml_url": execution.source_xml_url,
-                }
-                for suite in report.suites.values()
-                for test_file in suite.test_files.values()
-                for logical in test_file.logical_tests.values()
-                for execution in logical.executions.values()
-                if execution.status in ("FAILED", "ERRORED")
-            ],
-        }
-        if artifact_metadata is not None:
-            summary["artifacts"] = artifact_metadata
-        summary_json.parent.mkdir(parents=True, exist_ok=True)
-        summary_json.write_text(json.dumps(summary, indent=2))
-        log(f"Wrote summary JSON output={summary_json}")
+        with trace("report.summary"):
+            summary = {
+                "raw_testcases": report.raw_testcases,
+                "suites": len(report.suites),
+                "logical_tests": report.logical_test_count,
+                "platform_executions": report.platform_execution_count,
+                "targets": len(report.platforms),
+                "platforms": report.platforms,
+                "resolved_platforms": report.resolved_platforms,
+                "status_counts": dict(report.status_counts),
+                "logical_status_counts": dict(report.logical_status_counts),
+                "root_status": report.root_status,
+                "malformed_junit_xml": report.malformed_junit_xml,
+                "failed_test_cases": [
+                    {
+                        "suite": execution.suite_name,
+                        "test_file": execution.test_file,
+                        "test_case": (
+                            execution.name
+                            if execution.report_kind == "ctest"
+                            else execution.logical_id
+                        ),
+                        "report_kind": execution.report_kind,
+                        "platform": execution.platform,
+                        "status": execution.status,
+                        "reason": execution.reason,
+                        "duration_seconds": execution.duration_seconds,
+                        "source_xml_url": execution.source_xml_url,
+                    }
+                    for suite in report.suites.values()
+                    for test_file in suite.test_files.values()
+                    for logical in test_file.logical_tests.values()
+                    for execution in logical.executions.values()
+                    if execution.status in ("FAILED", "ERRORED")
+                ],
+            }
+            if report.junit_archive_errors:
+                summary["junit_archive_errors"] = report.junit_archive_errors
+            if artifact_metadata is not None:
+                summary["artifacts"] = artifact_metadata
+            summary_json.parent.mkdir(parents=True, exist_ok=True)
+            summary_json.write_text(json.dumps(summary, indent=2))
+            log(f"Wrote summary JSON output={summary_json}")
 
     if logger.isEnabledFor(logging.INFO):
         log(
@@ -158,6 +165,8 @@ def generate_html_report(
             f"status_counts={format_counts(report.status_counts)} root_status={report.root_status}",
         )
 
+    if report.junit_archive_errors:
+        return 1
     failed_or_errored = report.status_counts["FAILED"] + report.status_counts["ERRORED"]
     if fail_on_test_failures and failed_or_errored:
         logger.error(

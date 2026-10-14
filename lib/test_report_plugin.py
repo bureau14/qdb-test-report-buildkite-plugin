@@ -8,6 +8,8 @@ import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
+from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 
 # Add tools to path so we can import junit_html_report tool
 tools_path = str(Path(__file__).parent.parent / "tools")
@@ -28,6 +30,7 @@ from object_store import (
     ObjectAuth,
     PublishedObject,
     StoreConfig,
+    UploadRequest,
     aws_clients,
     internal_url,
     key_join,
@@ -35,6 +38,7 @@ from object_store import (
     parse_s3,
     resolve_object_auth,
     upload_file,
+    upload_files,
 )
 from plugin_config import PlatformConfig, PluginConfig, load_plugin_config
 from report_downloads import (
@@ -43,7 +47,7 @@ from report_downloads import (
     collect_full_scope_job_summaries_for_xml,
     collect_full_scope_xml,
 )
-from report_logging import configure_logging, logger
+from report_logging import configure_logging, logger, trace, traced
 from report_paths import build_report_location
 from xml_inputs import XmlUpload, collect_job_xml_uploads
 
@@ -87,6 +91,7 @@ def aggregate_discovery_counts(
     return {"variants": len(variants), "jobs": len(jobs), "files": len(downloaded_xml)}
 
 
+@traced("summary.metadata")
 def add_summary_metadata(
     summary_path: Path,
     *,
@@ -159,9 +164,9 @@ def build_job_xml_source_links(
     )
     links: dict[Path, XmlSourceLink] = {}
     for xml in xml_uploads:
-        key = key_join(location.xml_prefix, xml.object_relative_path)
+        key = key_join(location.xml_prefix, "junit.zip")
         links[xml.local_path.resolve()] = XmlSourceLink(
-            key=key, url=internal_url(store_context.store_cfg, key)
+            key=key, url=archive_member_url(store_context.store_cfg, key, xml.object_relative_path)
         )
     return links
 
@@ -172,7 +177,13 @@ def build_aggregate_xml_source_links(
     return {
         item.local_path.resolve(): XmlSourceLink(
             key=item.object.key,
-            url=internal_url(store_context.store_cfg, item.object.key),
+            url=(
+                archive_member_url(
+                    store_context.store_cfg, item.object.key, item.object.archive_member
+                )
+                if item.object.archive_member is not None
+                else internal_url(store_context.store_cfg, item.object.key)
+            ),
         )
         for item in downloaded_xml
     }
@@ -186,6 +197,7 @@ def build_zero_xml_annotation_body(title: str) -> str:
     )
 
 
+@traced("report.generate")
 def run_report_generation(
     config: PluginConfig,
     output_dir: Path,
@@ -194,6 +206,7 @@ def run_report_generation(
     artifacts: list[ArtifactLink] | None = None,
     artifact_metadata: ArtifactMetadata | None = None,
     xml_source_links: dict[Path, XmlSourceLink] | None = None,
+    junit_archive_errors: list[dict[str, str]] | None = None,
 ) -> GenerationResult:
     """
     Runs the HTML report generator and returns the paths to the generated report files.
@@ -216,6 +229,7 @@ def run_report_generation(
         artifacts=artifacts,
         artifact_metadata=artifact_metadata,
         xml_source_links={path: link.url for path, link in (xml_source_links or {}).items()},
+        junit_archive_errors=junit_archive_errors,
         only_failures=config.only_failures,
         fail_on_test_failures=False,
         log_level=config.log_level,
@@ -227,6 +241,7 @@ def run_report_generation(
     )
 
 
+@traced("store.resolve")
 def resolve_object_store_context() -> ObjectStoreContext:
     _s3, ssm = aws_clients()
     store_cfg = load_store_config(ssm)
@@ -241,6 +256,22 @@ def guessed_content_type(path: Path) -> str:
     return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 
 
+def archive_member_url(cfg: StoreConfig, key: str, member: str) -> str | None:
+    url = internal_url(cfg, key)
+    return f"{url}#zip-member={quote(member, safe='')}" if url else None
+
+
+def create_zip(files: list[tuple[Path, str]], output: Path) -> None:
+    with trace("archive.create", archive=output.name, files=len(files)):
+        with ZipFile(output, "w", compression=ZIP_DEFLATED, compresslevel=1) as archive:
+            for path, name in files:
+                # Already-compressed logs do not benefit from another compression pass.
+                compression = ZIP_STORED if path.suffix in {".gz", ".zip", ".zst"} else ZIP_DEFLATED
+                archive.write(path, name, compress_type=compression)
+        log(f"Created ZIP archive={output.name} files={len(files)} bytes={output.stat().st_size}")
+
+
+@traced("artifacts.upload")
 def upload_extra_artifacts(
     config: PluginConfig,
     artifact_files: list[ArtifactFile],
@@ -256,24 +287,59 @@ def upload_extra_artifacts(
         variant=config.variant,
     )
 
-    grouped: dict[str, dict[str, Any]] = {}
-    for artifact_file in artifact_files:
-        artifact = artifact_file.config
-        slug = slugify_artifact_name(artifact.name)
-        key = key_join(location.artifact_prefix, slug, artifact_file.relative_path)
-        log(
-            f"Uploading additional artifact {artifact.name} {artifact_file.relative_path} "
-            f"to s3://{store_context.bucket}/{key}"
-        )
-        published = upload_file(
-            store_context.store_cfg,
-            store_context.auth,
-            store_context.bucket,
-            key,
-            artifact_file.local_path,
-            content_type=guessed_content_type(artifact_file.local_path),
+    requests = [
+        UploadRequest(
+            key=key_join(
+                location.artifact_prefix,
+                slugify_artifact_name(item.config.name),
+                item.relative_path,
+            ),
+            local_path=item.local_path,
+            content_type=guessed_content_type(item.local_path),
             content_disposition="attachment",
         )
+        for item in artifact_files
+    ]
+    if artifact_files:
+        with tempfile.TemporaryDirectory(prefix="test-report-logs-") as tmp_dir:
+            archive_path = Path(tmp_dir) / "logs.zip"
+            create_zip(
+                [
+                    (
+                        item.local_path,
+                        key_join(slugify_artifact_name(item.config.name), item.relative_path),
+                    )
+                    for item in artifact_files
+                ],
+                archive_path,
+            )
+            upload_files(
+                store_context.store_cfg,
+                store_context.auth,
+                store_context.bucket,
+                [
+                    UploadRequest(
+                        key_join(location.artifact_prefix, "logs.zip"),
+                        archive_path,
+                        "application/zip",
+                        "attachment",
+                    )
+                ],
+                parallel=config.upload_parallel,
+            )
+    grouped: dict[str, dict[str, Any]] = {}
+    for artifact_file, request in zip(artifact_files, requests):
+        archive_key = key_join(location.artifact_prefix, "logs.zip")
+        member = key_join(
+            slugify_artifact_name(artifact_file.config.name), artifact_file.relative_path
+        )
+        published = PublishedObject(
+            bucket=store_context.bucket,
+            key=archive_key,
+            url=archive_member_url(store_context.store_cfg, archive_key, member),
+            size_bytes=request.local_path.stat().st_size,
+        )
+        artifact = artifact_file.config
         entry = grouped.setdefault(
             artifact.name,
             {
@@ -286,6 +352,7 @@ def upload_extra_artifacts(
         file_info: dict[str, Any] = {
             "relative_path": artifact_file.relative_path,
             "key": published.key,
+            "archive_member": member,
             "size_bytes": published.size_bytes,
         }
         if published.url:
@@ -294,6 +361,7 @@ def upload_extra_artifacts(
     return list(grouped.values())
 
 
+@traced("report.upload")
 def upload_report_artifacts(
     config: PluginConfig,
     generation: GenerationResult,
@@ -319,23 +387,30 @@ def upload_report_artifacts(
         variant=config.variant,
     )
 
-    results = {}
-
-    # HTML
-    log(f"Uploading HTML report to s3://{bucket}/{location.html_key}")
-    results["html"] = upload_file(
-        store_cfg,
-        auth,
-        bucket,
-        location.html_key,
-        generation.html_path,
-        content_type="text/html; charset=utf-8",
-        content_disposition="inline",
-    )
-
-    # Summary JSON
+    requests = [
+        UploadRequest(
+            key=location.html_key,
+            local_path=generation.html_path,
+            content_type="text/html; charset=utf-8",
+            content_disposition="inline",
+        )
+    ]
+    job_xml = xml_uploads if config.scope == "job" else []
+    if job_xml:
+        archive_path = generation.html_path.parent / "junit.zip"
+        create_zip([(xml.local_path, xml.object_relative_path) for xml in job_xml], archive_path)
+        requests.append(
+            UploadRequest(
+                key=key_join(location.xml_prefix, "junit.zip"),
+                local_path=archive_path,
+                content_type="application/zip",
+                content_disposition="attachment",
+            )
+        )
+    published = upload_files(store_cfg, auth, bucket, requests, parallel=config.upload_parallel)
+    # Publish the discovery manifest only after all HTML/XML uploads succeed.
     log(f"Uploading summary JSON to s3://{bucket}/{location.summary_key}")
-    results["summary"] = upload_file(
+    summary = upload_file(
         store_cfg,
         auth,
         bucket,
@@ -344,21 +419,9 @@ def upload_report_artifacts(
         content_type="application/json",
         content_disposition="inline",
     )
-
-    # XMLs
-    if config.scope == "job":
-        for xml in xml_uploads:
-            key = key_join(location.xml_prefix, xml.object_relative_path)
-            log(f"Uploading JUnit XML {xml.object_relative_path} to s3://{bucket}/{key}")
-            results[f"xml:{xml.object_relative_path}"] = upload_file(
-                store_cfg,
-                auth,
-                bucket,
-                key,
-                xml.local_path,
-                content_type="application/xml",
-                content_disposition="attachment",
-            )
+    results = {"html": published[0], "summary": summary}
+    if job_xml:
+        results["xml_archive"] = published[1]
 
     return results
 
@@ -368,7 +431,10 @@ def main() -> int:
         config = load_plugin_config()
         configure_logging(config.log_level)
 
-        with tempfile.TemporaryDirectory(prefix="test-report-") as tmp_dir_str:
+        with (
+            trace("plugin.total", scope=config.scope),
+            tempfile.TemporaryDirectory(prefix="test-report-") as tmp_dir_str,
+        ):
             staging_root = Path(tmp_dir_str)
             full_scope_xml_stage_root = staging_root / "downloaded-xml"
 
@@ -379,6 +445,7 @@ def main() -> int:
             source_artifacts_by_job_id: dict[str, list[ArtifactLink]] = {}
             report_artifacts: list[ArtifactLink] = []
             xml_source_links: dict[Path, XmlSourceLink] = {}
+            junit_archive_errors: list[dict[str, str]] = []
             if config.scope == "aggregate":
                 store_context = resolve_object_store_context()
                 log("Discovering aggregate JUnit XML object keys from object storage")
@@ -394,9 +461,10 @@ def main() -> int:
                     download_parallel=config.aggregate_download_parallel,
                     download_concurrency=config.aggregate_download_concurrency,
                     log_fn=log,
+                    archive_errors=junit_archive_errors,
                 )
 
-                if not downloaded_xml:
+                if not downloaded_xml and not junit_archive_errors:
                     logger.error("No JUnit XML was found for this aggregate test report.")
                     if config.annotate:
                         create_buildkite_annotation(
@@ -416,7 +484,10 @@ def main() -> int:
                     f"{aggregate_counts['jobs']} jobs, "
                     f"{aggregate_counts['files']} XML files."
                 )
-                variant_names = sorted({item.variant for item in downloaded_xml})
+                variant_names = sorted(
+                    {item.variant for item in downloaded_xml}
+                    | {item["platform"] for item in junit_archive_errors}
+                )
                 config = replace(
                     config,
                     platforms=[
@@ -519,6 +590,7 @@ def main() -> int:
                 artifacts=report_artifacts if config.scope == "job" else [],
                 artifact_metadata=artifact_metadata if config.scope == "job" else None,
                 xml_source_links=xml_source_links,
+                junit_archive_errors=junit_archive_errors,
             )
             if config.scope == "aggregate":
                 add_summary_metadata(
@@ -551,7 +623,12 @@ def main() -> int:
                     style = get_job_annotation_style(summary)
                 else:
                     style = get_annotation_style(summary)
-                if not html_url and style != "warning" and not summary.get("malformed_junit_xml"):
+                if (
+                    not html_url
+                    and style != "warning"
+                    and not summary.get("malformed_junit_xml")
+                    and not summary.get("junit_archive_errors")
+                ):
                     warn(
                         "HTML public URL unavailable (ARTIFACTS_DOMAIN not set); skipping annotation"
                     )
@@ -574,6 +651,9 @@ def main() -> int:
                 status_counts.get("ERRORED", 0)
             )
             malformed_junit_xml = summary.get("malformed_junit_xml", [])
+            if summary.get("junit_archive_errors"):
+                logger.error("Report contains rejected JUnit archives. Exiting 1.")
+                return 1
             if malformed_junit_xml:
                 logger.error(
                     f"Report found {len(malformed_junit_xml)} malformed JUnit XML file(s). Exiting 1."

@@ -7,10 +7,13 @@ import json
 from pathlib import Path
 from typing import Any
 
+from report_logging import traced
+
 PLACEHOLDER = "<!-- TEST_REPORT_DATA -->"
 DEFAULT_TEMPLATE = Path(__file__).resolve().parent / "templates" / "report-template.html"
 
 
+@traced("html.json")
 def dumps_embedded_json(data: Any) -> str:
     """Serialize JSON for safe embedding in <script type=application/json>."""
     text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
@@ -18,6 +21,7 @@ def dumps_embedded_json(data: Any) -> str:
     return text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
+@traced("html.render")
 def render_html(data: Any, template_path: Path | str = DEFAULT_TEMPLATE) -> str:
     template = Path(template_path).read_text(encoding="utf-8")
     placeholder_count = template.count(PLACEHOLDER)
@@ -31,6 +35,7 @@ def render_html(data: Any, template_path: Path | str = DEFAULT_TEMPLATE) -> str:
     return template.replace(PLACEHOLDER, script)
 
 
+@traced("html.write")
 def write_html_report(
     data: Any,
     output: Path | str,

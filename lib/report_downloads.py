@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import threading
 import time
+import zlib
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
-from pathlib import Path
+from dataclasses import dataclass, replace
+from pathlib import Path, PurePosixPath
 from typing import Any
+from zipfile import BadZipFile, ZipFile
 
 from boto3.s3.transfer import TransferConfig
 from object_store import (
@@ -15,9 +18,19 @@ from object_store import (
     StoreConfig,
     create_s3_client,
     download_file,
+    internal_url,
     key_join,
     list_objects,
 )
+from report_logging import logger, traced
+
+# Stream member bodies so parallel jobs never allocate whole decompressed XMLs.
+# Legitimate verbose test output must not be rejected by size or member-count caps.
+JUNIT_COPY_CHUNK_BYTES = 64 * 1024
+
+
+class InvalidJUnitArchive(ValueError):
+    """An invalid archive that must not hide other jobs' results."""
 
 
 @dataclass(frozen=True)
@@ -27,6 +40,7 @@ class JobXmlObject:
     key: str
     relative_path: str
     size_bytes: int
+    archive_member: str | None = None
 
     @property
     def object_relative_path(self) -> str:
@@ -95,7 +109,7 @@ def build_aggregate_xml_discovery_prefix(
 
 
 def _xml_metadata_from_key(*, prefix: str, key: str, size_bytes: int) -> JobXmlObject | None:
-    if not key.endswith(".xml"):
+    if not (key.endswith((".xml", "/xml/junit.zip"))):
         return None
     relative_to_variants = key[len(prefix) :].lstrip("/") if key.startswith(prefix) else key
     parts = relative_to_variants.split("/", 4)
@@ -159,7 +173,14 @@ def find_job_xml_objects(
         )
         if metadata is not None:
             found.append(metadata)
-    return found
+    archived_jobs = {
+        (obj.variant, obj.job_id) for obj in found if obj.key.endswith("/xml/junit.zip")
+    }
+    return [
+        obj
+        for obj in found
+        if obj.key.endswith("/xml/junit.zip") or (obj.variant, obj.job_id) not in archived_jobs
+    ]
 
 
 def find_job_summary_objects(
@@ -192,6 +213,81 @@ def find_job_summary_objects(
     return found
 
 
+def extract_junit_archive(
+    obj: JobXmlObject, local_path: Path, job_dir: Path
+) -> list[DownloadedJobXml]:
+    """Validate then stream into disposable staging; publish only a complete job."""
+    try:
+        with ZipFile(local_path) as archive:
+            members = archive.infolist()
+            selected = []
+            seen = set()
+            for member in members:
+                path = PurePosixPath(member.filename)
+                if (
+                    path.is_absolute()
+                    or ".." in path.parts
+                    or "\\" in member.orig_filename
+                    or ":" in member.filename
+                    or (member.external_attr >> 16) & 0o170000 == 0o120000
+                ):
+                    raise InvalidJUnitArchive(f"Unsafe JUnit archive member: {member.filename!r}")
+                if member.is_dir() or not member.filename.endswith(".xml"):
+                    continue
+                relative_path = path.as_posix()
+                if relative_path in seen:
+                    raise InvalidJUnitArchive(f"Duplicate JUnit archive member: {relative_path!r}")
+                seen.add(relative_path)
+                selected.append((member, relative_path))
+            for _, relative_path in selected:
+                if any(
+                    parent.as_posix() in seen for parent in PurePosixPath(relative_path).parents
+                ):
+                    raise InvalidJUnitArchive("Conflicting JUnit archive member paths")
+            if not selected:
+                raise InvalidJUnitArchive("JUnit archive contains no XML members")
+
+            # A late CRC/decompression failure must not leave discoverable partial XML.
+            with tempfile.TemporaryDirectory(prefix=".junit-extract-", dir=job_dir.parent) as tmp:
+                staged = Path(tmp)
+                for member, relative_path in selected:
+                    target = staged / relative_path
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    size = 0
+                    with archive.open(member) as source, target.open("wb") as output:
+                        while chunk := source.read(JUNIT_COPY_CHUNK_BYTES):
+                            size += len(chunk)
+                            if size > member.file_size:
+                                raise InvalidJUnitArchive(
+                                    "JUnit archive member size does not match metadata"
+                                )
+                            output.write(chunk)
+                    if size != member.file_size:
+                        raise InvalidJUnitArchive(
+                            "JUnit archive member size does not match metadata"
+                        )
+                extracted = []
+                for member, relative_path in selected:
+                    target = job_dir / relative_path
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    (staged / relative_path).replace(target)
+                    extracted.append(
+                        DownloadedJobXml(
+                            object=replace(
+                                obj,
+                                relative_path=relative_path,
+                                size_bytes=member.file_size,
+                                archive_member=member.filename,
+                            ),
+                            local_path=target,
+                        )
+                    )
+                return extracted
+    except (BadZipFile, EOFError, RuntimeError, UnicodeDecodeError, zlib.error) as exc:
+        raise InvalidJUnitArchive(str(exc)) from exc
+
+
+@traced("aggregate.xml")
 def collect_full_scope_xml(
     *,
     cfg: StoreConfig,
@@ -205,6 +301,7 @@ def collect_full_scope_xml(
     download_parallel: int = 32,
     download_concurrency: int = 4,
     log_fn: Callable[[str], None] | None = None,
+    archive_errors: list[dict[str, str]] | None = None,
 ) -> list[DownloadedJobXml]:
     """Download discovered job-scope XML into a full-scope staging directory."""
 
@@ -246,8 +343,7 @@ def collect_full_scope_xml(
             thread_state.client = client
         return client
 
-    def _download_one(obj: JobXmlObject) -> DownloadedJobXml:
-        local_path = Path(output_dir) / obj.variant / obj.job_id / obj.relative_path
+    def _download_to_path(obj: JobXmlObject, local_path: Path) -> None:
         download_file(
             cfg,
             auth,
@@ -258,16 +354,43 @@ def collect_full_scope_xml(
             client=_thread_client(),
             transfer_config=transfer_config,
         )
-        return DownloadedJobXml(object=obj, local_path=local_path)
 
-    downloaded: list[DownloadedJobXml | None] = [None] * len(objects)
+    def _download_one(obj: JobXmlObject) -> list[DownloadedJobXml]:
+        job_dir = Path(output_dir) / obj.variant / obj.job_id
+        if not obj.key.endswith("/xml/junit.zip"):
+            local_path = job_dir / obj.relative_path
+            _download_to_path(obj, local_path)
+            return [DownloadedJobXml(object=obj, local_path=local_path)]
+        job_dir.mkdir(parents=True, exist_ok=True)
+        # Keep transport staging outside the member namespace, including on Windows.
+        with tempfile.TemporaryDirectory(prefix=".junit-download-", dir=job_dir.parent) as tmp:
+            local_path = Path(tmp) / "junit.zip"
+            _download_to_path(obj, local_path)
+            return extract_junit_archive(obj, local_path, job_dir)
+
+    downloaded: list[list[DownloadedJobXml] | None] = [None] * len(objects)
     download_started = time.monotonic()
     completed = 0
+    errors_by_index = {}
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(_download_one, obj): idx for idx, obj in enumerate(objects)}
         for future in as_completed(futures):
             idx = futures[future]
-            downloaded[idx] = future.result()
+            try:
+                downloaded[idx] = future.result()
+            except InvalidJUnitArchive as exc:
+                obj = objects[idx]
+                error = {
+                    "file": obj.key,
+                    "key": obj.key,
+                    "platform": obj.variant,
+                    "job_id": obj.job_id,
+                    "error": str(exc),
+                }
+                if url := internal_url(cfg, obj.key):
+                    error["url"] = url
+                errors_by_index[idx] = error
+                logger.error("Rejected JUnit archive key=%s job=%s: %s", obj.key, obj.job_id, exc)
             completed += 1
             if log_fn and completed < len(objects) and completed % 100 == 0:
                 elapsed = time.monotonic() - download_started
@@ -284,9 +407,12 @@ def collect_full_scope_xml(
             f"{len(objects)} files ({_fmt_size(total_bytes)}) in {download_elapsed:.1f}s "
             f"({_fmt_size(int(throughput))}/s)."
         )
-    return [item for item in downloaded if item is not None]
+    if archive_errors is not None:
+        archive_errors.extend(errors_by_index[idx] for idx in sorted(errors_by_index))
+    return [item for batch in downloaded if batch is not None for item in batch]
 
 
+@traced("aggregate.summaries.fallback")
 def collect_full_scope_job_summaries(
     *,
     cfg: StoreConfig,
@@ -331,6 +457,7 @@ def _summary_key_from_xml_key(key: str) -> str | None:
     return key.split(marker, 1)[0] + "/summary.json"
 
 
+@traced("aggregate.summaries.direct")
 def collect_full_scope_job_summaries_for_xml(
     *,
     cfg: StoreConfig,
@@ -358,7 +485,12 @@ def collect_full_scope_job_summaries_for_xml(
         local_path = Path(output_dir) / obj.variant / obj.job_id / "summary.json"
         try:
             download_file(cfg, auth, bucket, obj.key, local_path)
-        except Exception:  # noqa: BLE001, S112 - optional summary sidecar
+        except Exception as exc:  # noqa: BLE001 - optional summary sidecar
+            logger.debug(
+                "Optional summary download skipped key=%s error_type=%s",
+                obj.key,
+                type(exc).__name__,
+            )
             continue
         try:
             summary = json.loads(local_path.read_text(encoding="utf-8"))
