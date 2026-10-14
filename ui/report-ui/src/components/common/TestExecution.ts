@@ -100,7 +100,11 @@ export default class TestExecution {
     this.statusCounts = new Map<string, number>();
     TestExecution.STATUSES.forEach((s) => this.statusCounts.set(s, 0));
 
-    let maxStatusIndex = 0;
+    // Input/archive errors have no testcase leaf; retain their report-level status.
+    let maxStatusIndex = Math.max(
+      0,
+      TestExecution.STATUSES.indexOf(this.summary?.rootStatus ?? ""),
+    );
     let firstFailedOrErroredNode: TestNodeData | undefined;
     for (const node of this.testNodes.values()) {
       const statusIndex = TestExecution.STATUSES.indexOf(node.status);

@@ -206,6 +206,7 @@ def run_report_generation(
     artifacts: list[ArtifactLink] | None = None,
     artifact_metadata: ArtifactMetadata | None = None,
     xml_source_links: dict[Path, XmlSourceLink] | None = None,
+    junit_archive_errors: list[dict[str, str]] | None = None,
 ) -> GenerationResult:
     """
     Runs the HTML report generator and returns the paths to the generated report files.
@@ -228,6 +229,7 @@ def run_report_generation(
         artifacts=artifacts,
         artifact_metadata=artifact_metadata,
         xml_source_links={path: link.url for path, link in (xml_source_links or {}).items()},
+        junit_archive_errors=junit_archive_errors,
         only_failures=config.only_failures,
         fail_on_test_failures=False,
         log_level=config.log_level,
@@ -443,6 +445,7 @@ def main() -> int:
             source_artifacts_by_job_id: dict[str, list[ArtifactLink]] = {}
             report_artifacts: list[ArtifactLink] = []
             xml_source_links: dict[Path, XmlSourceLink] = {}
+            junit_archive_errors: list[dict[str, str]] = []
             if config.scope == "aggregate":
                 store_context = resolve_object_store_context()
                 log("Discovering aggregate JUnit XML object keys from object storage")
@@ -458,9 +461,10 @@ def main() -> int:
                     download_parallel=config.aggregate_download_parallel,
                     download_concurrency=config.aggregate_download_concurrency,
                     log_fn=log,
+                    archive_errors=junit_archive_errors,
                 )
 
-                if not downloaded_xml:
+                if not downloaded_xml and not junit_archive_errors:
                     logger.error("No JUnit XML was found for this aggregate test report.")
                     if config.annotate:
                         create_buildkite_annotation(
@@ -480,7 +484,10 @@ def main() -> int:
                     f"{aggregate_counts['jobs']} jobs, "
                     f"{aggregate_counts['files']} XML files."
                 )
-                variant_names = sorted({item.variant for item in downloaded_xml})
+                variant_names = sorted(
+                    {item.variant for item in downloaded_xml}
+                    | {item["platform"] for item in junit_archive_errors}
+                )
                 config = replace(
                     config,
                     platforms=[
@@ -583,6 +590,7 @@ def main() -> int:
                 artifacts=report_artifacts if config.scope == "job" else [],
                 artifact_metadata=artifact_metadata if config.scope == "job" else None,
                 xml_source_links=xml_source_links,
+                junit_archive_errors=junit_archive_errors,
             )
             if config.scope == "aggregate":
                 add_summary_metadata(
@@ -615,7 +623,12 @@ def main() -> int:
                     style = get_job_annotation_style(summary)
                 else:
                     style = get_annotation_style(summary)
-                if not html_url and style != "warning" and not summary.get("malformed_junit_xml"):
+                if (
+                    not html_url
+                    and style != "warning"
+                    and not summary.get("malformed_junit_xml")
+                    and not summary.get("junit_archive_errors")
+                ):
                     warn(
                         "HTML public URL unavailable (ARTIFACTS_DOMAIN not set); skipping annotation"
                     )
@@ -638,6 +651,9 @@ def main() -> int:
                 status_counts.get("ERRORED", 0)
             )
             malformed_junit_xml = summary.get("malformed_junit_xml", [])
+            if summary.get("junit_archive_errors"):
+                logger.error("Report contains rejected JUnit archives. Exiting 1.")
+                return 1
             if malformed_junit_xml:
                 logger.error(
                     f"Report found {len(malformed_junit_xml)} malformed JUnit XML file(s). Exiting 1."

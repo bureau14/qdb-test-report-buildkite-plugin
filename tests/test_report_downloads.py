@@ -75,8 +75,11 @@ def test_collect_archive_preserves_member_identity_and_rejects_unsafe_paths(
         "output_dir": tmp_path,
     }
     if member != "nested/results.xml":
-        with pytest.raises(ValueError, match="Unsafe"):
-            collect_full_scope_xml(**kwargs)
+        errors = []
+        assert collect_full_scope_xml(**kwargs, archive_errors=errors) == []
+        assert len(errors) == 1
+        assert "Unsafe" in errors[0]["error"]
+        assert list(tmp_path.rglob("*.xml")) == []
         return
     result = collect_full_scope_xml(**kwargs)
     assert len(result) == 1

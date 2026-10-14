@@ -1,3 +1,4 @@
+<!-- Modified from original source; this is an original local extension. -->
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import { downloadMember } from "./archive-download.ts";
@@ -20,9 +21,10 @@ async function download() {
   error.value = "";
   try {
     await downloadMember(props.reference);
-  } catch {
-    error.value =
-      "Could not download this file. Retry, or download the ZIP below.";
+  } catch (reason) {
+    const message =
+      reason instanceof Error ? reason.message : "Could not download this file.";
+    error.value = `${message} Retry, or download the ZIP below.`;
   } finally {
     busy.value = false;
   }

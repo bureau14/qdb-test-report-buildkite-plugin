@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import JSZip from "jszip";
 import {
   archiveMember,
+  archiveDownloadLimits,
   extractMember,
   downloadMember,
 } from "../src/components/details/archive-download.ts";
@@ -17,6 +19,139 @@ async function fixture() {
   });
   return zip.generateAsync({ type: "arraybuffer" });
 }
+
+function useTinyLimits(t, values) {
+  const original = { ...archiveDownloadLimits };
+  Object.assign(archiveDownloadLimits, values);
+  t.after(() => Object.assign(archiveDownloadLimits, original));
+}
+
+async function zipWithFiles(files) {
+  const zip = new JSZip();
+  for (const [name, contents] of Object.entries(files)) {
+    zip.file(name, contents, { compression: "STORE", createFolders: false });
+  }
+  return zip.generateAsync({ type: "arraybuffer" });
+}
+
+test("vendored archive download sources retain attribution and ZIP fallback contracts", async () => {
+  const [logic, component] = await Promise.all([
+    readFile(
+      new URL("../src/components/details/archive-download.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../src/components/details/ArchiveDownload.vue", import.meta.url),
+      "utf8",
+    ),
+  ]);
+  assert.match(logic, /^\/\/ Modified from original source/m);
+  assert.match(component, /^<!-- Modified from original source/m);
+  assert.match(component, /catch \(reason\)/);
+  assert.match(component, /Download ZIP/);
+});
+
+test("rejects an archive whose Content-Length exceeds the configured byte limit", async (t) => {
+  useTinyLimits(t, { archiveBytes: 8 });
+  let cancelled = false;
+  const body = new ReadableStream({
+    cancel() {
+      cancelled = true;
+    },
+  });
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () => new Response(body, { headers: { "Content-Length": "9" } }),
+  );
+
+  await assert.rejects(
+    extractMember({
+      url: "https://example.com/header-too-large.zip",
+      member: "anything.xml",
+    }),
+    /archive.*8 B/i,
+  );
+  assert.equal(cancelled, true);
+});
+
+test("stops a streamed archive without Content-Length when it exceeds the byte limit", async (t) => {
+  useTinyLimits(t, { archiveBytes: 8 });
+  let cancelled = false;
+  const body = new ReadableStream({
+    pull(controller) {
+      controller.enqueue(new Uint8Array([1, 2, 3, 4, 5]));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  t.mock.method(globalThis, "fetch", async () => new Response(body));
+
+  await assert.rejects(
+    extractMember({
+      url: "https://example.com/stream-too-large.zip",
+      member: "anything.xml",
+    }),
+    /archive.*8 B/i,
+  );
+  assert.equal(cancelled, true);
+});
+
+test("rejects archives with too many members before extracting a member", async (t) => {
+  useTinyLimits(t, { memberCount: 2 });
+  const bytes = await zipWithFiles({ "a.xml": "a", "b.xml": "b", "c.xml": "c" });
+  t.mock.method(globalThis, "fetch", async () => new Response(bytes));
+
+  await assert.rejects(
+    extractMember({
+      url: "https://example.com/too-many-members.zip",
+      member: "a.xml",
+    }),
+    /more than 2 members/i,
+  );
+});
+
+test("stops member decompression when the selected member exceeds the byte limit", async (t) => {
+  useTinyLimits(t, { memberBytes: 8 });
+  const bytes = await zipWithFiles({ "large.xml": "0123456789" });
+  t.mock.method(globalThis, "fetch", async () => new Response(bytes));
+
+  await assert.rejects(
+    extractMember({
+      url: "https://example.com/member-too-large.zip",
+      member: "large.xml",
+    }),
+    /requested file.*8 B/i,
+  );
+});
+
+test("timed out archive downloads abort and can be retried", async (t) => {
+  useTinyLimits(t, { fetchTimeoutMs: 10 });
+  const bytes = await fixture();
+  let attempts = 0;
+  t.mock.method(globalThis, "fetch", async (_url, options) => {
+    if (++attempts === 1) {
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      });
+    }
+    return new Response(bytes);
+  });
+  const reference = {
+    url: "https://example.com/timed-out.zip",
+    member: "logs/server.tar.gz",
+  };
+
+  await assert.rejects(extractMember(reference), /timed out after 10 ms/i);
+  assert.deepEqual(
+    new Uint8Array(await extractMember(reference)),
+    new Uint8Array([0, 255, 17, 200]),
+  );
+  assert.equal(attempts, 2);
+});
 
 test("archive references preserve encoded paths and reject malformed or unsafe members", () => {
   assert.deepEqual(

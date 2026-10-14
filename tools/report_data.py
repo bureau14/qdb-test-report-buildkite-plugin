@@ -413,4 +413,12 @@ def report_to_report_ui_data(
                 f"link:{item['url']}\n{error}" if item.get("url") else error
             )
         execution_data["sections"].append(kvp_section("Malformed JUnit XML", malformed_content))
+    if report.junit_archive_errors:
+        archive_content: dict[str, str] = {}
+        for item in report.junit_archive_errors:
+            label = f"{item['file']} ({item['platform']}, job {item['job_id']})"
+            archive_content[label] = (
+                f"link:{item['url']}\n{item['error']}" if item.get("url") else item["error"]
+            )
+        execution_data["sections"].append(kvp_section("JUnit archive errors", archive_content))
     return [execution_data]

@@ -209,6 +209,8 @@ The job `summary.json` includes an `artifacts` array with ZIP object keys, publi
 
 Individual-file downloads fetch the whole ZIP on demand and extract only the selected member in the browser. The two most recently used ZIPs are cached; no archives are fetched during report startup. The HTML embeds JSZip, so no CDN or extraction service is required. Fetches use the user's browser credentials and require same-origin access or credentialed CORS when the artifact domain differs. If authentication, network access, or extraction fails, the report displays a retry message and keeps the direct ZIP link available.
 
+Browser extraction accepts at most 128 MiB of downloaded ZIP data, 10,000 parsed archive entries, and 64 MiB for the selected uncompressed file. Download size is enforced while reading the response, including when `Content-Length` is absent or incorrect. Fetching the archive, including its response body, has a 60-second deadline. Oversized or timed-out downloads show the reason and keep the direct ZIP link available; these limits do not prevent downloading the complete ZIP directly.
+
 Aggregate mode discovers XML and job summaries under the current build's variants prefix:
 
 ```text
@@ -218,6 +220,10 @@ prefix/project/refs/heads/main/reports/builds/build-1/variants/*/jobs/*/summary.
 ```
 
 Aggregate mode downloads each JUnit ZIP once and extracts its XML members into the variant/job staging directory. Legacy individual XML uploads remain supported. When both forms exist for a job, its ZIP takes precedence to avoid duplicate results.
+
+JUnit ZIP extraction is streamed in 64 KiB chunks and limited to 128 MiB compressed per archive, 10,000 archive entries, 64 MiB per XML member, 512 MiB of extracted XML per archive, and 2 GiB of extracted XML across the aggregate collection. These are fixed safety limits; log ZIP uploads are not subject to these JUnit limits. Concurrent archives reserve space against the aggregate budget, and rejected archives release their reservations.
+
+Corrupt, empty, unsafe, duplicate-member, or oversized JUnit ZIPs are rejected per job without discarding valid sibling jobs. Partial extraction is removed before report generation. The HTML report and `summary.json` retain the rejected archive's object key, variant, job ID, error, and public download URL when available in `junit_archive_errors`. The report status and annotation are errors, and the plugin exits with status `1` after publishing the usable report—even when all archives were rejected or no public HTML URL is configured. Object-store transport errors still fail the invocation rather than being classified as invalid archive content.
 
 The aggregate report is written under:
 

@@ -126,6 +126,7 @@ class Report:
     duplicates_seen: int = 0
     duplicates_replaced: int = 0
     malformed_junit_xml: list[dict[str, str]] = field(default_factory=list)
+    junit_archive_errors: list[dict[str, str]] = field(default_factory=list)
     artifacts: list[ArtifactLink] = field(default_factory=list)
 
     @property
@@ -187,6 +188,8 @@ class Report:
 
     @property
     def root_status(self) -> str:
+        if self.junit_archive_errors:
+            return "ERRORED"
         return aggregate_status(list(self.status_counts.elements()))
 
 

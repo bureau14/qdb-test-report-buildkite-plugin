@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import threading
 import time
+import zlib
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
 
 from boto3.s3.transfer import TransferConfig
 from object_store import (
@@ -16,10 +18,42 @@ from object_store import (
     StoreConfig,
     create_s3_client,
     download_file,
+    internal_url,
     key_join,
     list_objects,
 )
 from report_logging import logger, traced
+
+# Limits apply to ZIP-backed JUnit inputs, not downloadable job log archives.
+# Stream member bodies so parallel jobs never allocate whole decompressed XMLs.
+MAX_JUNIT_ARCHIVE_BYTES = 128 * 1024 * 1024
+MAX_JUNIT_ARCHIVE_MEMBERS = 10_000
+MAX_JUNIT_MEMBER_BYTES = 64 * 1024 * 1024
+MAX_JUNIT_EXTRACTED_BYTES = 512 * 1024 * 1024
+MAX_JUNIT_REPORT_BYTES = 2 * 1024 * 1024 * 1024
+JUNIT_COPY_CHUNK_BYTES = 64 * 1024
+
+
+class InvalidJUnitArchive(ValueError):
+    """An invalid or oversized archive that must not hide other jobs' results."""
+
+
+class ExtractionBudget:
+    """Reserve output bytes across concurrent jobs; failed jobs return their reservation."""
+
+    def __init__(self):
+        self.used = 0
+        self.lock = threading.Lock()
+
+    def reserve(self, size: int) -> None:
+        with self.lock:
+            if self.used + size > MAX_JUNIT_REPORT_BYTES:
+                raise InvalidJUnitArchive("JUnit report extracted-size limit exceeded")
+            self.used += size
+
+    def release(self, size: int) -> None:
+        with self.lock:
+            self.used -= size
 
 
 @dataclass(frozen=True)
@@ -202,6 +236,99 @@ def find_job_summary_objects(
     return found
 
 
+def extract_junit_archive(
+    obj: JobXmlObject, local_path: Path, job_dir: Path, budget: ExtractionBudget
+) -> list[DownloadedJobXml]:
+    """Validate then stream into disposable staging; publish only a complete job."""
+    if local_path.stat().st_size > MAX_JUNIT_ARCHIVE_BYTES:
+        raise InvalidJUnitArchive("JUnit archive compressed-size limit exceeded")
+    try:
+        with ZipFile(local_path) as archive:
+            members = archive.infolist()
+            if len(members) > MAX_JUNIT_ARCHIVE_MEMBERS:
+                raise InvalidJUnitArchive("JUnit archive member-count limit exceeded")
+            selected = []
+            seen = set()
+            total = 0
+            for member in members:
+                path = PurePosixPath(member.filename)
+                if (
+                    path.is_absolute()
+                    or ".." in path.parts
+                    or "\\" in member.orig_filename
+                    or ":" in member.filename
+                    or (member.external_attr >> 16) & 0o170000 == 0o120000
+                ):
+                    raise InvalidJUnitArchive(f"Unsafe JUnit archive member: {member.filename!r}")
+                if member.is_dir() or not member.filename.endswith(".xml"):
+                    continue
+                relative_path = path.as_posix()
+                if relative_path in seen:
+                    raise InvalidJUnitArchive(f"Duplicate JUnit archive member: {relative_path!r}")
+                seen.add(relative_path)
+                if member.file_size > MAX_JUNIT_MEMBER_BYTES:
+                    raise InvalidJUnitArchive("JUnit archive member-size limit exceeded")
+                total += member.file_size
+                if total > MAX_JUNIT_EXTRACTED_BYTES:
+                    raise InvalidJUnitArchive("JUnit archive extracted-size limit exceeded")
+                selected.append((member, relative_path))
+            for _, relative_path in selected:
+                if any(
+                    parent.as_posix() in seen for parent in PurePosixPath(relative_path).parents
+                ):
+                    raise InvalidJUnitArchive("Conflicting JUnit archive member paths")
+            if not selected:
+                raise InvalidJUnitArchive("JUnit archive contains no XML members")
+
+            budget.reserve(total)
+            complete = False
+            try:
+                # A late CRC/decompression failure must not leave discoverable partial XML.
+                with tempfile.TemporaryDirectory(
+                    prefix=".junit-extract-", dir=job_dir.parent
+                ) as tmp:
+                    staged = Path(tmp)
+                    for member, relative_path in selected:
+                        target = staged / relative_path
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        size = 0
+                        with archive.open(member) as source, target.open("wb") as output:
+                            while chunk := source.read(JUNIT_COPY_CHUNK_BYTES):
+                                size += len(chunk)
+                                if size > min(member.file_size, MAX_JUNIT_MEMBER_BYTES):
+                                    raise InvalidJUnitArchive(
+                                        "JUnit archive member-size limit exceeded"
+                                    )
+                                output.write(chunk)
+                        if size != member.file_size:
+                            raise InvalidJUnitArchive(
+                                "JUnit archive member size does not match metadata"
+                            )
+                    extracted = []
+                    for member, relative_path in selected:
+                        target = job_dir / relative_path
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        (staged / relative_path).replace(target)
+                        extracted.append(
+                            DownloadedJobXml(
+                                object=replace(
+                                    obj,
+                                    relative_path=relative_path,
+                                    size_bytes=member.file_size,
+                                    archive_member=member.filename,
+                                ),
+                                local_path=target,
+                            )
+                        )
+                    complete = True
+                    return extracted
+            finally:
+                if not complete:
+                    budget.release(total)
+    except (BadZipFile, EOFError, RuntimeError, UnicodeDecodeError, zlib.error) as exc:
+        raise InvalidJUnitArchive(str(exc)) from exc
+
+
 @traced("aggregate.xml")
 def collect_full_scope_xml(
     *,
@@ -216,6 +343,7 @@ def collect_full_scope_xml(
     download_parallel: int = 32,
     download_concurrency: int = 4,
     log_fn: Callable[[str], None] | None = None,
+    archive_errors: list[dict[str, str]] | None = None,
 ) -> list[DownloadedJobXml]:
     """Download discovered job-scope XML into a full-scope staging directory."""
 
@@ -243,6 +371,7 @@ def collect_full_scope_xml(
     workers = max(1, min(download_parallel, len(objects)))
     transfer_config = TransferConfig(max_concurrency=download_concurrency)
     thread_state = threading.local()
+    budget = ExtractionBudget()
 
     if log_fn:
         log_fn(
@@ -257,10 +386,7 @@ def collect_full_scope_xml(
             thread_state.client = client
         return client
 
-    def _download_one(obj: JobXmlObject) -> list[DownloadedJobXml]:
-        job_dir = Path(output_dir) / obj.variant / obj.job_id
-        is_archive = obj.key.endswith("/xml/junit.zip")
-        local_path = job_dir / (".junit.zip" if is_archive else obj.relative_path)
+    def _download_to_path(obj: JobXmlObject, local_path: Path) -> None:
         download_file(
             cfg,
             auth,
@@ -271,54 +397,45 @@ def collect_full_scope_xml(
             client=_thread_client(),
             transfer_config=transfer_config,
         )
-        if not is_archive:
+
+    def _download_one(obj: JobXmlObject) -> list[DownloadedJobXml]:
+        job_dir = Path(output_dir) / obj.variant / obj.job_id
+        if not obj.key.endswith("/xml/junit.zip"):
+            local_path = job_dir / obj.relative_path
+            _download_to_path(obj, local_path)
             return [DownloadedJobXml(object=obj, local_path=local_path)]
-        extracted = []
-        try:
-            with ZipFile(local_path) as archive:
-                seen = set()
-                for member in archive.infolist():
-                    path = PurePosixPath(member.filename)
-                    if (
-                        path.is_absolute()
-                        or ".." in path.parts
-                        or "\\" in member.orig_filename
-                        or ":" in member.filename
-                        or (member.external_attr >> 16) & 0o170000 == 0o120000
-                    ):
-                        raise ValueError(f"Unsafe JUnit archive member: {member.filename!r}")
-                    if member.is_dir() or not member.filename.endswith(".xml"):
-                        continue
-                    relative_path = path.as_posix()
-                    if relative_path in seen:
-                        raise ValueError(f"Duplicate JUnit archive member: {relative_path!r}")
-                    seen.add(relative_path)
-                    target = job_dir / relative_path
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_bytes(archive.read(member))
-                    extracted.append(
-                        DownloadedJobXml(
-                            object=replace(
-                                obj,
-                                relative_path=relative_path,
-                                size_bytes=member.file_size,
-                                archive_member=member.filename,
-                            ),
-                            local_path=target,
-                        )
-                    )
-        finally:
-            local_path.unlink(missing_ok=True)
-        return extracted
+        if obj.size_bytes > MAX_JUNIT_ARCHIVE_BYTES:
+            raise InvalidJUnitArchive("JUnit archive compressed-size limit exceeded")
+        job_dir.mkdir(parents=True, exist_ok=True)
+        # Keep transport staging outside the member namespace, including on Windows.
+        with tempfile.TemporaryDirectory(prefix=".junit-download-", dir=job_dir.parent) as tmp:
+            local_path = Path(tmp) / "junit.zip"
+            _download_to_path(obj, local_path)
+            return extract_junit_archive(obj, local_path, job_dir, budget)
 
     downloaded: list[list[DownloadedJobXml] | None] = [None] * len(objects)
     download_started = time.monotonic()
     completed = 0
+    errors_by_index = {}
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(_download_one, obj): idx for idx, obj in enumerate(objects)}
         for future in as_completed(futures):
             idx = futures[future]
-            downloaded[idx] = future.result()
+            try:
+                downloaded[idx] = future.result()
+            except InvalidJUnitArchive as exc:
+                obj = objects[idx]
+                error = {
+                    "file": obj.key,
+                    "key": obj.key,
+                    "platform": obj.variant,
+                    "job_id": obj.job_id,
+                    "error": str(exc),
+                }
+                if url := internal_url(cfg, obj.key):
+                    error["url"] = url
+                errors_by_index[idx] = error
+                logger.error("Rejected JUnit archive key=%s job=%s: %s", obj.key, obj.job_id, exc)
             completed += 1
             if log_fn and completed < len(objects) and completed % 100 == 0:
                 elapsed = time.monotonic() - download_started
@@ -335,6 +452,8 @@ def collect_full_scope_xml(
             f"{len(objects)} files ({_fmt_size(total_bytes)}) in {download_elapsed:.1f}s "
             f"({_fmt_size(int(throughput))}/s)."
         )
+    if archive_errors is not None:
+        archive_errors.extend(errors_by_index[idx] for idx in sorted(errors_by_index))
     return [item for batch in downloaded if batch is not None for item in batch]
 
 

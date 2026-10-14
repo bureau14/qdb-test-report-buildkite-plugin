@@ -81,6 +81,7 @@ def generate_html_report(
     artifacts: list[ArtifactLink] | None = None,
     artifact_metadata: list[dict[str, Any]] | None = None,
     xml_source_links: dict[Path, str | None] | None = None,
+    junit_archive_errors: list[dict[str, str]] | None = None,
     only_failures: bool = False,
     fail_on_test_failures: bool = False,
     log_level: str = "error",
@@ -98,6 +99,7 @@ def generate_html_report(
         xml_source_links=xml_source_links,
     )
     parsed = time.monotonic()
+    report.junit_archive_errors = list(junit_archive_errors or [])
     log(f"Built JUnit report model in {parsed - started:.1f}s")
     data = report_to_report_ui_data(
         report, execution_name=execution_name, only_failures=only_failures
@@ -148,6 +150,8 @@ def generate_html_report(
                     if execution.status in ("FAILED", "ERRORED")
                 ],
             }
+            if report.junit_archive_errors:
+                summary["junit_archive_errors"] = report.junit_archive_errors
             if artifact_metadata is not None:
                 summary["artifacts"] = artifact_metadata
             summary_json.parent.mkdir(parents=True, exist_ok=True)
@@ -161,6 +165,8 @@ def generate_html_report(
             f"status_counts={format_counts(report.status_counts)} root_status={report.root_status}",
         )
 
+    if report.junit_archive_errors:
+        return 1
     failed_or_errored = report.status_counts["FAILED"] + report.status_counts["ERRORED"]
     if fail_on_test_failures and failed_or_errored:
         logger.error(
