@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import glob
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from plugin_config import PlatformConfig
+from report_logging import logger
 
 
 @dataclass(frozen=True)
@@ -85,9 +85,8 @@ def collect_xml_uploads(platforms: list[PlatformConfig], scope: str) -> list[Xml
                 raise FileNotFoundError(
                     f"platform path does not exist: {path} (platform: {platform.name})"
                 )
-            print(
-                f"WARN  platform path does not exist: {path} (platform: {platform.name})",
-                file=sys.stderr,
+            logger.warning(
+                f"platform path does not exist: {path} (platform: {platform.name})",
             )
             continue
 
@@ -98,9 +97,8 @@ def collect_xml_uploads(platforms: list[PlatformConfig], scope: str) -> list[Xml
                 raise FileNotFoundError(
                     f"no JUnit XML files found for platform: {platform.name} at {path}"
                 )
-            print(
-                f"WARN  no JUnit XML files found for platform: {platform.name} at {path}",
-                file=sys.stderr,
+            logger.warning(
+                f"no JUnit XML files found for platform: {platform.name} at {path}",
             )
             continue
 

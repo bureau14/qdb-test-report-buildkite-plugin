@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import argparse
 import glob
+import logging
 import re
-import sys
 import xml.etree.ElementTree as ET
 from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+from report_logging import logger
 
 STATUS_ORDER = ["SUCCESSFUL", "SKIPPED", "FAILED", "ERRORED"]
 STATUS_SEVERITY = {"SUCCESSFUL": 0, "SKIPPED": 1, "FAILED": 2, "ERRORED": 3}
@@ -27,11 +29,11 @@ MAX_EMBEDDED_TEST_OUTPUT_BYTES = 256 * 1024
 
 
 def log_info(message: str) -> None:
-    print(f"\tINFO  {message}", file=sys.stderr)
+    logger.info(message)
 
 
 def log_warn(message: str) -> None:
-    print(f"\tWARN  {message}", file=sys.stderr)
+    logger.warning(message)
 
 
 def format_counts(counter: Counter[str]) -> str:
@@ -442,7 +444,9 @@ def parse_junit_file(
     try:
         root = ET.parse(path).getroot()
     except ET.ParseError as error:
-        log_warn(f"skipping malformed JUnit XML file file={path} platform={platform} error={error}")
+        logger.error(
+            f"skipping malformed JUnit XML file file={path} platform={platform} error={error}"
+        )
         if malformed_junit_xml is not None:
             malformed = {"file": str(path), "platform": platform, "error": str(error)}
             if source_xml_url:
@@ -493,18 +497,19 @@ def parse_junit_file(
                     report_kind="ctest" if is_ctest else "test",
                 )
             )
-    status_counts = Counter(execution.status for execution in executions)
-    suite_names = sorted({execution.suite_name for execution in executions})
-    log_info(
-        f"parsed file={path} platform={platform} suites={len(suite_names)} "
-        f"testcases={len(executions)} status_counts={format_counts(status_counts)}"
-    )
-    for execution in executions:
-        if execution.status in {"SKIPPED", "FAILED", "ERRORED"}:
-            log_info(
-                f"{execution.status} test={execution.logical_id} platform={execution.platform} "
-                f"suite={execution.suite_name} reason={execution.reason or '<none>'} file={execution.source_file}"
-            )
+    if logger.isEnabledFor(logging.DEBUG):
+        status_counts = Counter(execution.status for execution in executions)
+        suite_names = sorted({execution.suite_name for execution in executions})
+        logger.debug(
+            f"parsed file={path} platform={platform} suites={len(suite_names)} "
+            f"testcases={len(executions)} status_counts={format_counts(status_counts)}"
+        )
+        for execution in executions:
+            if execution.status in {"SKIPPED", "FAILED", "ERRORED"}:
+                logger.debug(
+                    f"{execution.status} test={execution.logical_id} platform={execution.platform} "
+                    f"suite={execution.suite_name} reason={execution.reason or '<none>'} file={execution.source_file}"
+                )
     return executions
 
 
@@ -611,13 +616,15 @@ def build_report(
             if suite is None:
                 suite = TestSuite(name=execution.suite_name)
                 suites[execution.suite_name] = suite
-                log_info(f"created testsuite suite={execution.suite_name}")
+                logger.debug("created testsuite suite=%s", execution.suite_name)
             test_file = suite.test_files.get(execution.test_file)
             if test_file is None:
                 test_file = TestFile(name=execution.test_file)
                 suite.test_files[execution.test_file] = test_file
-                log_info(
-                    f"created testfile suite={execution.suite_name} test_file={execution.test_file}"
+                logger.debug(
+                    "created testfile suite=%s test_file=%s",
+                    execution.suite_name,
+                    execution.test_file,
                 )
             logical = test_file.logical_tests.get(execution.logical_id)
             if logical is None:
@@ -637,16 +644,30 @@ def build_report(
                 chosen = worse_execution(existing, execution)
                 if chosen is execution:
                     duplicates_replaced += 1
-                    log_warn(
-                        f"duplicate replaced test={execution.logical_id} platform={platform} "
-                        f"suite={execution.suite_name} test_file={execution.test_file} old_status={existing.status} "
-                        f"new_status={execution.status} old_file={existing.source_file} new_file={execution.source_file}"
+                    logger.debug(
+                        "duplicate replaced test=%s platform=%s suite=%s test_file=%s "
+                        "old_status=%s new_status=%s old_file=%s new_file=%s",
+                        execution.logical_id,
+                        platform,
+                        execution.suite_name,
+                        execution.test_file,
+                        existing.status,
+                        execution.status,
+                        existing.source_file,
+                        execution.source_file,
                     )
                 else:
-                    log_warn(
-                        f"duplicate kept-existing test={execution.logical_id} platform={platform} "
-                        f"suite={execution.suite_name} test_file={execution.test_file} existing_status={existing.status} "
-                        f"duplicate_status={execution.status} existing_file={existing.source_file} duplicate_file={execution.source_file}"
+                    logger.debug(
+                        "duplicate kept-existing test=%s platform=%s suite=%s test_file=%s "
+                        "existing_status=%s duplicate_status=%s existing_file=%s duplicate_file=%s",
+                        execution.logical_id,
+                        platform,
+                        execution.suite_name,
+                        execution.test_file,
+                        existing.status,
+                        execution.status,
+                        existing.source_file,
+                        execution.source_file,
                     )
                 logical.executions[platform] = chosen
 
@@ -664,14 +685,15 @@ def build_report(
         malformed_junit_xml=malformed_junit_xml,
         artifacts=artifacts or [],
     )
-    log_info(
-        f"Summary: files={report.total_files} raw_testcases={report.raw_testcases} suites={len(report.suites)} "
-        f"logical_tests={report.logical_test_count} platform_executions={report.platform_execution_count} "
-        f"duplicates_seen={report.duplicates_seen} duplicates_replaced={report.duplicates_replaced} "
-        f"status_counts={format_counts(report.status_counts)} root_status={report.root_status}"
-    )
-    if report.root_status in {"FAILED", "ERRORED"}:
+    if logger.isEnabledFor(logging.INFO):
+        log_info(
+            f"Summary: files={report.total_files} raw_testcases={report.raw_testcases} suites={len(report.suites)} "
+            f"logical_tests={report.logical_test_count} platform_executions={report.platform_execution_count} "
+            f"duplicates_seen={report.duplicates_seen} duplicates_replaced={report.duplicates_replaced} "
+            f"status_counts={format_counts(report.status_counts)} root_status={report.root_status}"
+        )
+    if logger.isEnabledFor(logging.WARNING) and report.root_status in {"FAILED", "ERRORED"}:
         log_warn(
-            f"Report model completed with root_status={report.root_status}; see FAILED/ERRORED lines above for details"
+            f"Report model completed with root_status={report.root_status}; see the HTML report for details"
         )
     return report

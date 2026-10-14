@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import glob
 import re
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from plugin_config import ArtifactConfig
+from report_logging import logger
 
 
 @dataclass(frozen=True)
@@ -17,7 +17,7 @@ class ArtifactFile:
 
 
 def warn(message: str) -> None:
-    print(f"WARN  {message}", file=sys.stderr)
+    logger.warning(message)
 
 
 def slugify_artifact_name(name: str) -> str:

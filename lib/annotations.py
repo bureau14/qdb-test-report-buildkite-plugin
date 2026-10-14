@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from html import escape
+
+from report_logging import logger
 
 MAX_ANNOTATION_BYTES = 1024 * 1024
 MAX_FAILURE_REASON_CHARS = 240
@@ -250,4 +251,4 @@ def create_buildkite_annotation(
     try:
         subprocess.run(args, input=body.encode("utf-8"), check=True)
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-        print(f"WARNING: failed to create Buildkite annotation: {exc}", file=sys.stderr)
+        logger.warning(f"failed to create Buildkite annotation: {exc}")

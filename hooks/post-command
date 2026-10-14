@@ -12,7 +12,11 @@ if [[ -z "$(plugin_read_config TITLE)" ]]; then
   exit 0
 fi
 
-echo "~~~ :bar_chart: Generating test report"
+case "$(plugin_read_config LOG_LEVEL error)" in
+  debug|DEBUG|info|INFO)
+    echo "~~~ :bar_chart: Generating test report"
+    ;;
+esac
 
 set +e
 run_test_report_py

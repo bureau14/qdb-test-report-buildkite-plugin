@@ -163,6 +163,7 @@ plugins:
 | `only_failures` | boolean |  | Generate an HTML tree containing only failures/errors while keeping full summary counts. Default: `false`. |
 | `annotate` | boolean |  | Create Buildkite annotation when a report URL can be built from `ARTIFACTS_DOMAIN`. Default: `true`. |
 | `debug` | boolean |  | Enable bash debug tracing in plugin hooks. Default: `false`. |
+| `log_level` | string |  | Minimum message severity: `debug`, `info`, `warning`, `error`, or `fatal`. Default: `error` (quiet; errors and fatal messages only). |
 
 ### `job` object keys
 
@@ -180,7 +181,7 @@ plugins:
 | `download_parallel` | integer |  | Number of XML files to download in parallel after S3/R2 listing. Default: `32`. |
 | `download_concurrency` | integer |  | Per-file boto3 transfer concurrency for XML downloads. Default: `4`. |
 
-The aggregate step logs listing and download durations separately so slow object-store listing can be distinguished from many-small-file download time.
+Set `log_level: info` to show progress, listing/download durations, and model/UI/HTML generation timings. Set `log_level: debug` for per-file parsing, test details, and duplicate decisions. Warnings remain in report metadata where applicable even when console output is quiet. `debug: true` independently enables shell tracing and can produce output at any log level.
 
 ## Object-store layout
 
@@ -274,8 +275,9 @@ python3 tools/junit_html_report.py \
 | `--commit-url` | No | - | Git commit URL metadata. |
 | `--only-failures` | No | `false` | Filter report to only show `FAILED`/`ERRORED` tests in the tree while keeping full summary counts. |
 | `--fail-on-test-failures` | No | `false` | Exit code `64` if any test has status `FAILED` or `ERRORED`. |
+| `--log-level` | No | `error` | Minimum message severity: `debug`, `info`, `warning`, `error`, or `fatal`. Use `info` for progress and phase timings, or `debug` for per-file details. |
 
-The standalone converter writes progress and summary details to stderr. Empty XML files are skipped with warnings. Malformed XML files are recorded in `summary.json` so the Buildkite plugin can fail the build and annotate the invalid inputs. If no XML files are discovered across all configured inputs, it still writes an empty report and logs a warning.
+The standalone converter is quiet by default; errors are written to stderr. Empty XML files are skipped with warnings visible at `warning` or more verbose levels. Malformed XML files emit errors and are recorded in `summary.json` so the Buildkite plugin can fail the build and annotate the invalid inputs. If no XML files are discovered across all configured inputs, it still writes an empty report and logs a warning when enabled.
 
 ## Licensing and Attribution
 

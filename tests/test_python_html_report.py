@@ -622,6 +622,9 @@ def test_build_report_supports_glob_platform_paths(tmp_path, monkeypatch):
 
 
 def test_build_report_records_malformed_xml_files_and_skips_empty_files(tmp_path, capsys):
+    from report_logging import configure_logging
+
+    configure_logging("warning")
     from junit_report_model import build_report
 
     linux = tmp_path / "linux"
@@ -1161,8 +1164,7 @@ def test_cli_writes_self_contained_html_from_repeated_platform_arguments(tmp_pat
     assert "passes" in node_names
     assert "passes - linux" in node_names
     assert "passes - macos" in node_names
-    assert "INFO  Wrote HTML report" in result.stderr
-    assert "Final summary:" in result.stderr
+    assert result.stderr == ""
 
 
 def test_cli_writes_summary_json(tmp_path):

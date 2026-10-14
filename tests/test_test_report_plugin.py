@@ -316,7 +316,8 @@ def test_upload_extra_artifacts_returns_summary_metadata(monkeypatch, tmp_path):
     ]
 
 
-def test_main_job_logs_uploaded_html_url(monkeypatch, tmp_path, capsys):
+@pytest.mark.parametrize("log_level", ["error", "info"])
+def test_main_job_logs_uploaded_html_url(monkeypatch, tmp_path, capsys, log_level):
     xml_dir = tmp_path / "xml"
     xml_dir.mkdir()
     (xml_dir / "test.xml").write_text("<testsuites />", encoding="utf-8")
@@ -325,6 +326,7 @@ def test_main_job_logs_uploaded_html_url(monkeypatch, tmp_path, capsys):
         "os.environ",
         {
             "BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE": "Job Tests",
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_LOG_LEVEL": log_level,
             "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT": "linux",
             "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_JUNIT_INPUT_PATH": str(xml_dir),
             "BUILDKITE_PLUGIN_QDB_TEST_REPORT_ANNOTATE": "false",
@@ -363,7 +365,11 @@ def test_main_job_logs_uploaded_html_url(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr("test_report_plugin.upload_report_artifacts", fake_upload_report_artifacts)
 
     assert main() == 0
-    assert "HTML report: https://reports.example.com/job/index.html" in capsys.readouterr().err
+    stderr = capsys.readouterr().err
+    if log_level == "info":
+        assert "HTML report: https://reports.example.com/job/index.html" in stderr
+    else:
+        assert stderr == ""
 
 
 def test_main_job_annotation_context(monkeypatch, tmp_path):

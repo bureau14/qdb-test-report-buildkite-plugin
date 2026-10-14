@@ -43,6 +43,7 @@ from report_downloads import (
     collect_full_scope_job_summaries_for_xml,
     collect_full_scope_xml,
 )
+from report_logging import configure_logging, logger
 from report_paths import build_report_location
 from xml_inputs import XmlUpload, collect_job_xml_uploads
 
@@ -71,11 +72,11 @@ ArtifactMetadata = list[dict[str, Any]]
 
 
 def log(message: str) -> None:
-    print(f"INFO  {message}", file=sys.stderr)
+    logger.info(message)
 
 
 def warn(message: str) -> None:
-    print(f"WARN  {message}", file=sys.stderr)
+    logger.warning(message)
 
 
 def aggregate_discovery_counts(
@@ -217,6 +218,7 @@ def run_report_generation(
         xml_source_links={path: link.url for path, link in (xml_source_links or {}).items()},
         only_failures=config.only_failures,
         fail_on_test_failures=False,
+        log_level=config.log_level,
     )
 
     return GenerationResult(
@@ -364,6 +366,7 @@ def upload_report_artifacts(
 def main() -> int:
     try:
         config = load_plugin_config()
+        configure_logging(config.log_level)
 
         with tempfile.TemporaryDirectory(prefix="test-report-") as tmp_dir_str:
             staging_root = Path(tmp_dir_str)
@@ -394,7 +397,7 @@ def main() -> int:
                 )
 
                 if not downloaded_xml:
-                    log("No JUnit XML was found for this aggregate test report.")
+                    logger.error("No JUnit XML was found for this aggregate test report.")
                     if config.annotate:
                         create_buildkite_annotation(
                             build_zero_xml_annotation_body(config.title),
@@ -572,19 +575,19 @@ def main() -> int:
             )
             malformed_junit_xml = summary.get("malformed_junit_xml", [])
             if malformed_junit_xml:
-                log(
+                logger.error(
                     f"Report found {len(malformed_junit_xml)} malformed JUnit XML file(s). Exiting 1."
                 )
                 return 1
             if config.fail_on_test_failures and failed_or_errored:
-                log(
+                logger.error(
                     f"Report has {failed_or_errored} failed/errored test execution(s) and fail_on_test_failures=true. Exiting 64."
                 )
                 return 64
 
             return 0
     except Exception as exc:  # noqa: BLE001 - plugin CLI boundary
-        print(f"ERROR: {exc}", file=sys.stderr)
+        logger.fatal("Test report plugin failed: %s", exc)
         return 1
 
 

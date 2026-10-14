@@ -23,6 +23,11 @@ configuration:
     debug:
       type: boolean
       description: Enable bash debug tracing.
+    log_level:
+      type: string
+      enum: [debug, info, warning, error, fatal]
+      default: error
+      description: Minimum message severity; defaults to quiet output (error and fatal only). Use info for progress or debug for per-file details.
     job:
       type: object
       description: Per-job report and raw JUnit XML upload configuration.
