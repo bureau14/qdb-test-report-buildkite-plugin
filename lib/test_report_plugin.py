@@ -24,6 +24,7 @@ from annotations import (
     get_job_annotation_style,
 )
 from artifact_inputs import ArtifactFile, collect_artifact_files, slugify_artifact_name
+from execution_inputs import collect_execution_inputs
 from git_links import build_commit_url
 from junit_report_model import ArtifactLink
 from object_store import (
@@ -143,6 +144,7 @@ def artifact_links_from_metadata(metadata: ArtifactMetadata) -> list[ArtifactLin
                     key=str(file_info.get("key", "")),
                     url=file_info.get("url"),
                     size_bytes=int(file_info.get("size_bytes", 0)),
+                    execution_id=file_info.get("execution_id"),
                 )
             )
     return links
@@ -550,14 +552,48 @@ def main() -> int:
             else:
                 if config.junit_input_path is None or config.variant is None:
                     raise ValueError("scope=job requires variant and junit_input_path")
-                xml_uploads = collect_job_xml_uploads(config.junit_input_path, config.variant)
+                try:
+                    xml_uploads = collect_job_xml_uploads(config.junit_input_path, config.variant)
+                except FileNotFoundError:
+                    if config.manifest_input_path is None:
+                        raise
+                    xml_uploads = []
+                execution_inputs = None
+                if config.manifest_input_path is not None:
+                    execution_inputs = collect_execution_inputs(
+                        config.manifest_input_path, xml_uploads, staging_root / "executions"
+                    )
+                    xml_uploads = execution_inputs.xml_uploads
+                    if not xml_uploads:
+                        raise FileNotFoundError("No JUnit reports or execution manifests found")
+                    config = replace(
+                        config,
+                        platforms=[
+                            PlatformConfig(config.variant, xml.local_path) for xml in xml_uploads
+                        ],
+                    )
                 store_context = resolve_object_store_context()
                 xml_source_links = build_job_xml_source_links(config, xml_uploads, store_context)
                 artifact_files = collect_artifact_files(config.artifacts)
+                if execution_inputs is not None:
+                    if any(
+                        artifact.name == "Test execution artifacts" for artifact in config.artifacts
+                    ):
+                        raise ValueError(
+                            "Test execution artifacts is reserved for launcher manifests"
+                        )
+                    artifact_files.extend(execution_inputs.artifact_files)
                 if artifact_files:
                     artifact_metadata = upload_extra_artifacts(
                         config, artifact_files, store_context
                     )
+                if execution_inputs is not None:
+                    for artifact in artifact_metadata:
+                        if artifact["name"] == "Test execution artifacts":
+                            for file_info in artifact["files"]:
+                                file_info["execution_id"] = execution_inputs.execution_ids[
+                                    file_info["relative_path"]
+                                ]
                 uploaded_artifact_names = {item["name"] for item in artifact_metadata}
                 for artifact in config.artifacts:
                     if artifact.name not in uploaded_artifact_names:
