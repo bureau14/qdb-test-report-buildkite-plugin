@@ -1,5 +1,48 @@
+import pytest
 from junit_report_model import ArtifactLink, build_report
 from report_data import report_to_report_ui_data
+
+
+@pytest.mark.parametrize(
+    "suite", ["qdb_unit_tests", "qdb_integration_tests", "qdb_regression_tests"]
+)
+@pytest.mark.parametrize(
+    "output", ["", "<system-out>INFO: check !pid.empty() has passed</system-out>"]
+)
+def test_boost_process_id_metadata_without_numeric_output_is_not_a_test(tmp_path, suite, output):
+    (tmp_path / "boost.xml").write_text(
+        f'<testsuite name="{suite}"><testcase name="qdb_test_process_id">{output}</testcase>'
+        '<testcase name="works" /></testsuite>'
+    )
+    report = build_report("report", [("linux", tmp_path)])
+    assert report.logical_test_count == 1
+    assert report.test_status_counts == {"SUCCESSFUL": 1}
+
+
+def test_failed_process_id_helper_remains_visible(tmp_path):
+    (tmp_path / "boost.xml").write_text(
+        '<testsuite name="qdb_unit_tests"><testcase name="qdb_test_process_id">'
+        '<system-out>1234</system-out><failure message="PID unavailable" /></testcase></testsuite>'
+    )
+    report = build_report("report", [("linux", tmp_path)])
+    assert report.logical_test_count == 1
+    assert report.root_status == "FAILED"
+
+
+@pytest.mark.parametrize("pid", [None, "1234"])
+def test_unmatched_legacy_reports_do_not_receive_other_suites_logs(tmp_path, pid):
+    from junit_report_model import source_artifacts_for_junit
+
+    unrelated = ArtifactLink("Query logs", "logs/query.tar.gz", "job/logs.zip", None, 12)
+    own = ArtifactLink(
+        "QDB test logs", "logs/qdb_test_log_pid_1234_123.json", "job/logs.zip", None, 12
+    )
+    managed = ArtifactLink(
+        "Execution logs", "test-results/id/stdout.log", "job/logs.zip", None, 12, "id", "other"
+    )
+    assert source_artifacts_for_junit(pid, [unrelated, own, managed], "cleanup") == (
+        [own] if pid else []
+    )
 
 
 def test_ctest_links_only_its_execution_and_does_not_inflate_case_totals(tmp_path):

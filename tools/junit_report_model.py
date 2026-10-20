@@ -425,10 +425,6 @@ def qdb_process_id(root: ET.Element) -> str | None:
     return None
 
 
-def is_qdb_test_log(artifact: ArtifactLink) -> bool:
-    return QDB_TEST_LOG_NAME_RE.fullmatch(Path(artifact.relative_path).name) is not None
-
-
 def artifact_matches_junit_filename(artifact: ArtifactLink, junit_filename_stem: str) -> bool:
     artifact_name = Path(artifact.relative_path).name
     # A substring match leaks logs from similarly prefixed suites, such as a
@@ -451,7 +447,6 @@ def source_artifacts_for_junit(
     if execution_id is not None:
         return [artifact for artifact in artifacts if artifact.execution_id == execution_id]
     artifacts = [artifact for artifact in artifacts if artifact.execution_id is None]
-    non_qdb_logs = [artifact for artifact in artifacts if not is_qdb_test_log(artifact)]
     matching_pid_artifacts = [
         artifact
         for artifact in artifacts
@@ -471,7 +466,7 @@ def source_artifacts_for_junit(
                 for artifact in matching_pid_artifacts
                 if artifact not in matching_junit_artifacts
             ]
-    return non_qdb_logs + matching_pid_artifacts
+    return matching_pid_artifacts
 
 
 def iter_junit_suites(root: ET.Element) -> list[ET.Element]:
@@ -530,8 +525,16 @@ def parse_junit_file(
         for testcase in suite_testcases:
             if (
                 testcase.attrib.get("name") == QDB_PROCESS_ID_TESTCASE
-                and (output := testcase_system_out(testcase))
-                and output.splitlines()[0].strip().isdecimal()
+                and testcase_status(testcase) == "SUCCESSFUL"
+                and (
+                    # Boost can suppress the helper's output at the selected log level.
+                    # Its reserved name and suite still identify it as metadata.
+                    suite_name
+                    in {"qdb_unit_tests", "qdb_integration_tests", "qdb_regression_tests"}
+                    and not testcase.attrib.get("classname")
+                    or (output := testcase_system_out(testcase))
+                    and output.splitlines()[0].strip().isdecimal()
+                )
             ):
                 continue
             logical_id, classname, name = logical_test_identity(testcase, source_id)

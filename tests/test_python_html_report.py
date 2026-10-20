@@ -258,9 +258,9 @@ def test_report_data_interns_repeated_leaf_artifacts_at_execution_level(tmp_path
             "job-1": [
                 ArtifactLink(
                     name="Test logs",
-                    relative_path="test-logs-1.tar.gz",
-                    key="prefix/artifacts/test-logs/test-logs-1.tar.gz",
-                    url="https://reports.example.com/prefix/artifacts/test-logs/test-logs-1.tar.gz",
+                    relative_path="a.tar.gz",
+                    key="prefix/artifacts/test-logs/a.tar.gz",
+                    url="https://reports.example.com/prefix/artifacts/test-logs/a.tar.gz",
                     size_bytes=123,
                 )
             ]
@@ -280,9 +280,9 @@ def test_report_data_interns_repeated_leaf_artifacts_at_execution_level(tmp_path
     assert execution["sourceArtifactTable"] == [
         {
             "name": "Test logs",
-            "relativePath": "test-logs-1.tar.gz",
-            "key": "prefix/artifacts/test-logs/test-logs-1.tar.gz",
-            "url": "https://reports.example.com/prefix/artifacts/test-logs/test-logs-1.tar.gz",
+            "relativePath": "a.tar.gz",
+            "key": "prefix/artifacts/test-logs/a.tar.gz",
+            "url": "https://reports.example.com/prefix/artifacts/test-logs/a.tar.gz",
             "sizeBytes": 123,
         }
     ]
@@ -393,12 +393,7 @@ def test_junit_xml_filename_match_limits_source_artifacts_and_falls_back_to_pid_
     )
 
     assert aggregation_execution.source_artifacts == [aggregation_log, matching_pid_log]
-    assert cluster_execution.source_artifacts == [
-        aggregation_log,
-        aggregation_parallelism_log,
-        auth_log,
-        matching_pid_log,
-    ]
+    assert cluster_execution.source_artifacts == [matching_pid_log]
 
 
 def test_build_report_matches_source_artifacts_once_per_junit_file(tmp_path, monkeypatch):

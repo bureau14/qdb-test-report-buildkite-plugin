@@ -627,7 +627,7 @@ def main() -> int:
                 config,
                 tmp_base,
                 source_artifacts_by_job_id=source_artifacts_by_job_id,
-                artifacts=report_artifacts if config.scope == "job" else [],
+                artifacts=report_artifacts,
                 artifact_metadata=artifact_metadata if config.scope == "job" else None,
                 xml_source_links=xml_source_links,
                 junit_archive_errors=junit_archive_errors,
