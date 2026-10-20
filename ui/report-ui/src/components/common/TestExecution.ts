@@ -59,6 +59,7 @@ export default class TestExecution {
   public readonly durationMillis: number;
   public readonly sections: SectionData[];
   public readonly summary: ExecutionSummaryData | undefined;
+  public readonly artifacts: SourceArtifactData[];
 
   private readonly rootIds: string[];
   private readonly rootNodes: TestNodeData[];
@@ -80,6 +81,7 @@ export default class TestExecution {
     this.durationMillis = execution.durationMillis;
     this.sections = execution.sections || [];
     this.summary = execution.summary;
+    this.artifacts = execution.artifacts || [];
     this.sourceTables = execution.sourceTables;
     this.sourceArtifactTable = execution.sourceArtifactTable;
     this.tagTables = execution.tagTables;
@@ -109,8 +111,14 @@ export default class TestExecution {
     for (const node of this.testNodes.values()) {
       const statusIndex = TestExecution.STATUSES.indexOf(node.status);
       maxStatusIndex = Math.max(maxStatusIndex, statusIndex);
-      this.statusCounts.set(node.status, this.statusCounts.get(node.status)! + 1);
-      if (!firstFailedOrErroredNode && TestExecution.isFailedOrErrored(node.status)) {
+      this.statusCounts.set(
+        node.status,
+        this.statusCounts.get(node.status)! + 1,
+      );
+      if (
+        !firstFailedOrErroredNode &&
+        TestExecution.isFailedOrErrored(node.status)
+      ) {
         firstFailedOrErroredNode = node;
       }
     }
@@ -250,7 +258,9 @@ export default class TestExecution {
         if (!artifact) {
           continue;
         }
-        const key = [artifact.name, artifact.relativePath, artifact.key].join("\u0000");
+        const key = [artifact.name, artifact.relativePath, artifact.key].join(
+          "\u0000",
+        );
         if (!artifactKeys.has(key)) {
           artifactKeys.add(key);
           artifacts.push(artifact);
@@ -282,9 +292,15 @@ export default class TestExecution {
       `testsuite:${this.tagTables.suites[node.tags[1] as number]}`,
       `classname:${classname}`,
       `test-name:${testName}`,
-      ...failedPlatforms.map((index) => `failed-platform:${this.tagTables!.platforms[index]}`),
-      ...erroredPlatforms.map((index) => `errored-platform:${this.tagTables!.platforms[index]}`),
-      ...skippedPlatforms.map((index) => `skipped-platform:${this.tagTables!.platforms[index]}`),
+      ...failedPlatforms.map(
+        (index) => `failed-platform:${this.tagTables!.platforms[index]}`,
+      ),
+      ...erroredPlatforms.map(
+        (index) => `errored-platform:${this.tagTables!.platforms[index]}`,
+      ),
+      ...skippedPlatforms.map(
+        (index) => `skipped-platform:${this.tagTables!.platforms[index]}`,
+      ),
     ].sort();
   }
 }

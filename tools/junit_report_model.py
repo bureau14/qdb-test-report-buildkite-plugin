@@ -68,6 +68,7 @@ class ArtifactLink:
     url: str | None
     size_bytes: int
     execution_id: str | None = None
+    execution_name: str | None = None
 
 
 @dataclass
@@ -91,6 +92,12 @@ class TestcaseExecution:
     qdb_process_id: str | None = None
     execution_id: str | None = None
     report_kind: str = "test"
+
+    @property
+    def is_ctest_execution(self) -> bool:
+        # The outer CI CTest report also describes suites whose cases have their own XML.
+        # Nested C API CTest reports contain actual cases and remain in test totals.
+        return self.report_kind == "ctest" and self.suite_name == "ctest"
 
 
 @dataclass
@@ -145,15 +152,16 @@ class Report:
     @property
     def logical_test_count(self) -> int:
         return sum(
-            len(test_file.logical_tests)
+            any(not execution.is_ctest_execution for execution in logical.executions.values())
             for suite in self.suites.values()
             for test_file in suite.test_files.values()
+            for logical in test_file.logical_tests.values()
         )
 
     @property
     def platform_execution_count(self) -> int:
         return sum(
-            len(logical.executions)
+            sum(not execution.is_ctest_execution for execution in logical.executions.values())
             for suite in self.suites.values()
             for test_file in suite.test_files.values()
             for logical in test_file.logical_tests.values()
@@ -167,6 +175,37 @@ class Report:
             for test_file in suite.test_files.values()
             for logical in test_file.logical_tests.values()
             for execution in logical.executions.values()
+            if not execution.is_ctest_execution
+        )
+
+    @property
+    def ctest_execution_count(self) -> int:
+        return sum(self.ctest_status_counts.values())
+
+    @property
+    def ctest_status_counts(self) -> Counter[str]:
+        return Counter(
+            execution.status
+            for suite in self.suites.values()
+            for test_file in suite.test_files.values()
+            for logical in test_file.logical_tests.values()
+            for execution in logical.executions.values()
+            if execution.is_ctest_execution
+        )
+
+    @property
+    def test_status_counts(self) -> Counter[str]:
+        return self.status_counts - self.ctest_status_counts
+
+    @property
+    def ctest_duration_seconds(self) -> float:
+        return sum(
+            execution.duration_seconds
+            for suite in self.suites.values()
+            for test_file in suite.test_files.values()
+            for logical in test_file.logical_tests.values()
+            for execution in logical.executions.values()
+            if execution.is_ctest_execution
         )
 
     @property
@@ -186,6 +225,7 @@ class Report:
             for suite in self.suites.values()
             for test_file in suite.test_files.values()
             for logical in test_file.logical_tests.values()
+            if any(not execution.is_ctest_execution for execution in logical.executions.values())
         )
 
     @property
@@ -304,6 +344,8 @@ def testcase_reason_and_output(testcase: ET.Element, status: str) -> tuple[str |
                 output_parts.append(output_text)
 
     output = "\n\n".join(output_parts) if output_parts else None
+    if status == "SKIPPED" and not reason:
+        reason = "No skip reason provided by the test runner."
     return reason, cap_embedded_test_output(output) if output else None
 
 
@@ -486,6 +528,12 @@ def parse_junit_file(
         if not suite_testcases:
             log_warn(f"empty testsuite file={path} platform={platform} suite={suite_name}")
         for testcase in suite_testcases:
+            if (
+                testcase.attrib.get("name") == QDB_PROCESS_ID_TESTCASE
+                and (output := testcase_system_out(testcase))
+                and output.splitlines()[0].strip().isdecimal()
+            ):
+                continue
             logical_id, classname, name = logical_test_identity(testcase, source_id)
             # CTest has no generator marker, but emits these suite attributes,
             # execution statuses, and identical class/test names.
@@ -631,18 +679,32 @@ def build_report(
             )
             matches_by_execution = {}
             for execution in file_executions:
-                if execution.execution_id not in matches_by_execution:
+                match_key = (
+                    execution.name if execution.is_ctest_execution else execution.execution_id
+                )
+                if match_key not in matches_by_execution:
                     arguments = (
                         first_execution.qdb_process_id,
                         job_artifacts,
                         first_execution.test_file,
                     )
-                    matches_by_execution[execution.execution_id] = (
-                        source_artifacts_for_junit(*arguments, execution_id=execution.execution_id)
-                        if execution.execution_id is not None
-                        else source_artifacts_for_junit(*arguments)
-                    )
-                execution.source_artifacts = matches_by_execution[execution.execution_id]
+                    if execution.is_ctest_execution:
+                        matches_by_execution[match_key] = [
+                            artifact
+                            for artifact in job_artifacts
+                            if artifact.execution_name == execution.name
+                            or artifact.execution_name is None
+                            and artifact_matches_junit_filename(artifact, execution.name)
+                        ]
+                    else:
+                        matches_by_execution[match_key] = (
+                            source_artifacts_for_junit(
+                                *arguments, execution_id=execution.execution_id
+                            )
+                            if execution.execution_id is not None
+                            else source_artifacts_for_junit(*arguments)
+                        )
+                execution.source_artifacts = matches_by_execution[match_key]
         total_raw_executions += len(file_executions)
         for execution in file_executions:
             suite = suites.get(execution.suite_name)

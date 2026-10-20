@@ -225,12 +225,55 @@ export async function extractMember(
 
 export async function downloadMember(reference: ArchiveMember): Promise<void> {
   const bytes = await extractMember(reference);
-  const url = URL.createObjectURL(
+  saveDownload(
     new Blob([bytes], { type: "application/octet-stream" }),
+    reference.member.split("/").pop()!,
   );
+}
+
+export async function downloadMembers(
+  references: ArchiveMember[],
+  filename: string,
+): Promise<void> {
+  const unique = new Map(
+    references.map((reference) => [
+      `${reference.url}\u0000${reference.member}`,
+      reference,
+    ]),
+  );
+  if (unique.size > archiveDownloadLimits.memberCount)
+    throw new Error("Too many files selected.");
+  const zip = new JSZip();
+  let total = 0;
+  const usedNames = new Set<string>();
+  for (const reference of unique.values()) {
+    // Keep full member paths, with a job suffix only when two jobs used the same path.
+    let name = reference.member;
+    if (usedNames.has(name)) {
+      const job =
+        reference.url.match(/\/jobs\/([^/]+)\//)?.[1] || String(usedNames.size);
+      name = `${job}/${name}`;
+    }
+    usedNames.add(name);
+    const bytes = await extractMember(reference);
+    total += bytes.byteLength;
+    if (total > archiveDownloadLimits.archiveBytes)
+      throw new Error(
+        "Selected files exceed the download size limit. Use a job ZIP instead.",
+      );
+    zip.file(name, bytes);
+  }
+  saveDownload(
+    await zip.generateAsync({ type: "blob", compression: "DEFLATE" }),
+    filename,
+  );
+}
+
+function saveDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = reference.member.split("/").pop()!;
+  link.download = filename;
   document.body.append(link);
   link.click();
   link.remove();

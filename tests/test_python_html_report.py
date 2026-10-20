@@ -121,7 +121,10 @@ def test_junit_report_omits_successful_test_stdout_and_stderr_from_embedded_outp
     )
 
     assert testcase_reason_and_output(successful, "SUCCESSFUL") == (None, None)
-    assert testcase_reason_and_output(skipped, "SKIPPED") == (None, None)
+    assert testcase_reason_and_output(skipped, "SKIPPED") == (
+        "No skip reason provided by the test runner.",
+        None,
+    )
     assert testcase_reason_and_output(failed, "FAILED") == (
         "failure details",
         "failure details\n\nfailing stdout\n\nfailing stderr",
@@ -463,7 +466,7 @@ def test_qdb_process_id_metadata_matches_only_its_uploaded_json_log(tmp_path):
         source_artifacts_by_job_id={"job-1": [matching_log, other_log]},
     )
 
-    assert report.raw_testcases == 2
+    assert report.raw_testcases == 1
     execution_model = (
         report.suites["qdb_unit_tests"]
         .test_files["qdb_auth_test"]
@@ -476,7 +479,6 @@ def test_qdb_process_id_metadata_matches_only_its_uploaded_json_log(tmp_path):
     execution = report_to_report_ui_data(report)[0]
     leaves = [node for node in execution["testNodes"] if node.get("status") == "SUCCESSFUL"]
     assert [node["name"] for node in leaves] == [
-        "qdb_test_process_id - linux",
         "data_size - linux",
     ]
     assert all(node["source"] == [0, 0, 0, -1, -1, -1, -1, 0] for node in leaves)
@@ -490,7 +492,7 @@ def test_qdb_process_id_metadata_matches_only_its_uploaded_json_log(tmp_path):
             "sizeBytes": 123,
         }
     ]
-    assert [leaf["sourceArtifacts"] for leaf in leaves] == [[0], [0]]
+    assert [leaf["sourceArtifacts"] for leaf in leaves] == [[0]]
 
 
 def test_qdb_process_id_verbose_cdata_matches_only_its_uploaded_json_log(tmp_path):
@@ -737,7 +739,15 @@ def test_report_ui_groups_suite_test_file_classname_test_and_platform_without_so
         junit_xml('<testcase classname="BoostSuite" name="same_name" time="0.2"/>'),
     )
 
-    execution = report_to_report_ui_data(build_report("boost", [("linux", linux)]))[0]
+    execution = report_to_report_ui_data(
+        build_report(
+            "boost",
+            [
+                ("linux", linux / "build/Release/test-reports/qdb_regression_test.xml"),
+                ("linux", linux / "build/Release/test-reports/qdb_aggregation_test.xml"),
+            ],
+        )
+    )[0]
     nodes = {node["id"]: node for node in execution["testNodes"]}
     suite = next(node for node in execution["testNodes"] if node["name"] == "suite")
     file_ids = execution["children"][suite["id"]]["ids"]
@@ -866,6 +876,9 @@ def test_report_ui_data_exposes_true_execution_counts_for_custom_header(tmp_path
 
     assert execution["summary"] == {
         "rawTestcases": 4,
+        "ctestExecutions": 0,
+        "ctestStatusCounts": {},
+        "durationKind": "summed-case-time",
         "suites": 1,
         "logicalTests": 2,
         "platformExecutions": 4,
@@ -1200,6 +1213,11 @@ def test_cli_writes_summary_json(tmp_path):
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary == {
         "raw_testcases": 3,
+        "test_status_counts": {"SUCCESSFUL": 2, "FAILED": 1},
+        "ctest_executions": 0,
+        "ctest_status_counts": {},
+        "summed_case_seconds": 0.0,
+        "summed_ctest_seconds": 0.0,
         "suites": 1,
         "logical_tests": 3,
         "platform_executions": 3,

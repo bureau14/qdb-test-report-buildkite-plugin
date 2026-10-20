@@ -96,8 +96,8 @@ def test_test_node_details_synthesizes_source_and_tag_sections_from_compact_meta
     assert "Buildkite job" in source
     assert "link:${source.jobUrl}" in source
     assert "props.execution.sourceArtifactsForNode(props.node)" in source
-    assert 'title: "Artifacts"' in source
-    assert "artifactContent[label]" in source
+    assert "<ExecutionArtifacts" in source
+    assert ':artifacts="artifacts"' in source
     assert 'sourceContent["Artifact:' not in source
     assert "Artifact:" not in source
     assert ':sections="sections"' in source
@@ -105,14 +105,15 @@ def test_test_node_details_synthesizes_source_and_tag_sections_from_compact_meta
 
 
 def test_artifact_links_display_the_uploaded_relative_path():
-    details = (REPO_ROOT / "ui/report-ui/src/components/details/TestNodeDetails.vue").read_text(
+    details = (REPO_ROOT / "ui/report-ui/src/components/details/ExecutionArtifacts.vue").read_text(
         encoding="utf-8"
     )
     rendered_block = (
         REPO_ROOT / "ui/report-ui/src/components/details/RenderedBlock.vue"
     ).read_text(encoding="utf-8")
 
-    assert "`link:${artifact.url}\\n${artifact.relativePath}`" in details
+    assert ':title="file.relativePath"' in details
+    assert "{{ file.relativePath }}" in details
     assert "function linkText(value: string): string" in rendered_block
     assert 'value.substring(5).split("\\n", 2)' in rendered_block
 

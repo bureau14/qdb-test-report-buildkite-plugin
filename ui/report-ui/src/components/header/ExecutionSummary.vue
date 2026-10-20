@@ -1,6 +1,6 @@
-/**
- * Modified from original source: https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/components/header/ExecutionSummary.vue
- */
+/** * Modified from original source:
+https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/components/header/ExecutionSummary.vue
+*/
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
@@ -15,6 +15,7 @@ function formattedCount(key: string, count?: number): string[] {
   return count ? [t(key, { count: count }, count)] : [];
 }
 
+/* global ExecutionSummaryData */
 function summaryCount(field: keyof ExecutionSummaryData): number | undefined {
   const summaries = executions.map((e) => e.summary);
   if (summaries.some((summary) => !summary)) {
@@ -63,6 +64,9 @@ const summaryMessage = computed(() => {
     ...formattedCount("executionSummary.failed", statusCount("FAILED")),
     ...formattedCount("executionSummary.aborted", statusCount("ABORTED")),
     ...formattedCount("executionSummary.skipped", statusCount("SKIPPED")),
+    ...(summaryCount("ctestExecutions")
+      ? [`${summaryCount("ctestExecutions")} CTest executions`]
+      : []),
   ].join(", ");
 });
 </script>

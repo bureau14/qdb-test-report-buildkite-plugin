@@ -3,7 +3,7 @@ import { computed } from "vue";
 import { Timer } from "@lucide/vue";
 import { defaultIconProps } from "../common/icon.ts";
 
-const props = defineProps<{ millis: number }>();
+const props = defineProps<{ millis: number; label?: string }>();
 const parts = computed(() => {
   const result = Object.fromEntries(
     Object.entries({
@@ -26,12 +26,13 @@ const parts = computed(() => {
   >
     <Timer v-bind="defaultIconProps" class="self-center" />
     <span class="ml-1 text-sm font-bold self-center">
+      <span v-if="label" class="mr-1 font-normal">{{ label }}:</span>
       <span
-        v-for="(value, label, index) in parts"
-        :key="label"
+        v-for="(value, unit, index) in parts"
+        :key="unit"
         :class="{ 'mr-1': index < Object.entries(parts).length - 1 }"
         style="word-spacing: -0.1em"
-        >{{ $t(`duration.${label}`, { count: value }, value) }}</span
+        >{{ $t(`duration.${unit}`, { count: value }, value) }}</span
       >
     </span>
   </div>

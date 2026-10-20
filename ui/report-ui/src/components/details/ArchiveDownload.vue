@@ -4,7 +4,11 @@ import { ref, watch } from "vue";
 import { downloadMember } from "./archive-download.ts";
 import type { ArchiveMember } from "./archive-download.ts";
 
-const props = defineProps<{ reference: ArchiveMember }>();
+const props = defineProps<{
+  reference: ArchiveMember;
+  label?: string;
+  compact?: boolean;
+}>();
 const busy = ref(false);
 const error = ref("");
 
@@ -23,8 +27,12 @@ async function download() {
     await downloadMember(props.reference);
   } catch (reason) {
     const message =
-      reason instanceof Error ? reason.message : "Could not download this file.";
-    error.value = `${message} Retry, or download the ZIP below.`;
+      reason instanceof Error
+        ? reason.message
+        : "Could not download this file.";
+    error.value = props.compact
+      ? `${message} Retry, or use the job ZIP under Other job artifacts.`
+      : `${message} Retry, or download the ZIP below.`;
   } finally {
     busy.value = false;
   }
@@ -43,11 +51,14 @@ async function download() {
       {{
         busy
           ? "Preparing download…"
-          : `Download ${reference.member.split("/").pop()}`
+          : label || `Download ${reference.member.split("/").pop()}`
       }}
     </button>
-    <pre class="whitespace-pre-wrap break-all">{{ reference.member }}</pre>
+    <pre v-if="!compact" class="whitespace-pre-wrap break-all">{{
+      reference.member
+    }}</pre>
     <a
+      v-if="!compact"
       :href="reference.url"
       target="_blank"
       rel="noopener noreferrer"

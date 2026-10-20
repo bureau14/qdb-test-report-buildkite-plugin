@@ -7,11 +7,12 @@ import TestExecution from "../common/TestExecution.ts";
 import { testResultStatusBackgroundColorClasses } from "../common/TestResultStatus.ts";
 import DurationLabel from "./DurationLabel.vue";
 import DetailsSections from "./DetailsSections.vue";
+import ExecutionArtifacts from "./ExecutionArtifacts.vue";
 import DetailsHeader from "./DetailsHeader.vue";
 import Selection from "../common/Selection.ts";
 import ExecutionIcon from "../common/ExecutionIcon.vue";
 import { defaultIconProps } from "../common/icon.ts";
-/* global TestNodeData */
+/* global TestNodeData, SectionData */
 
 const selection = defineModel<Selection | undefined>("selection");
 const props = defineProps<{ node: TestNodeData; execution: TestExecution }>();
@@ -20,9 +21,17 @@ function selectNode(node: TestNodeData | TestExecution) {
   selection.value = new Selection(props.execution, node);
 }
 
+const diagnostics = computed(() => props.node.sections || []);
+const artifacts = computed(() =>
+  props.execution.sourceArtifactsForNode(props.node),
+);
+const artifactSources = computed(() =>
+  props.execution.sourceDataForNode(props.node),
+);
+
 const parents = computed(() => props.execution.parents(props.node));
 const sections = computed(() => {
-  const result = props.node.sections ? [...props.node.sections] : [];
+  const result: SectionData[] = [];
   const tagLabels = props.execution.tagLabels(props.node);
   if (tagLabels) {
     result.unshift({
@@ -41,7 +50,7 @@ const sections = computed(() => {
     const source = sources[0];
     sourceContent.Target = source.target;
     sourceContent["Test suite"] = source.suite;
-    sourceContent["JUnit XML"] = source.xmlUrl ? `link:${source.xmlUrl}` : source.xml;
+
     if (source.buildUrl) {
       sourceContent["Buildkite build"] = `link:${source.buildUrl}`;
     }
@@ -57,9 +66,12 @@ const sections = computed(() => {
   } else {
     sources.forEach((source, index) => {
       const label = `JUnit XML ${index + 1} (${source.target} / ${source.suite} / ${source.xml})`;
-      sourceContent[label] = source.xmlUrl ? `link:${source.xmlUrl}` : source.xml;
+      sourceContent[label] = source.xmlUrl
+        ? `link:${source.xmlUrl}`
+        : source.xml;
       if (source.qdbProcessId) {
-        sourceContent[`QDB PID ${index + 1} (${source.xml})`] = source.qdbProcessId;
+        sourceContent[`QDB PID ${index + 1} (${source.xml})`] =
+          source.qdbProcessId;
       }
     });
   }
@@ -70,30 +82,6 @@ const sections = computed(() => {
       blocks: [{ type: "kvp", content: sourceContent }],
     } as SectionData,
   ];
-  const sourceArtifacts = props.execution.sourceArtifactsForNode(props.node);
-  if (sourceArtifacts.length > 0) {
-    const artifactContent: Record<string, string> = {};
-    const duplicateArtifactNames = sourceArtifacts.reduce(
-      (counts, artifact) => {
-        counts[artifact.name] = (counts[artifact.name] || 0) + 1;
-        return counts;
-      },
-      {} as Record<string, number>,
-    );
-    for (const artifact of sourceArtifacts) {
-      const label =
-        duplicateArtifactNames[artifact.name] > 1
-          ? `${artifact.name} / ${artifact.relativePath}`
-          : artifact.name;
-      artifactContent[label] = artifact.url
-        ? `link:${artifact.url}\n${artifact.relativePath}`
-        : artifact.key;
-    }
-    synthesizedSections.push({
-      title: "Artifacts",
-      blocks: [{ type: "kvp", content: artifactContent }],
-    } as SectionData);
-  }
 
   return [...synthesizedSections, ...result];
 });
@@ -141,5 +129,7 @@ const sections = computed(() => {
       </div>
     </template>
   </DetailsHeader>
+  <DetailsSections v-if="diagnostics.length" :sections="diagnostics" />
+  <ExecutionArtifacts :artifacts="artifacts" :sources="artifactSources" />
   <DetailsSections :sections="sections" />
 </template>

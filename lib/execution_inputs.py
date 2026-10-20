@@ -22,6 +22,7 @@ class ExecutionInputs:
     xml_uploads: list[XmlUpload] = field(default_factory=list)
     artifact_files: list[ArtifactFile] = field(default_factory=list)
     execution_ids: dict[str, str] = field(default_factory=dict)
+    execution_names: dict[str, str] = field(default_factory=dict)
 
 
 def resolve_input(root: Path, value: str) -> Path:
@@ -71,6 +72,7 @@ def collect_execution_manifest(root, manifest_path, manifest, staging, result, c
     execution_id = manifest["execution_id"]
     name = manifest["name"]
     status = manifest["status"]
+    result.execution_names[execution_id] = name
     collect_execution_artifacts(root, result, manifest_path, execution_id)
     errors: list[str] = []
     if status != "completed" or manifest.get("exit_code") != 0:

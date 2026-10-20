@@ -145,6 +145,7 @@ def artifact_links_from_metadata(metadata: ArtifactMetadata) -> list[ArtifactLin
                     url=file_info.get("url"),
                     size_bytes=int(file_info.get("size_bytes", 0)),
                     execution_id=file_info.get("execution_id"),
+                    execution_name=file_info.get("execution_name"),
                 )
             )
     return links
@@ -593,6 +594,9 @@ def main() -> int:
                             for file_info in artifact["files"]:
                                 file_info["execution_id"] = execution_inputs.execution_ids[
                                     file_info["relative_path"]
+                                ]
+                                file_info["execution_name"] = execution_inputs.execution_names[
+                                    file_info["execution_id"]
                                 ]
                 uploaded_artifact_names = {item["name"] for item in artifact_metadata}
                 for artifact in config.artifacts:

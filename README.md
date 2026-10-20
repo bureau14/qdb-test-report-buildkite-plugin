@@ -97,6 +97,16 @@ Successful executions with no JUnit report declared receive a successful launche
 result. Optional missing logs and dumps are normal; missing required artifacts
 produce an error result. Aggregate steps need no additional configuration.
 
+The report groups execution artifacts into reports, runner logs, server logs,
+crash diagnostics, and execution details. Empty files are hidden by default;
+paths and full job ZIPs remain available. Download all creates a ZIP containing
+only the selected execution's files, subject to the browser download limits.
+
+Headline test counts and summed case time exclude outer CTest execution checks
+and legacy process-ID metadata cases. CTest counts and summed time are shown
+separately, and CTest failures still fail the report. A skipped case without a
+runner-provided reason is explicitly labelled as such.
+
 By default, job mode exits `64` when the report contains failed or errored tests. Disable that if your pipeline already handles test failures another way:
 
 ```yaml
