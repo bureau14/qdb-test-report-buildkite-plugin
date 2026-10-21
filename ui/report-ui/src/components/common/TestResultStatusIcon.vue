@@ -4,15 +4,17 @@ import {
   CircleX,
   SquareArrowOutUpRight,
   SquareSlash,
+  TriangleAlert,
 } from "@lucide/vue";
-import { testResultStatusForegroundColorClass } from "./TestResultStatus.ts";
-import { defaultIconProps } from "./icon.ts";
+
+import {defaultIconProps} from "./icon.ts";
+import {testResultStatusForegroundColorClass} from "./TestResultStatus.ts";
 
 const props = withDefaults(
   defineProps<{
-    status: string;
-    color?: string; // eslint-disable-line vue/require-default-prop
-    size?: number; // eslint-disable-line vue/require-default-prop
+    status : string;
+    color?: string;       // eslint-disable-line vue/require-default-prop
+    size?: number;        // eslint-disable-line vue/require-default-prop
     strokeWidth?: number; // eslint-disable-line vue/require-default-prop
   }>(),
   defaultIconProps,
@@ -34,7 +36,13 @@ function commonClasses(status: string) {
     :class="commonClasses(status)"
   />
   <CircleX
-    v-else-if="status === 'FAILED' || status === 'ERRORED'"
+    v-else-if="status === 'FAILED'"
+    :size="size"
+    :stroke-width="strokeWidth"
+    :class="commonClasses(status)"
+  />
+  <TriangleAlert
+    v-else-if="status === 'ERRORED'"
     :size="size"
     :stroke-width="strokeWidth"
     :class="commonClasses(status)"

@@ -1,6 +1,8 @@
-// Modified from original source: https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/components/sidebar/TreeState.ts
+// Modified from original source:
+// https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/components/sidebar/TreeState.ts
+import type {InjectionKey} from "vue";
+
 import TestExecution from "../common/TestExecution.ts";
-import { InjectionKey } from "vue";
 
 export const treeStateKey = Symbol() as InjectionKey<TreeState>;
 
@@ -14,28 +16,29 @@ export default class TreeState {
   public showSkipped = false;
   public showSuccessful = false;
   public searchQuery = "";
-  public sortMode: "alphabetical" | "execution" = "alphabetical";
+  public sortMode: "alphabetical"|"execution" = "alphabetical";
 
   constructor(executions: TestExecution[]) {
     const nodes: Record<string, NodeState> = {};
+    this.showFailedAndErrored = executions.some(
+      (execution) => ["FAILED", "ERRORED"].includes(execution.overallStatus()));
 
     for (const execution of executions) {
       nodes[execution.id] = {
-        collapsed: false,
+        collapsed : false,
       };
 
       const largeTree = execution.size() > LARGE_TREE_NODE_THRESHOLD;
       for (const node of execution.nodesWithChildren()) {
         const statuses = execution.nodeStatuses(node);
         const parentDepth = execution.parentDepth(node);
-        const initiallyCollapsed = largeTree
-          ? parentDepth > 0
-          : parentDepth > 1 &&
-            statuses.indexOf("FAILED") == -1 &&
-            statuses.indexOf("ERRORED") == -1;
+        const hasProblems =
+          statuses.includes("FAILED") || statuses.includes("ERRORED");
+        const initiallyCollapsed = hasProblems ? execution.isLogicalTest(node)
+                                               : largeTree || parentDepth > 1;
 
         nodes[node.id] = {
-          collapsed: initiallyCollapsed,
+          collapsed : initiallyCollapsed,
         };
       }
     }
@@ -88,8 +91,10 @@ export default class TreeState {
     this.searchQuery = "";
   }
 
-  revealNode(execution: TestExecution, node: TestNodeData | TestExecution) {
-    this.clearFilters();
+  revealNode(execution: TestExecution, node: TestNodeData|TestExecution,
+    clearFilters = true) {
+    if (clearFilters)
+      this.clearFilters();
     if (!(node instanceof TestExecution)) {
       execution.parents(node).forEach((parent) => {
         const state = this.nodes[parent.id];
@@ -105,12 +110,8 @@ export default class TreeState {
   }
 
   hasActiveStatusFilter(): boolean {
-    return (
-      this.showAborted ||
-      this.showFailedAndErrored ||
-      this.showSkipped ||
-      this.showSuccessful
-    );
+    return (this.showAborted || this.showFailedAndErrored || this.showSkipped ||
+            this.showSuccessful);
   }
 
   hasActiveSearch(): boolean {
@@ -127,22 +128,21 @@ export default class TreeState {
       return true;
     }
 
-    return (
-      statuses.length == 0 ||
-      statuses.filter((status) => {
-        switch (status) {
-          case "SUCCESSFUL":
-            return this.showSuccessful;
-          case "FAILED":
-          case "ERRORED":
-            return this.showFailedAndErrored;
-          case "SKIPPED":
-            return this.showSkipped;
-          case "ABORTED":
-            return this.showAborted;
-        }
-      }).length > 0
-    );
+    return (statuses.length == 0 || statuses
+                                        .filter((status) => {
+                                          switch (status) {
+                                          case "SUCCESSFUL":
+                                            return this.showSuccessful;
+                                          case "FAILED":
+                                          case "ERRORED":
+                                            return this.showFailedAndErrored;
+                                          case "SKIPPED":
+                                            return this.showSkipped;
+                                          case "ABORTED":
+                                            return this.showAborted;
+                                          }
+                                        })
+                                        .length > 0);
   }
 }
 

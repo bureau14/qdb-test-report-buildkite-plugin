@@ -1,99 +1,48 @@
-<!--  Modified from original source: https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/components/sidebar/ToolBar.vue -->
+<!-- Modified from original source: https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/components/sidebar/ToolBar.vue -->
 <script setup lang="ts">
-import { ArrowDownAZ, ChevronsDownUp, ChevronsUpDown } from "@lucide/vue";
-import ToolBarIcon from "./ToolBarIcon.vue";
-import TestResultStatusIcon from "../common/TestResultStatusIcon.vue";
-import { defaultIconProps } from "../common/icon.ts";
-import { inject } from "vue";
-import { treeStateKey } from "./TreeState.ts";
+import {ArrowDownAZ, ChevronsDownUp, ChevronsUpDown} from "@lucide/vue";
+import {computed, inject} from "vue";
 
+import {defaultIconProps} from "../common/icon.ts";
+import {formatCount, statusCounts} from "../common/presentation.ts";
+import TestExecution from "../common/TestExecution.ts";
+
+import {treeStateKey} from "./TreeState.ts";
+
+const props = defineProps<{executions : TestExecution[]}>();
 const treeState = inject(treeStateKey)!;
+const counts = computed(() => statusCounts(props.executions));
+const matching = computed(
+  () => props.executions.reduce(
+    (total, execution) =>
+      total +
+      execution.matchingExecutionCount(
+        (node) => treeState.isVisible([ node.status ]) &&
+                  [ node, ...execution.parents(node) ].some(
+                    (ancestor) => treeState.matchesSearch(ancestor.name))),
+    0));
 </script>
-
 <template>
-  <div
-    class="bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border-b border-neutral-200 dark:border-neutral-700 flex flex-col gap-2 px-1.5 py-2"
-  >
-    <label class="sr-only" for="test-search">{{ $t("toolbar.search") }}</label>
-    <input
-      id="test-search"
-      v-model="treeState.searchQuery"
-      type="search"
-      :placeholder="$t('toolbar.search')"
-      class="min-w-0 rounded-sm border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-900 placeholder:text-neutral-500 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-400"
-    />
-    <div class="flex flex-row">
-      <div class="flex flex-row flex-1">
-        <ToolBarIcon
-          :selected="treeState.showSuccessful"
-          :title="$t('toolbar.showSuccessful')"
-          @click="treeState.toggleShowSuccessful()"
-        >
-          <TestResultStatusIcon
-            status="SUCCESSFUL"
-            v-bind="defaultIconProps"
-            color="''"
-          />
-        </ToolBarIcon>
-        <ToolBarIcon
-          :selected="treeState.showFailedAndErrored"
-          :title="$t('toolbar.showFailedAndErrored')"
-          @click="treeState.toggleShowFailedAndErrored()"
-        >
-          <TestResultStatusIcon
-            status="FAILED"
-            v-bind="defaultIconProps"
-            color="''"
-          />
-        </ToolBarIcon>
-        <ToolBarIcon
-          :selected="treeState.showSkipped"
-          :title="$t('toolbar.showSkipped')"
-          @click="treeState.toggleShowSkipped()"
-        >
-          <TestResultStatusIcon
-            status="SKIPPED"
-            v-bind="defaultIconProps"
-            color="''"
-          />
-        </ToolBarIcon>
-        <ToolBarIcon
-          :selected="treeState.showAborted"
-          :title="$t('toolbar.showAborted')"
-          @click="treeState.toggleShowAborted()"
-        >
-          <TestResultStatusIcon
-            status="ABORTED"
-            v-bind="defaultIconProps"
-            color="''"
-          />
-        </ToolBarIcon>
-      </div>
-      <div class="flex flex-row">
-        <ToolBarIcon
-          :selected="treeState.sortMode === 'alphabetical'"
-          :title="
-            treeState.sortMode === 'alphabetical'
-              ? $t('toolbar.sortByExecutionOrder')
-              : $t('toolbar.sortAlphabetically')
-          "
-          @click="treeState.toggleSortMode()"
-        >
-          <ArrowDownAZ v-bind="defaultIconProps" />
-        </ToolBarIcon>
-        <ToolBarIcon
-          :title="$t('toolbar.expandAll')"
-          @click="treeState.expandAll()"
-        >
-          <ChevronsUpDown v-bind="defaultIconProps" />
-        </ToolBarIcon>
-        <ToolBarIcon
-          :title="$t('toolbar.collapseAll')"
-          @click="treeState.collapseAll()"
-        >
-          <ChevronsDownUp v-bind="defaultIconProps" />
-        </ToolBarIcon>
-      </div>
+  <div class="tree-toolbar">
+    <label class="sr-only" for="test-search">Search tests</label>
+    <input id="test-search" v-model="treeState.searchQuery" type="search" placeholder="Search tests" class="report-search" />
+    <div class="tree-filters" aria-label="Filter test executions">
+      <button type="button" class="report-button" :aria-pressed="!treeState.hasActiveStatusFilter()" @click="treeState.clearFilters()">All</button>
+      <button type="button" class="report-button" :aria-pressed="treeState.showFailedAndErrored" @click="treeState.toggleShowFailedAndErrored()">Failed / Errored {{ formatCount(counts.FAILED || 0) }} / {{ formatCount(counts.ERRORED || 0) }}</button>
+      <button type="button" class="report-button" :aria-pressed="treeState.showSuccessful" @click="treeState.toggleShowSuccessful()">Passed {{ formatCount(counts.SUCCESSFUL || 0) }}</button>
+      <button type="button" class="report-button" :aria-pressed="treeState.showSkipped" @click="treeState.toggleShowSkipped()">Skipped {{ formatCount(counts.SKIPPED || 0) }}</button>
+      <button v-if="counts.ABORTED" type="button" class="report-button" :aria-pressed="treeState.showAborted" @click="treeState.toggleShowAborted()">Aborted {{ formatCount(counts.ABORTED) }}</button>
     </div>
+    <div class="tree-filter-description" aria-live="polite">
+      <span>{{ treeState.showFailedAndErrored && !treeState.showSuccessful && !treeState.showSkipped && !treeState.showAborted ? "Showing failed and errored tests" : treeState.hasActiveStatusFilter() ? "Showing selected statuses" : "Showing all statuses" }}</span>
+      <button v-if="treeState.hasActiveStatusFilter() || treeState.hasActiveSearch()" type="button" class="report-text-button" @click="treeState.clearFilters()">Clear filters</button>
+    </div>
+    <div class="tree-toolbar-actions">
+      <span class="report-muted">{{ formatCount(matching) }} matching executions</span>
+      <button type="button" class="report-icon-button" :aria-label="treeState.sortMode === 'alphabetical' ? 'Sort by execution order' : 'Sort alphabetically'" :aria-pressed="treeState.sortMode === 'alphabetical'" @click="treeState.toggleSortMode()"><ArrowDownAZ v-bind="defaultIconProps" /></button>
+      <button type="button" class="report-icon-button" aria-label="Expand all" @click="treeState.expandAll()"><ChevronsUpDown v-bind="defaultIconProps" /></button>
+      <button type="button" class="report-icon-button" aria-label="Collapse all" @click="treeState.collapseAll()"><ChevronsDownUp v-bind="defaultIconProps" /></button>
+    </div>
+    <span class="report-muted">Execution counts include CTest checks. Overview test counts remain unfiltered.</span>
   </div>
 </template>

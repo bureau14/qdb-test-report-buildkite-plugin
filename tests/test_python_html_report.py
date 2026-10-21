@@ -1162,11 +1162,14 @@ def test_cli_writes_self_contained_html_from_repeated_platform_arguments(tmp_pat
     assert "globalThis.testExecutions =" not in html
     assert "tests per target" in html
     assert "target" in html
-    assert "logical tests" not in html
+    assert "logical tests" in html
     assert "containers" not in html
     assert "tests/containers" not in html
     assert "<!-- TEST_REPORT_DATA -->" not in html
     data = embedded_data(html)
+    assert data[0]["summary"]["logicalTests"] == 1
+    assert data[0]["summary"]["platformExecutions"] == 2
+    assert data[0]["summary"]["targets"] == 2
     node_names = [node["name"] for node in data[0]["testNodes"]]
     assert "Smoke" in node_names
     assert "passes" in node_names

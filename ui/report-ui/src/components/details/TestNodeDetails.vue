@@ -1,32 +1,52 @@
 <!-- Modified from original source: https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/components/details/TestNodeDetails.vue -->
 <script setup lang="ts">
-import { computed } from "vue";
-import TestResultStatusIcon from "../common/TestResultStatusIcon.vue";
-import { ChevronRight } from "@lucide/vue";
-import TestExecution from "../common/TestExecution.ts";
-import { testResultStatusBackgroundColorClasses } from "../common/TestResultStatus.ts";
-import DurationLabel from "./DurationLabel.vue";
-import DetailsSections from "./DetailsSections.vue";
-import ExecutionArtifacts from "./ExecutionArtifacts.vue";
-import DetailsHeader from "./DetailsHeader.vue";
+import {Check, ChevronRight, Copy} from "@lucide/vue";
+import {useClipboard} from "@vueuse/core";
+import {computed} from "vue";
+
+import {defaultIconProps} from "../common/icon.ts";
+import {statusLabel} from "../common/presentation.ts";
 import Selection from "../common/Selection.ts";
-import ExecutionIcon from "../common/ExecutionIcon.vue";
-import { defaultIconProps } from "../common/icon.ts";
+import TestExecution from "../common/TestExecution.ts";
+import TestResultStatusIcon from "../common/TestResultStatusIcon.vue";
+
+import {archiveMember} from "./archive-download.ts";
+import ArchiveDownload from "./ArchiveDownload.vue";
+import BranchOverview from "./BranchOverview.vue";
+import DetailsHeader from "./DetailsHeader.vue";
+import DetailsSections from "./DetailsSections.vue";
+import DurationLabel from "./DurationLabel.vue";
+import ExecutionArtifacts from "./ExecutionArtifacts.vue";
+
 /* global TestNodeData, SectionData */
 
-const selection = defineModel<Selection | undefined>("selection");
-const props = defineProps<{ node: TestNodeData; execution: TestExecution }>();
+const selection = defineModel<Selection|undefined>("selection");
+const props = defineProps<{node : TestNodeData; execution : TestExecution}>();
 
-function selectNode(node: TestNodeData | TestExecution) {
+function selectNode(node: TestNodeData|TestExecution) {
   selection.value = new Selection(props.execution, node);
 }
 
-const diagnostics = computed(() => props.node.sections || []);
-const artifacts = computed(() =>
-  props.execution.sourceArtifactsForNode(props.node),
+const diagnostics =
+  computed(() => (props.node.sections || [])
+             .filter((section) => section.title !== "Reason"));
+const reason = computed(() => props.execution.reason(props.node));
+const status = computed(() => props.execution.displayStatus(props.node));
+const hasChildren =
+  computed(() => props.execution.children(props.node).length > 0);
+const source = computed(() => props.execution.sourceData(props.node));
+const title = computed(
+  () => source.value && props.node.name.endsWith(" - " + source.value.target)
+          ? props.node.name.slice(0, -(source.value.target.length + 3))
+          : props.node.name);
+const locator = computed(() => window.location.href.split("#")[0] +
+                               "#node=" + encodeURIComponent(props.node.id));
+const {copy, copied, isSupported} = useClipboard({source : locator});
+const artifacts = computed(
+  () => props.execution.sourceArtifactsForNode(props.node),
 );
-const artifactSources = computed(() =>
-  props.execution.sourceDataForNode(props.node),
+const artifactSources = computed(
+  () => props.execution.sourceDataForNode(props.node),
 );
 
 const parents = computed(() => props.execution.parents(props.node));
@@ -35,8 +55,8 @@ const sections = computed(() => {
   const tagLabels = props.execution.tagLabels(props.node);
   if (tagLabels) {
     result.unshift({
-      title: "Tags",
-      blocks: [{ type: "labels", content: tagLabels }],
+      title : "Tags",
+      blocks : [ {type : "labels", content : tagLabels} ],
     } as SectionData);
   }
 
@@ -65,10 +85,10 @@ const sections = computed(() => {
     }
   } else {
     sources.forEach((source, index) => {
-      const label = `JUnit XML ${index + 1} (${source.target} / ${source.suite} / ${source.xml})`;
-      sourceContent[label] = source.xmlUrl
-        ? `link:${source.xmlUrl}`
-        : source.xml;
+      const label = `JUnit XML ${index + 1} (${source.target} / ${
+        source.suite} / ${source.xml})`;
+      sourceContent[label] =
+        source.xmlUrl ? `link:${source.xmlUrl}` : source.xml;
       if (source.qdbProcessId) {
         sourceContent[`QDB PID ${index + 1} (${source.xml})`] =
           source.qdbProcessId;
@@ -78,58 +98,35 @@ const sections = computed(() => {
 
   const synthesizedSections: SectionData[] = [
     {
-      title: "Source",
-      blocks: [{ type: "kvp", content: sourceContent }],
+      title : "Source",
+      blocks : [ {type : "kvp", content : sourceContent} ],
     } as SectionData,
   ];
 
-  return [...synthesizedSections, ...result];
+  return [...synthesizedSections, ...result ];
 });
 </script>
 
+
 <template>
-  <DetailsHeader :title="node.name">
+  <DetailsHeader :title="title">
     <template #above>
-      <ul class="text-sm mb-3 inline-flex h-5">
-        <li v-for="parent in parents" :key="parent.id" class="inline-flex">
-          <ExecutionIcon
-            v-if="parent instanceof TestExecution"
-            class="-ml-px cursor-pointer"
-            @click="selectNode(parent)"
-          />
-          <span
-            v-else
-            class="underline underline-offset-4 decoration-neutral-300 dark:decoration-neutral-700 hover:decoration-neutral-400 decoration-2 whitespace-nowrap cursor-pointer"
-            @click="selectNode(parent)"
-          >
-            {{ parent.name }}
-          </span>
-          <ChevronRight
-            v-bind="defaultIconProps"
-            class="inline self-center mx-1 text-neutral-500"
-          />
-        </li>
-      </ul>
+      <nav class="test-breadcrumbs" aria-label="Test path">
+        <template v-for="parent in parents" :key="parent.id"><button type="button" class="report-text-button" @click="selectNode(parent)">{{ parent.name }}</button><ChevronRight v-bind="defaultIconProps" /></template>
+      </nav>
     </template>
     <template #below>
-      <div class="mt-3">
-        <div
-          class="inline-flex mb-2 border-2 rounded-full px-2 py-1 mr-2"
-          :class="testResultStatusBackgroundColorClasses(node.status)"
-        >
-          <TestResultStatusIcon :status="node.status" color="text-white" />
-          <span
-            class="ml-1 tracking-wide text-sm text-white font-bold self-center"
-            role="status"
-            :aria-label="node.status"
-            >{{ node.status }}</span
-          >
-        </div>
-        <DurationLabel :millis="node.durationMillis" />
+      <div class="test-status-line"><span class="status-badge" :data-status="status"><TestResultStatusIcon :status="status" />{{ statusLabel(status) }}</span><span v-if="source" class="report-muted">{{ source.target }}</span><DurationLabel :millis="node.durationMillis" /></div>
+      <div class="test-source-actions">
+        <a v-if="source?.jobUrl" class="report-text-button" :href="source.jobUrl" target="_blank" rel="noopener noreferrer">Buildkite job ↗</a>
+        <template v-if="source?.xmlUrl"><ArchiveDownload v-if="archiveMember(source.xmlUrl)" :reference="archiveMember(source.xmlUrl)!" label="JUnit XML" compact /><a v-else class="report-text-button" :href="source.xmlUrl" target="_blank" rel="noopener noreferrer">JUnit XML ↗</a></template>
+        <button v-if="isSupported" type="button" class="report-button" @click="copy(locator)"><Check v-if="copied" v-bind="defaultIconProps" /><Copy v-else v-bind="defaultIconProps" />{{ copied ? 'Copied link' : 'Copy link' }}</button>
       </div>
     </template>
   </DetailsHeader>
+  <section v-if="reason" class="test-reason" :data-status="status" aria-label="Test reason"><h3>{{ status === 'SKIPPED' ? 'Skip reason' : status === 'ERRORED' ? 'Execution error' : 'Failure reason' }}</h3><p>{{ reason }}</p></section>
+  <BranchOverview v-if="hasChildren" v-model:selection="selection" :execution="execution" :node="node" />
   <DetailsSections v-if="diagnostics.length" :sections="diagnostics" />
   <ExecutionArtifacts :artifacts="artifacts" :sources="artifactSources" />
-  <DetailsSections :sections="sections" />
+  <details class="metadata-section"><summary>Source and provenance</summary><DetailsSections :sections="sections" /></details>
 </template>

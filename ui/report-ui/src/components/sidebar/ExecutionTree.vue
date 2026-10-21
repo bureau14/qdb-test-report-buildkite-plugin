@@ -1,38 +1,49 @@
 <!-- Modified from original source: https://github.com/ota4j-team/open-test-reporting/blob/main/html-report/src/components/sidebar/ExecutionTree.vue -->
 <script setup lang="ts">
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import TestExecution from "../common/TestExecution.ts";
-import Selection from "../common/Selection.ts";
-import TreeRow from "./TreeRow.vue";
-import { treeStateKey } from "./TreeState.ts";
-import { visibleRows } from "./VisibleTree.ts";
+import {
+  computed,
+  inject,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch
+} from "vue";
 
-const ROW_HEIGHT = 24;
+import Selection from "../common/Selection.ts";
+import TestExecution from "../common/TestExecution.ts";
+
+import TreeRow from "./TreeRow.vue";
+import {treeStateKey} from "./TreeState.ts";
+import {visibleRows} from "./VisibleTree.ts";
+
+const ROW_HEIGHT = 34;
 const OVERSCAN_ROWS = 20;
 
-const selection = defineModel<Selection | undefined>("selection");
-const props = defineProps<{ executions: TestExecution[] }>();
+const selection = defineModel<Selection|undefined>("selection");
+const props = defineProps<{executions : TestExecution[]}>();
 const treeState = inject(treeStateKey)!;
-const container = ref<HTMLElement | null>(null);
+const container = ref<HTMLElement|null>(null);
 const scrollTop = ref(0);
 const viewportHeight = ref(600);
-let resizeObserver: ResizeObserver | undefined;
+let resizeObserver: ResizeObserver|undefined;
 
 const rows = computed(() => visibleRows(props.executions, treeState));
-const startIndex = computed(() =>
-  Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - OVERSCAN_ROWS),
+const startIndex = computed(
+  () => Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - OVERSCAN_ROWS),
 );
-const endIndex = computed(() =>
-  Math.min(
+const endIndex = computed(
+  () => Math.min(
     rows.value.length,
     Math.ceil((scrollTop.value + viewportHeight.value) / ROW_HEIGHT) +
       OVERSCAN_ROWS,
-  ),
+    ),
 );
-const visible = computed(() => rows.value.slice(startIndex.value, endIndex.value));
+const visible =
+  computed(() => rows.value.slice(startIndex.value, endIndex.value));
 const topPadding = computed(() => startIndex.value * ROW_HEIGHT);
-const bottomPadding = computed(() =>
-  Math.max(0, (rows.value.length - endIndex.value) * ROW_HEIGHT),
+const bottomPadding = computed(
+  () => Math.max(0, (rows.value.length - endIndex.value) * ROW_HEIGHT),
 );
 
 function updateViewportHeight() {
@@ -47,7 +58,8 @@ function onScroll(event: Event) {
 
 watch(rows, () => {
   if (container.value) {
-    const maxScrollTop = Math.max(0, rows.value.length * ROW_HEIGHT - viewportHeight.value);
+    const maxScrollTop =
+      Math.max(0, rows.value.length * ROW_HEIGHT - viewportHeight.value);
     if (container.value.scrollTop > maxScrollTop) {
       container.value.scrollTop = maxScrollTop;
       scrollTop.value = maxScrollTop;
@@ -94,7 +106,7 @@ onBeforeUnmount(() => {
   <div
     v-if="rows.length"
     ref="container"
-    class="h-[calc(100vh-3rem)] overflow-auto pr-2"
+    class="virtual-test-tree"
     @scroll="onScroll"
   >
     <div :style="{ height: `${topPadding}px` }" />
@@ -106,4 +118,5 @@ onBeforeUnmount(() => {
     />
     <div :style="{ height: `${bottomPadding}px` }" />
   </div>
+  <p v-else class="tree-empty-state">No tests match these filters. Clear the filters or change the search.</p>
 </template>

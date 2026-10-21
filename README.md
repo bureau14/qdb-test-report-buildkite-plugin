@@ -7,7 +7,11 @@ A [Buildkite plugin](https://buildkite.com/docs/plugins) for generating self-con
 - **Job report** — after a test step finishes, reads that job's local JUnit XML from `job.junit_input_path`, generates a per-job HTML report, uploads the HTML/summary/raw XML, and optionally fails the step when tests failed.
 - **Aggregate report** — in a later reporting step, discovers XML uploaded by earlier job-report steps for the current build, downloads it, generates one aggregate HTML report, and uploads the aggregate HTML/summary.
 
-Each platform-execution leaf is labeled `{test name} - {platform}`, preserving test identity in the sidebar and detail header. When `ARTIFACTS_DOMAIN` is configured, its Source panel links `JUnit XML` directly to the exact raw XML that produced the selected execution. Without a browser-facing artifacts domain, the XML name remains visible but is not made clickable.
+The report opens with the full report selected. When tests, CTest checks, or report inputs fail, the combined Failed / Errored filter is enabled automatically and affected branches are expanded down to logical tests. Direct links take priority and reveal their selected node even when it would otherwise be filtered out.
+
+The tree shows execution status counts, summed case time, and short failure reasons on logical tests. Platform leaves show the platform once, with the full test identity available on hover and in the test path. The overview keeps full logical-test counts separate from platform executions and CTest checks, and links affected branches back into the tree. Selecting a logical test compares its platform executions. Previous / Next failure moves through failing and errored executions. Diagnostic blocks support copy, line wrapping, and expansion; source metadata and provenance are collapsible.
+
+When `ARTIFACTS_DOMAIN` is configured, the selected execution links `JUnit XML` directly to the exact raw XML that produced it. Without a browser-facing artifacts domain, the XML name remains visible but is not made clickable.
 
 The self-contained report supports case-insensitive sidebar search without a server. It also updates the browser URL to `#node=<id>` for the selected report node; share that full URL to open the same static report with the node selected, its path expanded, and the sidebar scrolled to it. Node IDs are specific to the generated report file.
 
