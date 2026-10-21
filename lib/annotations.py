@@ -175,7 +175,8 @@ def build_annotation_body(
             file = item.get("file", "<unknown>")
             platform = item.get("platform", "<unknown>")
             label = f"{file} ({platform})"
-            if url := item.get("url"):
+            url = item.get("url")
+            if url:
                 label = f'<a href="{url}" target="_blank" rel="noopener noreferrer">{label}</a>'
             return f"- {label}: {item.get('error', 'invalid XML')}"
 
@@ -186,7 +187,8 @@ def build_annotation_body(
         archive_lines = []
         for item in archive_errors:
             label = escape(f"{item['file']} ({item['platform']}, job {item['job_id']})")
-            if url := item.get("url"):
+            url = item.get("url")
+            if url:
                 label = f'<a href="{escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">{label}</a>'
             archive_lines.append(f"- {label}: {escape(item['error'])}")
         body += "\n\n❌ JUnit archive errors\n\n" + "\n".join(archive_lines)

@@ -13,3 +13,12 @@ steps:
       - docker#v5.13.0:
           image: "python:3.14-slim"
           chown: true
+
+  - label: "Tests (Python 3.7)"
+    command: |
+      pip install pytest==7.4.4 boto3==1.33.13
+      python -m pytest -q
+    plugins:
+      - docker#v5.13.0:
+          image: "python:3.7-slim"
+          chown: true

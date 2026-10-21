@@ -30,7 +30,7 @@ def resolve_input(root: Path, value: str) -> Path:
     if path.is_absolute() or ".." in path.parts:
         raise ValueError(f"manifest paths must be checkout-relative: {value!r}")
     resolved = (root / path).resolve()
-    if not resolved.is_relative_to(root):
+    if root != resolved and root not in resolved.parents:
         raise ValueError(f"manifest path escapes checkout: {value!r}")
     return resolved
 
@@ -54,7 +54,7 @@ def collect_execution_artifacts(
         if not file.is_file():
             continue
         resolved = file.resolve()
-        if not resolved.is_relative_to(root):
+        if root != resolved and root not in resolved.parents:
             raise ValueError(f"execution artifact escapes checkout: {file}")
         relative = resolved.relative_to(root).as_posix()
         previous = result.execution_ids.get(relative)
@@ -175,7 +175,7 @@ def collect_execution_inputs(
         manifest_path = manifest_input.local_path.resolve()
         if manifest_path.suffix != ".json":
             continue
-        if not manifest_path.is_relative_to(root):
+        if root != manifest_path and root not in manifest_path.parents:
             raise ValueError(f"manifest is outside checkout: {manifest_path}")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if any(

@@ -2,6 +2,18 @@ import assert from "node:assert/strict";
 import {test} from "node:test";
 
 import {statusCounts} from "../src/components/common/presentation.ts";
+
+test("skipped-only containers keep their aggregate status", () => {
+  const execution = new TestExecution({
+    id : "skipped-report",
+    roots : [ "suite" ],
+    children : {suite : {ids : [ "skip" ], childStatuses : [ "SKIPPED" ]}},
+    testNodes :
+      [ {id : "suite", name : "Suite"}, {id : "skip", status : "SKIPPED"} ],
+  });
+  assert.equal(execution.displayStatus(execution.node("suite")), "SKIPPED");
+  assert.deepEqual(execution.counts(execution.node("suite")), {SKIPPED : 1});
+});
 import TestExecution from "../src/components/common/TestExecution.ts";
 import TreeState from "../src/components/sidebar/TreeState.ts";
 import {visibleRows} from "../src/components/sidebar/VisibleTree.ts";

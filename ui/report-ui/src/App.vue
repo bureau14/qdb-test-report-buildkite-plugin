@@ -13,7 +13,14 @@ import TreeState, {treeStateKey} from "./components/sidebar/TreeState.ts";
 
 const props = defineProps<{executions : TestExecution[]}>();
 const selection = ref<Selection|undefined>();
+performance.mark("report-tree-state-create-start");
 const treeState = reactive(new TreeState(props.executions));
+performance.mark("report-tree-state-create-end");
+performance.measure(
+  "report-tree-state-create",
+  "report-tree-state-create-start",
+  "report-tree-state-create-end",
+);
 provide(treeStateKey, treeState);
 const problems = computed(
   () => props.executions.flatMap((execution) => execution.problems().map(

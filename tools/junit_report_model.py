@@ -298,7 +298,7 @@ def specific_reason_from_text(text: str | None) -> str | None:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     for line in lines:
         if line.startswith("- message:"):
-            return line.removeprefix("- message:").strip()
+            return line[len("- message:") :].strip()
     for line in lines:
         if line not in {"ASSERTION FAILURE:", "Failures detected in:"}:
             return line
@@ -410,10 +410,12 @@ def qdb_process_id(root: ET.Element) -> str | None:
     values = set()
     for testcase in root.iter():
         if (
-            local_name(testcase) == "testcase"
-            and testcase.attrib.get("name") == QDB_PROCESS_ID_TESTCASE
-            and (output := testcase_system_out(testcase)) is not None
+            local_name(testcase) != "testcase"
+            or testcase.attrib.get("name") != QDB_PROCESS_ID_TESTCASE
         ):
+            continue
+        output = testcase_system_out(testcase)
+        if output is not None:
             value = output.splitlines()[0].strip()
             if value.isdecimal():
                 values.add(value)
@@ -447,13 +449,11 @@ def source_artifacts_for_junit(
     if execution_id is not None:
         return [artifact for artifact in artifacts if artifact.execution_id == execution_id]
     artifacts = [artifact for artifact in artifacts if artifact.execution_id is None]
-    matching_pid_artifacts = [
-        artifact
-        for artifact in artifacts
-        if (match := QDB_TEST_LOG_NAME_RE.fullmatch(Path(artifact.relative_path).name))
-        and qdb_pid
-        and match.group(1) == qdb_pid
-    ]
+    matching_pid_artifacts = []
+    for artifact in artifacts:
+        match = QDB_TEST_LOG_NAME_RE.fullmatch(Path(artifact.relative_path).name)
+        if match and qdb_pid and match.group(1) == qdb_pid:
+            matching_pid_artifacts.append(artifact)
     if junit_filename_stem:
         matching_junit_artifacts = [
             artifact
@@ -523,6 +523,11 @@ def parse_junit_file(
         if not suite_testcases:
             log_warn(f"empty testsuite file={path} platform={platform} suite={suite_name}")
         for testcase in suite_testcases:
+            process_output = (
+                testcase_system_out(testcase)
+                if testcase.attrib.get("name") == QDB_PROCESS_ID_TESTCASE
+                else None
+            )
             if (
                 testcase.attrib.get("name") == QDB_PROCESS_ID_TESTCASE
                 and testcase_status(testcase) == "SUCCESSFUL"
@@ -532,8 +537,8 @@ def parse_junit_file(
                     suite_name
                     in {"qdb_unit_tests", "qdb_integration_tests", "qdb_regression_tests"}
                     and not testcase.attrib.get("classname")
-                    or (output := testcase_system_out(testcase))
-                    and output.splitlines()[0].strip().isdecimal()
+                    or process_output
+                    and process_output.splitlines()[0].strip().isdecimal()
                 )
             ):
                 continue
@@ -617,7 +622,7 @@ def build_report(
                 xml_file.relative_to(
                     input_path.parent if input_path.is_file() else input_path
                 ).as_posix()
-                if input_path.is_dir()
+                if not has_glob_magic(input_path) and input_path.is_dir()
                 else xml_file.name
             )
             # Strip UUIDs and the platform name from the source_id components.

@@ -30,7 +30,7 @@ The plugin exits `64` when `job.fail_on_test_failures` is true and the generated
 
 ## Requirements
 
-- **Python 3** must be available on the host agent (`python3` in `PATH`).
+- **Python 3.7 or newer** must be available on the host agent (`python3` in `PATH`).
 - The agent must have IAM permissions (S3) or SSM-stored R2 credentials configured. See [Backend configuration](#backend-configuration).
 - Test jobs must write JUnit XML before the `post-command` hook runs.
 - Aggregate steps must depend on the test/reporting jobs whose uploaded XML they should include.

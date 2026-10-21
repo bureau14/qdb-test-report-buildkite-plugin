@@ -7,7 +7,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List
 from urllib.parse import quote
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 
@@ -73,7 +73,7 @@ class XmlSourceLink:
     url: str | None
 
 
-ArtifactMetadata = list[dict[str, Any]]
+ArtifactMetadata = List[Dict[str, Any]]
 
 
 def log(message: str) -> None:
@@ -434,10 +434,9 @@ def main() -> int:
         config = load_plugin_config()
         configure_logging(config.log_level)
 
-        with (
-            trace("plugin.total", scope=config.scope),
-            tempfile.TemporaryDirectory(prefix="test-report-") as tmp_dir_str,
-        ):
+        with trace("plugin.total", scope=config.scope), tempfile.TemporaryDirectory(
+            prefix="test-report-"
+        ) as tmp_dir_str:
             staging_root = Path(tmp_dir_str)
             full_scope_xml_stage_root = staging_root / "downloaded-xml"
 
