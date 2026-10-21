@@ -63,6 +63,40 @@ If the path does not exist or no XML files are found, the job report fails with 
 
 `job.artifacts` can optionally upload additional non-JUnit files, such as server logs or debug bundles. Each entry requires a `name` and `input_path`. The input path supports the same path styles as `junit_input_path` except directories upload all regular files recursively instead of filtering to XML. Missing or empty additional artifact inputs log a warning, are recorded in `summary.json`, and do not fail the report.
 
+### Launcher execution manifests
+
+Set `job.manifest_input_path: "test-metadata/*.json"` to collect results from the
+QuasarDB CTest launcher. The path accepts a JSON file, a directory of JSON files,
+or a glob. Existing `junit_input_path` and `artifacts` inputs continue to collect
+CTest, query, and other reports that do not have manifests. At least one report
+or manifest must be found. `Test execution artifacts` is a reserved artifact group.
+
+Each version 1 manifest records `execution_id`, `name`, `status`, `exit_code`,
+`reports`, and `artifacts`. Report and artifact entries contain a checkout-relative
+`path`, a `role`, and a `required` flag. Directories in `artifacts` are collected
+recursively, including binary dumps. Absolute paths, parent traversal, symlinks
+outside the checkout, and files claimed by multiple executions are rejected.
+The launcher writes the manifest atomically before spawning the test and updates
+it with the runner PID, duration, and exit status. A hard kill can leave its status
+as `running`; collection treats that as an interrupted execution. Manifests with
+Buildkite build/job IDs belonging to another build/job are ignored.
+
+The plugin collects the manifest itself, original reports, and all declared
+artifacts into `logs.zip`. JUnit reports are copied into `junit.zip` with a
+`qdb.execution_id` suite property; the original files remain unchanged and are
+available as artifacts. The summary records that same ID on each artifact.
+Both job and aggregate reports use the ID for exact associations, without PID
+or filename matching. Legacy executions retain their existing matching behavior
+and do not receive artifacts belonging to managed executions.
+
+Missing, empty, or malformed required JUnit reports produce an errored launcher
+result, with the original report retained when present. Interrupted executions
+and unsuccessful processes whose XML contains no failure also produce an error
+result. Valid XML that already describes a failed process is not duplicated.
+Successful executions with no JUnit report declared receive a successful launcher
+result. Optional missing logs and dumps are normal; missing required artifacts
+produce an error result. Aggregate steps need no additional configuration.
+
 By default, job mode exits `64` when the report contains failed or errored tests. Disable that if your pipeline already handles test failures another way:
 
 ```yaml
@@ -172,6 +206,7 @@ plugins:
 | --- | --- | :---: | --- |
 | `variant` | string | ✓ | Test variant name and object-store grouping, for example `linux-haswell-release`. |
 | `junit_input_path` | string | ✓ | Local JUnit XML file, directory, or glob to read from the test job. |
+| `manifest_input_path` | string |  | Optional version 1 launcher execution manifests (JSON file, directory, or glob). |
 | `fail_on_test_failures` | boolean |  | Exit `64` when the generated job report contains failed or errored tests. Default: `true`. |
 | `artifacts` | array |  | Optional additional artifact groups to upload and link from the report. Each item requires `name` and `input_path`. Missing files warn but do not fail. |
 

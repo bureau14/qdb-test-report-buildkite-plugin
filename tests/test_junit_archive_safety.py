@@ -206,10 +206,9 @@ def test_xml_above_64_mib_generates_complete_report(monkeypatch, archive_store, 
     add, kwargs = archive_store
     obj = add("large", [("results.xml", "placeholder")])
     archive_path = tmp_path / "large.zip"
-    with (
-        ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive,
-        archive.open("results.xml", "w") as output,
-    ):
+    with ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive, archive.open(
+        "results.xml", "w"
+    ) as output:
         output.write(b'<testsuite><testcase name="large"><system-out>')
         # Stream a real member above the former cap without a giant fixture string.
         for _ in range(65):

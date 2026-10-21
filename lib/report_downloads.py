@@ -255,7 +255,10 @@ def extract_junit_archive(
                     target.parent.mkdir(parents=True, exist_ok=True)
                     size = 0
                     with archive.open(member) as source, target.open("wb") as output:
-                        while chunk := source.read(JUNIT_COPY_CHUNK_BYTES):
+                        while True:
+                            chunk = source.read(JUNIT_COPY_CHUNK_BYTES)
+                            if not chunk:
+                                break
                             size += len(chunk)
                             if size > member.file_size:
                                 raise InvalidJUnitArchive(
@@ -387,7 +390,8 @@ def collect_full_scope_xml(
                     "job_id": obj.job_id,
                     "error": str(exc),
                 }
-                if url := internal_url(cfg, obj.key):
+                url = internal_url(cfg, obj.key)
+                if url:
                     error["url"] = url
                 errors_by_index[idx] = error
                 logger.error("Rejected JUnit archive key=%s job=%s: %s", obj.key, obj.job_id, exc)
