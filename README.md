@@ -334,6 +334,13 @@ python3 tools/junit_html_report.py \
 
 The standalone converter is quiet by default; errors are written to stderr. Empty XML files are skipped with warnings visible at `warning` or more verbose levels. Malformed XML files emit errors and are recorded in `summary.json` so the Buildkite plugin can fail the build and annotate the invalid inputs. If no XML files are discovered across all configured inputs, it still writes an empty report and logs a warning when enabled.
 
+Boost.Test cases skipped with a diagnostic chain ending in the exact reason
+`disabled` are omitted during report-model ingestion. These are filtered-out or
+default-disabled tests. Runtime skips, unknown skip diagnostics, failures, and
+fixture errors remain visible. Job and aggregate counts are derived from the
+retained cases, while source XML and execution-manifest artifact associations
+remain intact. No additional manifest metadata is required.
+
 ## Licensing and Attribution
 
 - This project includes a vendored and modified version of the **Open Test Reporting (OTR) UI**, licensed under the **Apache License 2.0**. The original license is at `ui/LICENSE.md`.

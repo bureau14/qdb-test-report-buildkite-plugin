@@ -368,6 +368,19 @@ def testcase_system_out(testcase: ET.Element) -> str | None:
     return None
 
 
+def should_omit_boost_disabled_testcase(testcase: ET.Element) -> bool:
+    # Boost emits the same skipped element for selection exclusions and runtime
+    # skips. Only its diagnostic chain identifies the ordinary disabled state.
+    if testcase_status(testcase) != "SKIPPED":
+        return False
+    output = testcase_system_out(testcase)
+    return bool(
+        output
+        and output.startswith("Test case disabled because of the following chain of decision:\n")
+        and output.endswith("- reason: 'disabled'")
+    )
+
+
 def qdb_process_id(root: ET.Element) -> str | None:
     values = set()
     for testcase in root.iter():
@@ -492,6 +505,8 @@ def parse_junit_file(
         if not suite_testcases:
             log_warn(f"empty testsuite file={path} platform={platform} suite={suite_name}")
         for testcase in suite_testcases:
+            if should_omit_boost_disabled_testcase(testcase):
+                continue
             logical_id, classname, name = logical_test_identity(testcase, source_id)
             # CTest has no generator marker, but emits these suite attributes,
             # execution statuses, and identical class/test names.

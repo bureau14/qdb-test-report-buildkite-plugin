@@ -1436,3 +1436,57 @@ def test_report_ui_data_can_filter_only_failures(tmp_path):
 
     # 1 suite + 1 test file + 1 classname + 1 logical + 1 execution leaf = 5 nodes
     assert len(filtered_execution["testNodes"]) == 5
+
+
+def test_boost_disabled_cases_are_omitted_without_hiding_runtime_results(tmp_path):
+    from junit_report_model import build_report
+
+    def skip(name, reason, extra=""):
+        return (
+            f'<testcase name="{name}"><skipped/>{extra}<system-out>'
+            "Test case disabled because of the following chain of decision:\n"
+            f"- disabled test unit: 'suite/{name}'\n"
+            "- disabled test unit: 'suite'\n"
+            f"- reason: '{reason}'</system-out></testcase>"
+        )
+
+    xml = write(
+        tmp_path / "boost.xml",
+        junit_xml(
+            '<testcase name="passed"/>',
+            skip("excluded", "disabled"),
+            skip("dependency", "dependency test case has failed"),
+            skip("precondition", "precondition failed"),
+            skip("timeout", "timeout for the test unit is exceeded"),
+            skip("failed", "disabled", '<failure message="failure"/>'),
+            skip("fixture", "disabled", '<error message="fixture failed"/>'),
+            '<testcase name="other_framework"><skipped message="disabled"/></testcase>',
+            '<testcase name="unknown"><skipped/><system-out>'
+            "- reason: 'disabled'</system-out></testcase>",
+        ),
+    )
+    original = xml.read_bytes()
+    report = build_report("report", [("linux", xml)])
+    names = {
+        logical.name
+        for suite in report.suites.values()
+        for test_file in suite.test_files.values()
+        for logical in test_file.logical_tests.values()
+    }
+    assert names == {
+        "passed",
+        "dependency",
+        "precondition",
+        "timeout",
+        "failed",
+        "fixture",
+        "other_framework",
+        "unknown",
+    }
+    assert report.status_counts == {
+        "SUCCESSFUL": 1,
+        "SKIPPED": 5,
+        "FAILED": 1,
+        "ERRORED": 1,
+    }
+    assert xml.read_bytes() == original
