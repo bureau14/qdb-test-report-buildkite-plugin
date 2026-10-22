@@ -67,6 +67,7 @@ class ArtifactLink:
     key: str
     url: str | None
     size_bytes: int
+    execution_id: str | None = None
 
 
 @dataclass
@@ -88,6 +89,7 @@ class TestcaseExecution:
     output: str | None = None
     source_artifacts: list[ArtifactLink] = field(default_factory=list)
     qdb_process_id: str | None = None
+    execution_id: str | None = None
     report_kind: str = "test"
 
 
@@ -241,11 +243,11 @@ def logical_test_identity(testcase: ET.Element, source_id: str) -> tuple[str, st
 
 
 def testcase_status(testcase: ET.Element) -> str:
-    if testcase.find("error") is not None:
+    if find_child(testcase, "error") is not None:
         return "ERRORED"
-    if testcase.find("failure") is not None:
+    if find_child(testcase, "failure") is not None:
         return "FAILED"
-    if testcase.find("skipped") is not None:
+    if find_child(testcase, "skipped") is not None:
         return "SKIPPED"
     return "SUCCESSFUL"
 
@@ -256,7 +258,7 @@ def specific_reason_from_text(text: str | None) -> str | None:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     for line in lines:
         if line.startswith("- message:"):
-            return line.removeprefix("- message:").strip()
+            return line[len("- message:") :].strip()
     for line in lines:
         if line not in {"ASSERTION FAILURE:", "Failures detected in:"}:
             return line
@@ -265,11 +267,11 @@ def specific_reason_from_text(text: str | None) -> str | None:
 
 def testcase_reason_and_output(testcase: ET.Element, status: str) -> tuple[str | None, str | None]:
     if status == "ERRORED":
-        node = testcase.find("error")
+        node = find_child(testcase, "error")
     elif status == "FAILED":
-        node = testcase.find("failure")
+        node = find_child(testcase, "failure")
     elif status == "SKIPPED":
-        node = testcase.find("skipped")
+        node = find_child(testcase, "skipped")
     else:
         node = None
 
@@ -294,7 +296,7 @@ def testcase_reason_and_output(testcase: ET.Element, status: str) -> tuple[str |
     # they diagnose a failed execution. Full output remains available in the JUnit XML.
     if status in {"FAILED", "ERRORED"}:
         for output_name in ("system-out", "system-err"):
-            output_node = testcase.find(output_name)
+            output_node = find_child(testcase, output_name)
             output_text = (
                 output_node.text.strip() if output_node is not None and output_node.text else None
             )
@@ -355,6 +357,10 @@ def local_name(element: ET.Element) -> str:
     return element.tag.rsplit("}", 1)[-1]
 
 
+def find_child(element: ET.Element, name: str) -> ET.Element | None:
+    return next((child for child in element if local_name(child) == name), None)
+
+
 def testcase_system_out(testcase: ET.Element) -> str | None:
     for child in testcase:
         if local_name(child) == "system-out" and child.text:
@@ -366,10 +372,12 @@ def qdb_process_id(root: ET.Element) -> str | None:
     values = set()
     for testcase in root.iter():
         if (
-            local_name(testcase) == "testcase"
-            and testcase.attrib.get("name") == QDB_PROCESS_ID_TESTCASE
-            and (output := testcase_system_out(testcase)) is not None
+            local_name(testcase) != "testcase"
+            or testcase.attrib.get("name") != QDB_PROCESS_ID_TESTCASE
         ):
+            continue
+        output = testcase_system_out(testcase)
+        if output is not None:
             value = output.splitlines()[0].strip()
             if value.isdecimal():
                 values.add(value)
@@ -399,16 +407,20 @@ def artifact_matches_junit_filename(artifact: ArtifactLink, junit_filename_stem:
 
 
 def source_artifacts_for_junit(
-    qdb_pid: str | None, artifacts: list[ArtifactLink], junit_filename_stem: str | None = None
+    qdb_pid: str | None,
+    artifacts: list[ArtifactLink],
+    junit_filename_stem: str | None = None,
+    execution_id: str | None = None,
 ) -> list[ArtifactLink]:
+    if execution_id is not None:
+        return [artifact for artifact in artifacts if artifact.execution_id == execution_id]
+    artifacts = [artifact for artifact in artifacts if artifact.execution_id is None]
     non_qdb_logs = [artifact for artifact in artifacts if not is_qdb_test_log(artifact)]
-    matching_pid_artifacts = [
-        artifact
-        for artifact in artifacts
-        if (match := QDB_TEST_LOG_NAME_RE.fullmatch(Path(artifact.relative_path).name))
-        and qdb_pid
-        and match.group(1) == qdb_pid
-    ]
+    matching_pid_artifacts = []
+    for artifact in artifacts:
+        match = QDB_TEST_LOG_NAME_RE.fullmatch(Path(artifact.relative_path).name)
+        if match and qdb_pid and match.group(1) == qdb_pid:
+            matching_pid_artifacts.append(artifact)
     if junit_filename_stem:
         matching_junit_artifacts = [
             artifact
@@ -466,6 +478,16 @@ def parse_junit_file(
         return executions
     for suite in suites:
         suite_name = suite.attrib.get("name") or path.stem
+        execution_id = next(
+            (
+                item.attrib.get("value")
+                for properties in suite
+                if local_name(properties) == "properties"
+                for item in properties
+                if local_name(item) == "property" and item.attrib.get("name") == "qdb.execution_id"
+            ),
+            None,
+        )
         suite_testcases = [child for child in list(suite) if local_name(child) == "testcase"]
         if not suite_testcases:
             log_warn(f"empty testsuite file={path} platform={platform} suite={suite_name}")
@@ -499,6 +521,7 @@ def parse_junit_file(
                     output=output,
                     source_artifacts=source_artifacts or [],
                     qdb_process_id=source_qdb_process_id,
+                    execution_id=execution_id,
                     report_kind="ctest" if is_ctest else "test",
                 )
             )
@@ -549,7 +572,7 @@ def build_report(
                 xml_file.relative_to(
                     input_path.parent if input_path.is_file() else input_path
                 ).as_posix()
-                if input_path.is_dir()
+                if not has_glob_magic(input_path) and input_path.is_dir()
                 else xml_file.name
             )
             # Strip UUIDs and the platform name from the source_id components.
@@ -609,13 +632,23 @@ def build_report(
             first_execution = file_executions[0]
             # The source XML's process ID and filename apply to every testcase,
             # so match its artifacts once rather than rescanning them per testcase.
-            matching_artifacts = source_artifacts_for_junit(
-                first_execution.qdb_process_id,
-                (source_artifacts_by_job_id or {}).get(effective_source_job_id or "", []),
-                first_execution.test_file,
+            job_artifacts = (source_artifacts_by_job_id or {}).get(
+                effective_source_job_id or "", []
             )
+            matches_by_execution = {}
             for execution in file_executions:
-                execution.source_artifacts = matching_artifacts
+                if execution.execution_id not in matches_by_execution:
+                    arguments = (
+                        first_execution.qdb_process_id,
+                        job_artifacts,
+                        first_execution.test_file,
+                    )
+                    matches_by_execution[execution.execution_id] = (
+                        source_artifacts_for_junit(*arguments, execution_id=execution.execution_id)
+                        if execution.execution_id is not None
+                        else source_artifacts_for_junit(*arguments)
+                    )
+                execution.source_artifacts = matches_by_execution[execution.execution_id]
         total_raw_executions += len(file_executions)
         for execution in file_executions:
             suite = suites.get(execution.suite_name)
@@ -679,7 +712,7 @@ def build_report(
 
     report = Report(
         title=title,
-        platforms=[platform for platform, _ in platform_specs],
+        platforms=list(dict.fromkeys(platform for platform, _ in platform_specs)),
         suites=suites,
         build_url=build_url,
         commit_url=commit_url,

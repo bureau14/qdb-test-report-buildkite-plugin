@@ -7,7 +7,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List
 from urllib.parse import quote
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 
@@ -24,6 +24,7 @@ from annotations import (
     get_job_annotation_style,
 )
 from artifact_inputs import ArtifactFile, collect_artifact_files, slugify_artifact_name
+from execution_inputs import collect_execution_inputs
 from git_links import build_commit_url
 from junit_report_model import ArtifactLink
 from object_store import (
@@ -72,7 +73,7 @@ class XmlSourceLink:
     url: str | None
 
 
-ArtifactMetadata = list[dict[str, Any]]
+ArtifactMetadata = List[Dict[str, Any]]
 
 
 def log(message: str) -> None:
@@ -143,6 +144,7 @@ def artifact_links_from_metadata(metadata: ArtifactMetadata) -> list[ArtifactLin
                     key=str(file_info.get("key", "")),
                     url=file_info.get("url"),
                     size_bytes=int(file_info.get("size_bytes", 0)),
+                    execution_id=file_info.get("execution_id"),
                 )
             )
     return links
@@ -431,10 +433,9 @@ def main() -> int:
         config = load_plugin_config()
         configure_logging(config.log_level)
 
-        with (
-            trace("plugin.total", scope=config.scope),
-            tempfile.TemporaryDirectory(prefix="test-report-") as tmp_dir_str,
-        ):
+        with trace("plugin.total", scope=config.scope), tempfile.TemporaryDirectory(
+            prefix="test-report-"
+        ) as tmp_dir_str:
             staging_root = Path(tmp_dir_str)
             full_scope_xml_stage_root = staging_root / "downloaded-xml"
 
@@ -548,16 +549,57 @@ def main() -> int:
                     link for links in source_artifacts_by_job_id.values() for link in links
                 ]
             else:
-                if config.junit_input_path is None or config.variant is None:
-                    raise ValueError("scope=job requires variant and junit_input_path")
-                xml_uploads = collect_job_xml_uploads(config.junit_input_path, config.variant)
+                if config.variant is None:
+                    raise ValueError("scope=job requires variant")
+                if config.junit_input_path is None and config.manifest_input_path is None:
+                    raise ValueError("scope=job requires junit_input_path or manifest_input_path")
+                xml_uploads = []
+                if config.junit_input_path is not None:
+                    try:
+                        xml_uploads = collect_job_xml_uploads(
+                            config.junit_input_path, config.variant
+                        )
+                    except FileNotFoundError:
+                        if config.manifest_input_path is None:
+                            raise
+                execution_inputs = None
+                if config.manifest_input_path is not None:
+                    execution_inputs = collect_execution_inputs(
+                        config.manifest_input_path, xml_uploads, staging_root / "executions"
+                    )
+                    xml_uploads = execution_inputs.xml_uploads
+                    if not xml_uploads:
+                        raise FileNotFoundError("No JUnit reports or execution manifests found")
+                    config = replace(
+                        config,
+                        platforms=[
+                            PlatformConfig(config.variant, xml.local_path) for xml in xml_uploads
+                        ],
+                    )
                 store_context = resolve_object_store_context()
                 xml_source_links = build_job_xml_source_links(config, xml_uploads, store_context)
                 artifact_files = collect_artifact_files(config.artifacts)
+                if execution_inputs is not None:
+                    if any(
+                        slugify_artifact_name(artifact.name)
+                        == slugify_artifact_name("Test execution artifacts")
+                        for artifact in config.artifacts
+                    ):
+                        raise ValueError(
+                            "Test execution artifacts is reserved for launcher manifests"
+                        )
+                    artifact_files.extend(execution_inputs.artifact_files)
                 if artifact_files:
                     artifact_metadata = upload_extra_artifacts(
                         config, artifact_files, store_context
                     )
+                if execution_inputs is not None:
+                    for artifact in artifact_metadata:
+                        if artifact["name"] == "Test execution artifacts":
+                            for file_info in artifact["files"]:
+                                file_info["execution_id"] = execution_inputs.execution_ids[
+                                    file_info["relative_path"]
+                                ]
                 uploaded_artifact_names = {item["name"] for item in artifact_metadata}
                 for artifact in config.artifacts:
                     if artifact.name not in uploaded_artifact_names:
@@ -616,7 +658,7 @@ def main() -> int:
                 else:
                     log(f"HTML report uploaded to s3://{html_upload.bucket}/{html_upload.key}")
 
-            # A malformed JUnit file is a build error even when HTML upload is unavailable.
+            # Preserve malformed-input diagnostics even when no public HTML URL is available.
             if config.annotate:
                 html_url = html_upload.url if html_upload is not None else None
                 if config.scope == "job":
@@ -654,14 +696,11 @@ def main() -> int:
             if summary.get("junit_archive_errors"):
                 logger.error("Report contains rejected JUnit archives. Exiting 1.")
                 return 1
-            if malformed_junit_xml:
+            if config.fail_on_test_failures and (failed_or_errored or malformed_junit_xml):
                 logger.error(
-                    f"Report found {len(malformed_junit_xml)} malformed JUnit XML file(s). Exiting 1."
-                )
-                return 1
-            if config.fail_on_test_failures and failed_or_errored:
-                logger.error(
-                    f"Report has {failed_or_errored} failed/errored test execution(s) and fail_on_test_failures=true. Exiting 64."
+                    f"Report has {failed_or_errored} failed/errored test execution(s) and "
+                    f"{len(malformed_junit_xml)} malformed JUnit XML file(s); "
+                    "fail_on_test_failures=true. Exiting 64."
                 )
                 return 64
 

@@ -35,6 +35,7 @@ class PluginConfig:
     annotate: bool
     fail_on_test_failures: bool
     junit_input_path: Path | None = None
+    manifest_input_path: Path | None = None
     commit: str | None = None
     repo: str | None = None
     artifacts: list[ArtifactConfig] = field(default_factory=list)
@@ -156,6 +157,8 @@ def load_plugin_config() -> PluginConfig:
         "BUILDKITE_PLUGIN_QDB_TEST_REPORT_UPLOAD_PARALLEL", os.cpu_count() or 1
     )
 
+    manifest_input = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_MANIFEST_INPUT_PATH")
+
     variant: str | None
     junit_input_path: Path | None
     fail_on_test_failures: bool
@@ -167,8 +170,8 @@ def load_plugin_config() -> PluginConfig:
         junit_input_path = Path(junit_input_path_raw) if junit_input_path_raw else None
         if not variant:
             raise ValueError("job requires variant")
-        if not junit_input_path:
-            raise ValueError("job requires junit_input_path")
+        if junit_input_path is None and not manifest_input:
+            raise ValueError("job requires junit_input_path or manifest_input_path")
         if not job_id:
             raise ValueError("job requires BUILDKITE_JOB_ID")
 
@@ -176,7 +179,9 @@ def load_plugin_config() -> PluginConfig:
             "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_FAIL_ON_TEST_FAILURES", True
         )
         artifacts = _get_artifact_configs("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_ARTIFACTS")
-        platforms = [PlatformConfig(name=variant, path=junit_input_path)]
+        platforms = (
+            [PlatformConfig(name=variant, path=junit_input_path)] if junit_input_path else []
+        )
     else:
         variant = None
         junit_input_path = None
@@ -199,6 +204,7 @@ def load_plugin_config() -> PluginConfig:
         annotate=annotate,
         fail_on_test_failures=fail_on_test_failures,
         junit_input_path=junit_input_path,
+        manifest_input_path=Path(manifest_input) if manifest_input else None,
         commit=commit,
         repo=repo,
         artifacts=artifacts,

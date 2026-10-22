@@ -42,9 +42,12 @@ configuration:
         junit_input_path:
           type: string
           description: Local JUnit XML file, directory, or glob.
+        manifest_input_path:
+          type: string
+          description: Optional version 1 launcher manifests (file, directory, or glob), with explicit report and artifact associations.
         fail_on_test_failures:
           type: boolean
-          description: Exit 64 when the generated job report contains failed or errored tests; default true.
+          description: Exit 64 for failed or errored tests or malformed JUnit XML (legacy or manifest-owned); default true. When false, report these errors without failing the step.
         artifacts:
           type: array
           description: Optional additional files to upload with the job report and link from HTML.
@@ -59,7 +62,10 @@ configuration:
                 description: Local file, directory, or glob to upload.
             required: [name, input_path]
             additionalProperties: false
-      required: [variant, junit_input_path]
+      required: [variant]
+      anyOf:
+        - required: [junit_input_path]
+        - required: [manifest_input_path]
       additionalProperties: false
     aggregate:
       type: object
