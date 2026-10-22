@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from artifact_inputs import ArtifactFile, collect_artifact_files
+from junit_report_model import find_child, iter_junit_suites, local_name
 from plugin_config import ArtifactConfig
 from report_logging import logger
 from xml_inputs import XmlUpload
@@ -35,14 +36,17 @@ def resolve_input(root: Path, value: str) -> Path:
 
 
 def mark_execution(document: ET.Element, execution_id: str) -> None:
-    for suite in document.iter("testsuite"):
-        properties = suite.find("properties")
+    for suite in iter_junit_suites(document):
+        namespace = suite.tag[: -len("testsuite")]
+        properties = find_child(suite, "properties")
         if properties is None:
-            properties = ET.SubElement(suite, "properties")
+            properties = ET.SubElement(suite, namespace + "properties")
         for item in list(properties):
-            if item.attrib.get("name") == EXECUTION_PROPERTY:
+            if local_name(item) == "property" and item.attrib.get("name") == EXECUTION_PROPERTY:
                 properties.remove(item)
-        ET.SubElement(properties, "property", name=EXECUTION_PROPERTY, value=execution_id)
+        ET.SubElement(
+            properties, namespace + "property", name=EXECUTION_PROPERTY, value=execution_id
+        )
 
 
 def collect_execution_artifacts(
@@ -101,16 +105,15 @@ def collect_execution_manifest(root, manifest_path, manifest, staging, result, c
         collect_execution_artifacts(root, result, path, execution_id)
         try:
             document = ET.parse(path).getroot()
-            if not list(document.iter("testcase")):
+            if not any(local_name(element) == "testcase" for element in document.iter()):
                 raise ValueError("report contains no test cases")
         except (ET.ParseError, ValueError) as exc:
             errors.append(f"Invalid JUnit report {item['path']}: {exc}")
             report_errors = True
             continue
         reports_parsed += 1
-        reports_failed |= (
-            next(document.iter("failure"), None) is not None
-            or next(document.iter("error"), None) is not None
+        reports_failed |= any(
+            local_name(element) in {"failure", "error"} for element in document.iter()
         )
         mark_execution(document, execution_id)
         relative = path.relative_to(root).as_posix()

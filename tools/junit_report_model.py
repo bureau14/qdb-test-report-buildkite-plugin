@@ -243,11 +243,11 @@ def logical_test_identity(testcase: ET.Element, source_id: str) -> tuple[str, st
 
 
 def testcase_status(testcase: ET.Element) -> str:
-    if testcase.find("error") is not None:
+    if find_child(testcase, "error") is not None:
         return "ERRORED"
-    if testcase.find("failure") is not None:
+    if find_child(testcase, "failure") is not None:
         return "FAILED"
-    if testcase.find("skipped") is not None:
+    if find_child(testcase, "skipped") is not None:
         return "SKIPPED"
     return "SUCCESSFUL"
 
@@ -267,11 +267,11 @@ def specific_reason_from_text(text: str | None) -> str | None:
 
 def testcase_reason_and_output(testcase: ET.Element, status: str) -> tuple[str | None, str | None]:
     if status == "ERRORED":
-        node = testcase.find("error")
+        node = find_child(testcase, "error")
     elif status == "FAILED":
-        node = testcase.find("failure")
+        node = find_child(testcase, "failure")
     elif status == "SKIPPED":
-        node = testcase.find("skipped")
+        node = find_child(testcase, "skipped")
     else:
         node = None
 
@@ -296,7 +296,7 @@ def testcase_reason_and_output(testcase: ET.Element, status: str) -> tuple[str |
     # they diagnose a failed execution. Full output remains available in the JUnit XML.
     if status in {"FAILED", "ERRORED"}:
         for output_name in ("system-out", "system-err"):
-            output_node = testcase.find(output_name)
+            output_node = find_child(testcase, output_name)
             output_text = (
                 output_node.text.strip() if output_node is not None and output_node.text else None
             )
@@ -355,6 +355,10 @@ def worse_execution(current: TestcaseExecution, candidate: TestcaseExecution) ->
 
 def local_name(element: ET.Element) -> str:
     return element.tag.rsplit("}", 1)[-1]
+
+
+def find_child(element: ET.Element, name: str) -> ET.Element | None:
+    return next((child for child in element if local_name(child) == name), None)
 
 
 def testcase_system_out(testcase: ET.Element) -> str | None:
@@ -477,8 +481,10 @@ def parse_junit_file(
         execution_id = next(
             (
                 item.attrib.get("value")
-                for item in suite.findall("properties/property")
-                if item.attrib.get("name") == "qdb.execution_id"
+                for properties in suite
+                if local_name(properties) == "properties"
+                for item in properties
+                if local_name(item) == "property" and item.attrib.get("name") == "qdb.execution_id"
             ),
             None,
         )
