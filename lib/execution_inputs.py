@@ -107,8 +107,12 @@ def collect_execution_manifest(root, manifest_path, manifest, staging, result, c
         collect_execution_artifacts(root, result, path, execution_id)
         try:
             document = ET.parse(path).getroot()
-            if not any(local_name(element) == "testcase" for element in document.iter()):
-                raise ValueError("report contains no test cases")
+            if not any(
+                local_name(child) == "testcase"
+                for suite in iter_junit_suites(document)
+                for child in suite
+            ):
+                raise ValueError("report contains no direct testcase children of a testsuite")
         except (ET.ParseError, ValueError) as exc:
             errors.append(f"Invalid JUnit report {item['path']}: {exc}")
             report_errors = True

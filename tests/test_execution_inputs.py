@@ -247,3 +247,35 @@ def test_rejects_empty_and_dot_paths(tmp_path, value, group, role):
 
     with pytest.raises(ValueError, match="must not be empty or dot paths"):
         collect(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "xml",
+    [
+        '<testcase name="orphan" />',
+        '<report><testcase name="orphan" /></report>',
+        '<testsuite><wrapper><testcase name="nested" /></wrapper></testsuite>',
+        '<testsuite><testsuite><testcase name="nested" /></testsuite></testsuite>',
+    ],
+)
+@pytest.mark.parametrize("namespace", [False, True])
+def test_unparseable_junit_structure_produces_launcher_error(tmp_path, xml, namespace):
+    original = write_execution(tmp_path)
+    document = ET.fromstring(xml)
+    if namespace:
+        for element in document.iter():
+            element.tag = "{urn:junit}" + element.tag
+    source = ET.tostring(document, encoding="unicode")
+    original.write_text(source, encoding="utf-8")
+
+    inputs = collect(tmp_path, [XmlUpload(original, original.name)])
+
+    assert len(inputs.xml_uploads) == 1
+    assert inputs.xml_uploads[0].local_path.name == "launcher.xml"
+    error = ET.parse(inputs.xml_uploads[0].local_path).find(".//error")
+    assert error is not None
+    assert "direct testcase children of a testsuite" in error.attrib["message"]
+    assert original.read_text(encoding="utf-8") == source
+    assert original in [item.local_path for item in inputs.artifact_files]
+    report = build_report("report", [("linux", inputs.xml_uploads[0].local_path)])
+    assert report.status_counts["ERRORED"] == 1
