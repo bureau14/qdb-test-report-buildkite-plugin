@@ -1416,3 +1416,48 @@ def test_create_zip_preserves_group_paths_and_stores_compressed_logs(tmp_path):
         assert archive.read("server/server.tar.gz") == compressed.read_bytes()
         assert archive.getinfo("api/log.json").compress_type == ZIP_DEFLATED
         assert archive.getinfo("server/server.tar.gz").compress_type == ZIP_STORED
+
+
+def test_main_manifest_only_job_without_declared_reports(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "os.environ",
+        {
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE": "Manifest report",
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT": "linux",
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_MANIFEST_INPUT_PATH": "manifest.json",
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_ANNOTATE": "false",
+            "BUILDKITE_PIPELINE_SLUG": "project",
+            "BUILDKITE_BUILD_ID": "build",
+            "BUILDKITE_JOB_ID": "job",
+            "BUILDKITE_BRANCH": "main",
+        },
+    )
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "execution_id": "execution",
+                "name": "launcher-only",
+                "status": "completed",
+                "exit_code": 0,
+                "reports": [],
+                "artifacts": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("test_report_plugin.upload_extra_artifacts", lambda *args: [])
+    captured = {}
+
+    def capture_report(config, generation, xml_uploads, store_context=None):
+        captured.update(json.loads(generation.summary_path.read_text(encoding="utf-8")))
+        assert len(xml_uploads) == 1
+        assert xml_uploads[0].local_path.name == "launcher.xml"
+        return {}
+
+    monkeypatch.setattr("test_report_plugin.upload_report_artifacts", capture_report)
+
+    assert main() == 0
+    assert captured["root_status"] == "SUCCESSFUL"
+    assert captured["status_counts"]["SUCCESSFUL"] == 1

@@ -13,7 +13,7 @@ The self-contained report supports case-insensitive sidebar search without a ser
 
 Configure exactly one mode per plugin invocation:
 
-- `job` requires `variant` and `junit_input_path`.
+- `job` requires `variant` and at least one of `junit_input_path` or `manifest_input_path`.
 - `aggregate` enables full-build report mode; optional download settings tune aggregate XML fetch concurrency.
 
 Common report options such as `title`, `only_failures`, `annotate`, and `project_id` stay at the plugin top level.
@@ -205,7 +205,7 @@ plugins:
 | Key | Type | Required | Description |
 | --- | --- | :---: | --- |
 | `variant` | string | ✓ | Test variant name and object-store grouping, for example `linux-haswell-release`. |
-| `junit_input_path` | string | ✓ | Local JUnit XML file, directory, or glob to read from the test job. |
+| `junit_input_path` | string | Conditional | Local JUnit XML file, directory, or glob. Required unless `manifest_input_path` is set. |
 | `manifest_input_path` | string |  | Optional version 1 launcher execution manifests (JSON file, directory, or glob). |
 | `fail_on_test_failures` | boolean |  | Exit `64` when the generated job report contains failed or errored tests. Default: `true`. |
 | `artifacts` | array |  | Optional additional artifact groups to upload and link from the report. Each item requires `name` and `input_path`. Missing files warn but do not fail. |

@@ -549,14 +549,19 @@ def main() -> int:
                     link for links in source_artifacts_by_job_id.values() for link in links
                 ]
             else:
-                if config.junit_input_path is None or config.variant is None:
-                    raise ValueError("scope=job requires variant and junit_input_path")
-                try:
-                    xml_uploads = collect_job_xml_uploads(config.junit_input_path, config.variant)
-                except FileNotFoundError:
-                    if config.manifest_input_path is None:
-                        raise
-                    xml_uploads = []
+                if config.variant is None:
+                    raise ValueError("scope=job requires variant")
+                if config.junit_input_path is None and config.manifest_input_path is None:
+                    raise ValueError("scope=job requires junit_input_path or manifest_input_path")
+                xml_uploads = []
+                if config.junit_input_path is not None:
+                    try:
+                        xml_uploads = collect_job_xml_uploads(
+                            config.junit_input_path, config.variant
+                        )
+                    except FileNotFoundError:
+                        if config.manifest_input_path is None:
+                            raise
                 execution_inputs = None
                 if config.manifest_input_path is not None:
                     execution_inputs = collect_execution_inputs(

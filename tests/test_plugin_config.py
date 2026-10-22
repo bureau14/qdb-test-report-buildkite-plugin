@@ -201,3 +201,20 @@ def test_load_plugin_config_job_missing_job_id(monkeypatch):
 
     with pytest.raises(ValueError, match="job requires BUILDKITE_JOB_ID"):
         load_plugin_config()
+
+
+@pytest.mark.parametrize("junit_path", [None, "reports/junit"])
+def test_load_plugin_config_accepts_manifest_input(monkeypatch, junit_path):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT", "linux")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_MANIFEST_INPUT_PATH", "metadata")
+    monkeypatch.setenv("BUILDKITE_JOB_ID", "job")
+    monkeypatch.delenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_JUNIT_INPUT_PATH", raising=False)
+    if junit_path:
+        monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_JUNIT_INPUT_PATH", junit_path)
+
+    config = load_plugin_config()
+
+    assert config.manifest_input_path == Path("metadata")
+    assert config.junit_input_path == (Path(junit_path) if junit_path else None)
+    assert config.platforms == ([PlatformConfig("linux", Path(junit_path))] if junit_path else [])
