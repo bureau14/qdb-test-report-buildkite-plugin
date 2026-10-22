@@ -62,7 +62,10 @@ configuration:
                 description: Local file, directory, or glob to upload.
             required: [name, input_path]
             additionalProperties: false
-      required: [variant, junit_input_path]
+      required: [variant]
+      anyOf:
+        - required: [junit_input_path]
+        - required: [manifest_input_path]
       additionalProperties: false
     aggregate:
       type: object
