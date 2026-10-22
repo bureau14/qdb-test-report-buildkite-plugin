@@ -1,9 +1,11 @@
 import json
+import os
 import shutil
+import subprocess
 import xml.etree.ElementTree as ET
 
 import pytest
-from execution_inputs import collect_execution_inputs
+from execution_inputs import ExecutionInputs, collect_execution_artifacts, collect_execution_inputs
 from junit_report_model import ArtifactLink, build_report
 from xml_inputs import XmlUpload
 
@@ -279,3 +281,69 @@ def test_unparseable_junit_structure_produces_launcher_error(tmp_path, xml, name
     assert original in [item.local_path for item in inputs.artifact_files]
     report = build_report("report", [("linux", inputs.xml_uploads[0].local_path)])
     assert report.status_counts["ERRORED"] == 1
+
+
+def create_directory_link(link, target):
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        if os.name != "nt":
+            raise
+        # Windows junctions exercise directory escapes without symlink privileges.
+        subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            check=True,
+            capture_output=True,
+        )
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("has_files", [False, True])
+def test_artifact_collection_rejects_outside_directory_links(tmp_path, nested, has_files):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    if has_files:
+        (outside / "unrelated.txt").write_text("outside data")
+    artifacts = checkout / "artifacts"
+    artifacts.mkdir()
+    link = artifacts / "link"
+    create_directory_link(link, outside)
+    inputs = ExecutionInputs()
+
+    with pytest.raises(ValueError, match="execution artifact escapes checkout"):
+        collect_execution_artifacts(checkout, inputs, artifacts if nested else link, "execution")
+    assert inputs.artifact_files == []
+
+
+@pytest.mark.parametrize("required", [False, True])
+def test_manifest_rejects_nested_outside_directory_link(tmp_path, required):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    write_execution(checkout)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    create_directory_link(checkout / "example" / "outside", outside)
+    path = checkout / "metadata/example.json"
+    manifest = json.loads(path.read_text())
+    manifest["artifacts"][0]["required"] = required
+    path.write_text(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match="execution artifact escapes checkout"):
+        collect(checkout)
+
+
+def test_declared_directory_link_inside_checkout_collects_files(tmp_path):
+    target = tmp_path / "data"
+    target.mkdir()
+    log = target / "runner.log"
+    log.write_text("runner data")
+    link = tmp_path / "linked-data"
+    create_directory_link(link, target)
+    inputs = ExecutionInputs()
+
+    collect_execution_artifacts(tmp_path, inputs, link, "execution")
+
+    assert [artifact.local_path for artifact in inputs.artifact_files] == [log]
+    assert inputs.execution_ids == {"data/runner.log": "execution"}

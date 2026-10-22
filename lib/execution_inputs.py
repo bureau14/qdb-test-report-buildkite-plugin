@@ -54,13 +54,20 @@ def mark_execution(document: ET.Element, execution_id: str) -> None:
 def collect_execution_artifacts(
     root: Path, result: ExecutionInputs, path: Path, execution_id: str
 ) -> None:
-    files = sorted(path.rglob("*")) if path.is_dir() else [path]
-    for file in files:
-        if not file.is_file():
-            continue
+    pending = [path.resolve()]
+    visited = set()
+    while pending:
+        file = pending.pop()
         resolved = file.resolve()
         if root != resolved and root not in resolved.parents:
             raise ValueError(f"execution artifact escapes checkout: {file}")
+        if file.is_dir():
+            if not file.is_symlink() and resolved not in visited:
+                visited.add(resolved)
+                pending.extend(sorted(file.iterdir(), reverse=True))
+            continue
+        if not file.is_file():
+            continue
         relative = resolved.relative_to(root).as_posix()
         previous = result.execution_ids.get(relative)
         if previous is not None:
