@@ -8,6 +8,7 @@ import {
   groupResults,
   relatedResults,
   safeReportUrl,
+  sortResultGroups,
   valueMismatch
 } from "../src/components/common/report-presentation.ts";
 import TestExecution from "../src/components/common/TestExecution.ts";
@@ -208,4 +209,54 @@ test(
       assert.equal(report.overallStatus(), "ERRORED");
       assert.deepEqual(collectResults([ report ]), []);
       assert.deepEqual(countOutcomes([ report ], false), {});
+    });
+
+test(
+    "CTest problem filtering includes failures and errors without passed checks",
+    () => {
+      const results = collectResults([ makeReport() ]);
+      const check = results.find((result) => result.ctest);
+      const records = [
+        ...results, {...check, key : "error", status : "ERRORED"},
+        {...check, key : "passed", status : "SUCCESSFUL"}
+      ];
+      const filter =
+          {scope : "ctest", status : "PROBLEMS", search : "", suite : ""};
+      assert.deepEqual(
+          filterResults(records, filter).map((result) => result.status),
+          [ "FAILED", "FAILED", "ERRORED" ]);
+      assert.equal(filterResults(records, {...filter, status : ""}).length, 4);
+    });
+
+test(
+    "result sorting supports status, name, duration, and grouped problem count",
+    () => {
+      const result = collectResults([ makeReport() ])[0];
+      const makeGroup = (name, status, millis, count = 1) => ({
+        key : name,
+        name,
+        status,
+        reason : "",
+        results : Array.from(
+            {length : count},
+            () => ({...result, selection : {item : {durationMillis : millis}}}))
+      });
+      const groups = [
+        makeGroup("Zulu", "SUCCESSFUL", 90),
+        makeGroup("Alpha", "FAILED", 10, 2), makeGroup("Beta", "ERRORED", 30)
+      ];
+      assert.deepEqual(
+          sortResultGroups(groups, "status").map((group) => group.name),
+          [ "Beta", "Alpha", "Zulu" ]);
+      assert.deepEqual(
+          sortResultGroups(groups, "name").map((group) => group.name),
+          [ "Alpha", "Beta", "Zulu" ]);
+      assert.deepEqual(
+          sortResultGroups(groups, "duration").map((group) => group.name),
+          [ "Zulu", "Beta", "Alpha" ]);
+      assert.deepEqual(
+          sortResultGroups(groups, "problems").map((group) => group.name),
+          [ "Alpha", "Beta", "Zulu" ]);
+      assert.deepEqual(groups.map((group) => group.name),
+                       [ "Zulu", "Alpha", "Beta" ]);
     });

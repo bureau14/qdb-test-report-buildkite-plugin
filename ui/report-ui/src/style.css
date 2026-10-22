@@ -230,3 +230,7 @@
   .presentation-sidebar, .presentation-divider, .presentation-detail-nav, .presentation-app .report-topbar > .presentation-actions { display: none; }
   .presentation-details { display: block; overflow: visible; }
 }
+
+.presentation-sort { min-width: 0; max-width: 185px; padding: 3px 5px; border: 1px solid var(--report-line); border-radius: 5px; background: var(--report-paper); color: var(--report-ink); font-size: 11px; cursor: pointer; }
+
+.presentation-list-caption { align-items: center; flex-wrap: wrap; }

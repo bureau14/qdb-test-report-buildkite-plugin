@@ -22,6 +22,7 @@ export interface ResultGroup {
 }
 
 export type ResultScope = "problems"|"tests"|"ctest";
+export type ResultSort = "problems"|"status"|"name"|"duration";
 
 export interface ResultFilter {
   scope: ResultScope;
@@ -69,7 +70,9 @@ export function filterResults(results: ReportResult[],
   return results.filter(
       (result) => (filter.scope === "ctest" ? result.ctest : !result.ctest) &&
                   (filter.scope !== "problems" || isProblem(result.status)) &&
-                  (!filter.status || result.status === filter.status) &&
+                  (!filter.status || (filter.status === "PROBLEMS"
+                                          ? isProblem(result.status)
+                                          : result.status === filter.status)) &&
                   (!filter.suite || result.source?.suite === filter.suite) &&
                   (!search || result.search.includes(search)));
 }
@@ -95,6 +98,26 @@ export function groupResults(results: ReportResult[],
     group.results.push(result);
   }
   return [...groups.values() ];
+}
+
+export function sortResultGroups(groups: ResultGroup[],
+                                 mode: ResultSort): ResultGroup[] {
+  const priority: Record<string, number> =
+      {ERRORED : 0, FAILED : 1, ABORTED : 2, SKIPPED : 3, SUCCESSFUL : 4};
+  const duration = (group: ResultGroup) =>
+      group.results.reduce((sum, result) => {
+        const millis = result.selection.item.durationMillis;
+        return sum + (Number.isFinite(millis) ? millis : 0);
+      }, 0);
+  return [...groups ].sort((a, b) => {
+    const difference = mode === "problems" ? b.results.length - a.results.length
+                       : mode === "status" ? (priority[a.status] ?? 5) -
+                                                 (priority[b.status] ?? 5)
+                       : mode === "duration" ? duration(b) - duration(a)
+                                             : 0;
+    return difference || a.name.localeCompare(b.name) ||
+           a.key.localeCompare(b.key);
+  });
 }
 
 export function countOutcomes(executions: TestExecution[],

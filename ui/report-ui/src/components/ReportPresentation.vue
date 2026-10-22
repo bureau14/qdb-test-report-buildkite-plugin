@@ -23,10 +23,11 @@ import {
   isProblem,
   relatedResults,
   reportIdentity,
-  safeReportUrl
+  safeReportUrl,
+  sortResultGroups
 } from "./common/report-presentation.ts";
 import type {
-  ReportResult, ResultFilter, ResultGroup, ResultScope} from
+  ReportResult, ResultFilter, ResultGroup, ResultScope, ResultSort} from
   "./common/report-presentation.ts";
 import Selection from "./common/Selection.ts";
 import TestExecution from "./common/TestExecution.ts";
@@ -55,7 +56,7 @@ performance.measure("report-initial-selection",
 const filter = reactive<ResultFilter>(
     {scope : "problems", search : "", suite : "", status : ""});
 const grouped = ref(true);
-const sortByName = ref(false);
+const sortMode = ref<ResultSort>("problems");
 const limit = ref(100);
 const showDetails = ref(false);
 const detailsPane = ref<HTMLElement>();
@@ -79,11 +80,8 @@ const filtered = computed(() => filterResults(results, filter));
 const groupedView =
     computed(() => filter.scope === "problems" && grouped.value);
 const rows = computed(
-    () => groupResults(filtered.value, groupedView.value)
-              .sort((a, b) => sortByName.value
-                                  ? a.name.localeCompare(b.name)
-                                  : b.results.length - a.results.length ||
-                                        a.name.localeCompare(b.name)));
+    () => sortResultGroups(groupResults(filtered.value, groupedView.value),
+                           sortMode.value));
 const suites = [
   ...new Set(results.filter((result) => !result.ctest)
                  .map((result) => result.source?.suite)
@@ -163,7 +161,7 @@ function selectResult(result: ReportResult) {
   openDetails();
 }
 function selectGroup(group: ResultGroup) {
-  if (!groupedView.value) {
+  if (!groupedView.value || group.results.length === 1) {
     selectResult(group.results[0]);
     return;
   }
@@ -207,7 +205,7 @@ function restoreHash() {
   if (params.has("group") && result) {
     const group = groups.find(
         (group) => group.results.some((item) => item.key === result.key));
-    if (group) {
+    if (group && group.results.length > 1) {
       selectedGroup.value = group;
       selection.value = undefined;
       openDetails();
@@ -238,6 +236,10 @@ function resize(event: PointerEvent) {
                   (workspace.value?.getBoundingClientRect().left || 0));
 }
 watch(filter, () => { limit.value = 100; });
+watch(groupedView, (active) => {
+  if (!active && sortMode.value === "problems")
+    sortMode.value = "status";
+});
 onMounted(() => {
   restoreHash();
   window.addEventListener("popstate", restoreHash);
@@ -267,10 +269,10 @@ onBeforeUnmount(() => {
       <div class="presentation-actions"><button type="button" class="report-button" @click="selectOverview">Overview</button><DarkModeSwitch /></div>
     </header>
     <section class="presentation-summary" aria-label="Logical test outcomes and separate CTest checks">
-      <button type="button" class="summary-card" @click="setScope('problems')"><strong class="failed-count">{{ formatCount(logicalCounts.FAILED || 0) }} <small>failed</small> / {{ formatCount(logicalCounts.ERRORED || 0) }} <small>errors</small></strong><span>Test problems</span><small>{{ formatCount(testProblemCount) }} logical tests · {{ groups.length }} matching groups</small></button>
+      <button type="button" class="summary-card" @click="setScope('problems')"><strong class="failed-count">{{ formatCount(logicalCounts.FAILED || 0) }} <small>failed</small> / {{ formatCount(logicalCounts.ERRORED || 0) }} <small>{{ logicalCounts.ERRORED === 1 ? 'error' : 'errors' }}</small></strong><span>Test problems</span><small>{{ formatCount(testProblemCount) }} logical {{ testProblemCount === 1 ? 'test' : 'tests' }} · {{ groups.length }} matching {{ groups.length === 1 ? 'group' : 'groups' }}</small></button>
       <button type="button" class="summary-card" @click="setScope('tests', 'SUCCESSFUL')"><strong class="passed-count">{{ formatCount(logicalCounts.SUCCESSFUL || 0) }}</strong><span>Tests passed</span><small>Logical test outcomes</small></button>
       <button type="button" class="summary-card" @click="setScope('tests', 'SKIPPED')"><strong class="skipped-count">{{ formatCount(logicalCounts.SKIPPED || 0) }}</strong><span>Tests skipped</span><small>Browse recorded skip reasons</small></button>
-      <button type="button" class="summary-card" @click="setScope('ctest')"><strong>{{ formatCount(ctestProblemCount) }} <small>/ {{ formatCount(ctestCount) }}</small></strong><span>CTest checks with problems</span><small>Separate execution-level checks</small></button>
+      <button type="button" class="summary-card" @click="setScope('ctest', 'PROBLEMS')"><strong>{{ formatCount(ctestProblemCount) }} <small>/ {{ formatCount(ctestCount) }}</small></strong><span>CTest checks with problems</span><small>Separate execution-level checks</small></button>
     </section>
     <div ref="workspace" class="presentation-workspace" :class="{'show-details': showDetails}" :style="{'--sidebar-width': sidebarWidth + 'px'}">
       <aside class="presentation-sidebar" aria-label="Results browser">
@@ -278,12 +280,12 @@ onBeforeUnmount(() => {
           <nav class="presentation-tabs" aria-label="Result views"><button v-for="scope in (['problems', 'tests', 'ctest'] as const)" :key="scope" type="button" :aria-pressed="filter.scope === scope" @click="setScope(scope)">{{ scope === 'problems' ? 'Problems' : scope === 'tests' ? 'All tests' : 'CTest checks' }}</button></nav>
           <label class="sr-only" for="result-search">Search names, paths, or failure messages</label><input id="result-search" v-model="filter.search" class="report-search" type="search" placeholder="Search names, paths, or messages…">
           <label class="presentation-field" for="result-suite">Suite</label><select id="result-suite" v-model="filter.suite" class="report-search" :disabled="filter.scope === 'ctest'"><option value="">All suites</option><option v-for="suite in suites" :key="suite">{{ suite }}</option></select>
-          <div class="presentation-filters" aria-label="Filter result statuses"><button type="button" class="report-button" :aria-pressed="!filter.status" @click="filter.status = ''">All statuses</button><button v-for="status in outcomes" :key="status" type="button" class="report-button" :aria-pressed="filter.status === status" @click="filter.status = status">{{ statusLabel(status) }}</button></div>
+          <div class="presentation-filters" aria-label="Filter result statuses"><button v-if="filter.scope === 'ctest'" type="button" class="report-button" :aria-pressed="filter.status === 'PROBLEMS'" @click="filter.status = 'PROBLEMS'">Failed / errors</button><button type="button" class="report-button" :aria-pressed="!filter.status" @click="filter.status = ''">All statuses</button><button v-for="status in outcomes" :key="status" type="button" class="report-button" :aria-pressed="filter.status === status" @click="filter.status = status">{{ statusLabel(status) }}</button></div>
           <div class="presentation-actions"><button type="button" class="report-text-button" @click="resetFilters">Reset filters</button><button v-if="filter.scope === 'problems'" type="button" class="report-text-button" :aria-pressed="grouped" @click="grouped = !grouped">Group matching failures: {{ grouped ? 'on' : 'off' }}</button></div>
         </div>
-        <div class="presentation-list-caption"><span role="status" aria-live="polite">{{ groupedView ? rows.length + ' groups · ' : '' }}{{ formatCount(filtered.length) }} {{ filter.scope === 'ctest' ? 'checks' : 'executions' }}</span><button type="button" class="report-text-button" @click="sortByName = !sortByName">{{ sortByName ? 'Name A–Z' : 'Problem count ↓' }}</button></div>
+        <div class="presentation-list-caption"><span role="status" aria-live="polite">{{ groupedView ? rows.length + (rows.length === 1 ? ' group · ' : ' groups · ') : '' }}{{ formatCount(filtered.length) }} {{ filter.scope === 'ctest' ? (filtered.length === 1 ? 'check' : 'checks') : (filtered.length === 1 ? 'execution' : 'executions') }}</span><label class="sr-only" for="result-sort">Sort results</label><select id="result-sort" v-model="sortMode" class="presentation-sort"><option v-if="groupedView" value="problems">Problem count ↓</option><option value="status">Status · problems first</option><option value="name">Name A–Z</option><option value="duration">Duration ↓</option></select></div>
         <div class="presentation-results">
-          <button v-for="row in rows.slice(0, limit)" :key="row.key" type="button" class="presentation-result" :aria-current="row.key === selectedKey" @click="selectGroup(row)"><span class="result-title">{{ row.name }}<span v-if="groupedView" class="result-count">{{ row.results.length }} results</span></span><span class="result-context"><TestResultStatusIcon :status="row.status" />{{ statusLabel(row.status) }} · {{ groupedView ? new Set(row.results.map((item) => item.source?.suite)).size + ' suites' : row.results[0].source?.suite }}</span><span v-if="row.reason" class="result-reason">{{ row.reason }}</span><span v-if="!groupedView && targets.length > 1" class="result-context">{{ row.results[0].source?.target }}</span></button>
+          <button v-for="row in rows.slice(0, limit)" :key="row.key" type="button" class="presentation-result" :aria-current="row.key === selectedKey" @click="selectGroup(row)"><span class="result-title">{{ row.name }}<span v-if="groupedView" class="result-count">{{ row.results.length }} {{ row.results.length === 1 ? 'result' : 'results' }}</span></span><span class="result-context"><TestResultStatusIcon :status="row.status" />{{ statusLabel(row.status) }} · {{ groupedView ? new Set(row.results.map((item) => item.source?.suite)).size + (new Set(row.results.map((item) => item.source?.suite)).size === 1 ? ' suite' : ' suites') : row.results[0].source?.suite }}</span><span v-if="row.reason" class="result-reason">{{ row.reason }}</span><span v-if="!groupedView && targets.length > 1" class="result-context">{{ row.results[0].source?.target }}</span></button>
           <p v-if="!rows.length" class="tree-empty-state">No results match these filters. Change the search or reset the filters.</p>
           <button v-if="rows.length > limit" type="button" class="report-button presentation-more" @click="limit += 100">Show next {{ Math.min(100, rows.length - limit) }} results</button>
         </div>
@@ -297,15 +299,18 @@ onBeforeUnmount(() => {
           <section class="presentation-section"><h3>Affected executions</h3><div class="report-table-wrapper"><table class="report-table"><thead><tr><th>Suite / execution path</th><th>Platform</th><th class="number-cell">Case time</th></tr></thead><tbody><tr v-for="result in selectedGroup.results" :key="result.key"><td><button type="button" class="report-text-button" @click="selectResult(result)">{{ result.source?.suite || result.name }}</button><p class="presentation-path">{{ result.path }}</p></td><td>{{ result.source?.target }}</td><td class="number-cell">{{ formatDuration(result.selection.item.durationMillis) }}</td></tr></tbody></table></div><p class="presentation-hint">Grouped by test name, status, and exact message. Matching messages do not establish a shared cause.</p></section>
         </template>
         <template v-else-if="selection">
-          <section v-if="related.length" class="presentation-related"><h3>{{ currentResult?.ctest ? 'Test problems in this execution' : 'Related CTest checks' }}</h3><p class="presentation-hint">Matched using execution artifact identity.</p><button v-for="result in related" :key="result.key" type="button" class="report-text-button" @click="selectResult(result)">{{ result.name }} · {{ statusLabel(result.status) }}</button></section>
           <ExecutionDetails v-if="selection.item instanceof TestExecution" v-model:selection="selection" :execution="selection.item" />
-          <TestNodeDetails v-else :key="selection.execution.id + ':' + selection.item.id" :selection="selection" :execution="selection.execution" :node="selection.item" @update:selection="selection = $event; writeSelection(); openDetails()" />
+          <TestNodeDetails v-else :key="selection.execution.id + ':' + selection.item.id" :selection="selection" :execution="selection.execution" :node="selection.item" @update:selection="selection = $event; writeSelection(); openDetails()">
+            <template #related>
+              <section v-if="related.length" class="presentation-related"><h3>{{ currentResult?.ctest ? 'Test problems in this execution' : 'Related CTest checks' }}</h3><p class="presentation-hint">Matched using execution artifact identity.</p><button v-for="result in related" :key="result.key" type="button" class="report-text-button" @click="selectResult(result)">{{ result.name }} · {{ statusLabel(result.status) }}</button></section>
+            </template>
+          </TestNodeDetails>
         </template>
         <template v-else>
-          <header class="details-heading"><p class="presentation-eyebrow">Run overview</p><h2>{{ formatCount(testProblemCount) }} test problems, in {{ groups.length }} matching groups</h2><p class="presentation-intro">Start with a failure pattern, then inspect its affected executions. CTest checks have their own view and are counted separately.</p></header>
+          <header class="details-heading"><p class="presentation-eyebrow">Run overview</p><h2>{{ formatCount(testProblemCount) }} test {{ testProblemCount === 1 ? 'problem' : 'problems' }}, in {{ groups.length }} matching {{ groups.length === 1 ? 'group' : 'groups' }}</h2><p class="presentation-intro">Start with a failure pattern, then inspect its affected executions. CTest checks have their own view and are counted separately.</p></header>
           <DetailsSections v-for="execution in executions" :key="execution.id" :sections="execution.sections.filter((section) => !['Tags', 'Report summary'].includes(section.title))" />
           <section v-if="groups.length" class="presentation-section"><h3>Matching failure groups</h3><div class="report-table-wrapper"><table class="report-table"><thead><tr><th>Test / failure pattern</th><th>Status</th><th class="number-cell">Executions</th></tr></thead><tbody><tr v-for="group in groups" :key="group.key"><td><button type="button" class="report-text-button" @click="grouped = true; filter.scope = 'problems'; selectGroup(group)">{{ group.name }}</button><p class="presentation-hint">{{ group.reason }}</p></td><td>{{ statusLabel(group.status) }}</td><td class="number-cell">{{ group.results.length }}</td></tr></tbody></table></div><p class="presentation-hint">Headline outcomes count logical tests; groups and navigation retain individual platform executions.</p></section>
-          <section class="presentation-section"><h3>Execution scope</h3><div class="presentation-scope"><div v-for="execution in executions" :key="execution.id"><strong>{{ formatCount(execution.summary?.logicalTests || 0) }}</strong><span>logical tests · {{ execution.summary?.suites || 0 }} suites</span><p>{{ formatCount(execution.summary?.platformExecutions || 0) }} platform executions</p></div><div><strong>{{ formatDuration(sumTime) }}</strong><span>summed case time</span><p class="presentation-hint">Adds case durations; this is not elapsed build time.</p></div></div></section>
+          <section class="presentation-section"><h3>Execution scope</h3><div class="presentation-scope"><div v-for="execution in executions" :key="execution.id"><strong>{{ formatCount(execution.summary?.logicalTests || 0) }}</strong><span>logical {{ execution.summary?.logicalTests === 1 ? 'test' : 'tests' }} · {{ execution.summary?.suites || 0 }} {{ execution.summary?.suites === 1 ? 'suite' : 'suites' }}</span><p>{{ formatCount(execution.summary?.platformExecutions || 0) }} platform {{ execution.summary?.platformExecutions === 1 ? 'execution' : 'executions' }}</p></div><div><strong>{{ formatDuration(sumTime) }}</strong><span>summed case time</span><p class="presentation-hint">Adds case durations; this is not elapsed build time.</p></div></div></section>
           <template v-for="execution in executions" :key="execution.id"><details v-if="execution.artifacts.length" class="metadata-section"><summary>Build artifacts · {{ execution.artifacts.length }} files</summary><ExecutionArtifacts :artifacts="execution.artifacts" title="Build artifacts" /></details><details class="metadata-section"><summary>Source and provenance · {{ execution.name }}</summary><DetailsSections :sections="execution.sections" /></details></template>
         </template>
       </div>

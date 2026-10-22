@@ -131,6 +131,7 @@ const sections = computed(() => {
   <FailureReason :reason="reason" :status="status" />
   <BranchOverview v-if="hasChildren" v-model:selection="selection" :execution="execution" :node="node" />
   <DetailsSections v-if="diagnostics.length" :sections="diagnostics" />
+  <slot name="related" />
   <ExecutionArtifacts :artifacts="artifacts" :sources="artifactSources" />
   <details class="metadata-section"><summary>Source and provenance</summary><DetailsSections :sections="sections" /></details>
 </template>
