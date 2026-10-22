@@ -22,7 +22,7 @@ Job and aggregate annotations separate failed and errored executions into two ta
 
 The plugin runs from the Buildkite `post-command` hook, so reports are still published after the step command exits with a failure.
 
-The plugin exits `64` when `job.fail_on_test_failures` is true and the generated job report contains failed or errored tests. It exits `1` when any discovered JUnit XML is malformed and creates an error annotation listing the malformed files when `annotate: true`. When the HTML report is available through `ARTIFACTS_DOMAIN`, that annotation includes its link; if the report is unavailable, it still creates the error annotation without a link. When the original job command exits non-zero but every reported test passes, the plugin creates a warning annotation explaining the mismatch, even without `ARTIFACTS_DOMAIN`. It also exits `1` for other internal plugin errors and otherwise exits `0` so Buildkite can preserve the original command status. Aggregate mode exits `0` when no XML is discovered, but creates an error-style annotation unless `annotate: false` is set.
+The plugin exits `64` when `job.fail_on_test_failures` is true and the generated job report contains failed or errored tests or malformed JUnit XML, whether collected through legacy inputs or execution manifests. Setting it to `false` allows those results to exit `0`. Malformed legacy XML remains listed in the report and summary and creates an error annotation listing the malformed files when `annotate: true`. Malformed manifest-owned XML remains an errored launcher result. When the HTML report is available through `ARTIFACTS_DOMAIN`, that annotation includes its link; if the report is unavailable, it still creates the error annotation without a link. When the original job command exits non-zero but every reported test passes, the plugin creates a warning annotation explaining the mismatch, even without `ARTIFACTS_DOMAIN`. It also exits `1` for other internal plugin errors and otherwise exits `0` so Buildkite can preserve the original command status. Aggregate mode does not fail on test failures or malformed JUnit XML; it exits `0` while retaining diagnostics and error-style annotations when enabled. It also exits `0` when no XML is discovered, but creates an error-style annotation unless `annotate: false` is set.
 
 ## Requirements
 
@@ -95,7 +95,7 @@ and unsuccessful processes whose XML contains no failure also produce an error
 result. Valid XML that already describes a failed process is not duplicated.
 Successful executions with no JUnit report declared receive a successful launcher
 result. Optional missing logs and dumps are normal; missing required artifacts
-produce an error result. Aggregate steps need no additional configuration.
+produce an error result. These launcher errors follow `job.fail_on_test_failures`, just like malformed legacy JUnit XML. Aggregate steps need no additional configuration.
 
 By default, job mode exits `64` when the report contains failed or errored tests. Disable that if your pipeline already handles test failures another way:
 
@@ -207,7 +207,7 @@ plugins:
 | `variant` | string | ✓ | Test variant name and object-store grouping, for example `linux-haswell-release`. |
 | `junit_input_path` | string | Conditional | Local JUnit XML file, directory, or glob. Required unless `manifest_input_path` is set. |
 | `manifest_input_path` | string |  | Optional version 1 launcher execution manifests (JSON file, directory, or glob). |
-| `fail_on_test_failures` | boolean |  | Exit `64` when the generated job report contains failed or errored tests. Default: `true`. |
+| `fail_on_test_failures` | boolean |  | Exit `64` when the generated job report contains failed or errored tests or malformed JUnit XML (legacy or manifest-owned). Default: `true`; `false` reports these errors without failing the step. |
 | `artifacts` | array |  | Optional additional artifact groups to upload and link from the report. Each item requires `name` and `input_path`. Missing files warn but do not fail. |
 
 ### `aggregate` object keys

@@ -658,7 +658,7 @@ def main() -> int:
                 else:
                     log(f"HTML report uploaded to s3://{html_upload.bucket}/{html_upload.key}")
 
-            # A malformed JUnit file is a build error even when HTML upload is unavailable.
+            # Preserve malformed-input diagnostics even when no public HTML URL is available.
             if config.annotate:
                 html_url = html_upload.url if html_upload is not None else None
                 if config.scope == "job":
@@ -696,14 +696,11 @@ def main() -> int:
             if summary.get("junit_archive_errors"):
                 logger.error("Report contains rejected JUnit archives. Exiting 1.")
                 return 1
-            if malformed_junit_xml:
+            if config.fail_on_test_failures and (failed_or_errored or malformed_junit_xml):
                 logger.error(
-                    f"Report found {len(malformed_junit_xml)} malformed JUnit XML file(s). Exiting 1."
-                )
-                return 1
-            if config.fail_on_test_failures and failed_or_errored:
-                logger.error(
-                    f"Report has {failed_or_errored} failed/errored test execution(s) and fail_on_test_failures=true. Exiting 64."
+                    f"Report has {failed_or_errored} failed/errored test execution(s) and "
+                    f"{len(malformed_junit_xml)} malformed JUnit XML file(s); "
+                    "fail_on_test_failures=true. Exiting 64."
                 )
                 return 64
 

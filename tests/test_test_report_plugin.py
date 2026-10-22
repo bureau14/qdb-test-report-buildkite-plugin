@@ -706,8 +706,9 @@ def test_main_job_fails_when_summary_has_errored_tests(monkeypatch, tmp_path):
     [(True, True), (False, False)],
     ids=["report-available", "report-missing"],
 )
-def test_main_job_fails_and_annotates_malformed_junit_xml(
-    monkeypatch, tmp_path, uploads_html, expect_report_link
+@pytest.mark.parametrize("fail_on_test_failures", [False, True])
+def test_main_job_annotates_malformed_junit_xml_regardless_of_exit_policy(
+    monkeypatch, tmp_path, uploads_html, expect_report_link, fail_on_test_failures
 ):
     xml_dir = tmp_path / "xml"
     xml_dir.mkdir()
@@ -718,6 +719,9 @@ def test_main_job_fails_and_annotates_malformed_junit_xml(
             "BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE": "Job Tests",
             "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT": "linux",
             "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_JUNIT_INPUT_PATH": str(xml_dir),
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_FAIL_ON_TEST_FAILURES": str(
+                fail_on_test_failures
+            ),
             "BUILDKITE_PIPELINE_SLUG": "project",
             "BUILDKITE_BUILD_ID": "build-1",
             "BUILDKITE_JOB_ID": "job-1",
@@ -764,7 +768,7 @@ def test_main_job_fails_and_annotates_malformed_junit_xml(
         ),
     )
 
-    assert main() == 1
+    assert main() == (64 if fail_on_test_failures else 0)
     assert annotations[0][1:] == ("test-report:linux:job-1", "error", 10, "job")
     assert "Malformed JUnit XML" in annotations[0][0]
     assert "broken.xml (linux): no element found: line 1, column 11" in annotations[0][0]
@@ -1489,3 +1493,78 @@ def test_main_manifest_only_job_without_declared_reports(
         upload_artifacts.assert_called_once()
         assert captured["root_status"] == "SUCCESSFUL"
         assert captured["status_counts"]["SUCCESSFUL"] == 1
+
+
+@pytest.mark.parametrize("mode", ["legacy-job", "manifest-job", "legacy-aggregate"])
+@pytest.mark.parametrize("fail_on_test_failures", [False, True])
+def test_malformed_junit_exit_policy_with_real_report_generation(
+    monkeypatch, tmp_path, mode, fail_on_test_failures
+):
+    from report_downloads import DownloadedJobXml, JobXmlObject
+
+    monkeypatch.chdir(tmp_path)
+    environment = {
+        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE": "Malformed report",
+        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_ANNOTATE": "false",
+        "BUILDKITE_PIPELINE_SLUG": "project",
+        "BUILDKITE_BUILD_ID": "build",
+        "BUILDKITE_JOB_ID": "job",
+        "BUILDKITE_BRANCH": "main",
+    }
+    if mode.endswith("job"):
+        environment.update(
+            {
+                "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT": "linux",
+                "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_FAIL_ON_TEST_FAILURES": str(
+                    fail_on_test_failures
+                ),
+            }
+        )
+        key = "MANIFEST_INPUT_PATH" if mode == "manifest-job" else "JUNIT_INPUT_PATH"
+        environment["BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_" + key] = (
+            "manifest.json" if mode == "manifest-job" else "broken.xml"
+        )
+    monkeypatch.setattr("os.environ", environment)
+    (tmp_path / "broken.xml").write_text("<testsuite>", encoding="utf-8")
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "execution_id": "execution",
+                "name": "launch",
+                "status": "completed",
+                "exit_code": 0,
+                "reports": [{"path": "broken.xml", "role": "junit", "required": True}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def download_reports(**kwargs):
+        staged = kwargs["output_dir"] / "linux" / "job" / "broken.xml"
+        staged.parent.mkdir(parents=True)
+        staged.write_text("<testsuite>", encoding="utf-8")
+        return [
+            DownloadedJobXml(
+                JobXmlObject("linux", "job", "xml/broken.xml", "broken.xml", 11), staged
+            )
+        ]
+
+    monkeypatch.setattr("test_report_plugin.collect_full_scope_xml", download_reports)
+    monkeypatch.setattr("test_report_plugin.upload_extra_artifacts", lambda *args: [])
+    captured = {}
+
+    def capture_report(config, generation, xml_uploads, store_context=None):
+        captured.update(json.loads(generation.summary_path.read_text(encoding="utf-8")))
+        assert generation.html_path.is_file()
+        return {}
+
+    monkeypatch.setattr("test_report_plugin.upload_report_artifacts", capture_report)
+
+    assert main() == (64 if mode.endswith("job") and fail_on_test_failures else 0)
+    if mode == "manifest-job":
+        assert captured["status_counts"]["ERRORED"] == 1
+        assert "Invalid JUnit report" in captured["failed_test_cases"][0]["reason"]
+    else:
+        assert len(captured["malformed_junit_xml"]) == 1
+        assert "no element found" in captured["malformed_junit_xml"][0]["error"]
