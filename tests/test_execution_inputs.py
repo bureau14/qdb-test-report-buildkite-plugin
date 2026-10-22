@@ -217,14 +217,33 @@ def test_rejects_duplicate_execution_claims(tmp_path, claim):
         collect(tmp_path)
 
 
-def test_optional_missing_artifact_does_not_fail_execution(tmp_path):
+@pytest.mark.parametrize(
+    "group,role", [("artifacts", "dump"), ("reports", "junit"), ("reports", "log")]
+)
+def test_optional_missing_input_does_not_fail_execution(tmp_path, group, role):
     write_execution(tmp_path)
     path = tmp_path / "metadata/example.json"
     manifest = json.loads(path.read_text())
-    manifest["artifacts"].append({"role": "dump", "path": "optional.dmp", "required": False})
+    manifest[group].append({"role": role, "path": "optional.dmp", "required": False})
     path.write_text(json.dumps(manifest))
 
     inputs = collect(tmp_path)
 
     assert len(inputs.xml_uploads) == 1
     assert inputs.xml_uploads[0].local_path.name == "example.xml"
+
+
+@pytest.mark.parametrize("value", ["", ".", "./", "././"])
+@pytest.mark.parametrize(
+    "group,role", [("artifacts", "log"), ("reports", "junit"), ("reports", "log")]
+)
+def test_rejects_empty_and_dot_paths(tmp_path, value, group, role):
+    write_execution(tmp_path)
+    (tmp_path / "unrelated.txt").write_text("unrelated checkout data")
+    path = tmp_path / "metadata/example.json"
+    manifest = json.loads(path.read_text())
+    manifest[group].append({"path": value, "role": role, "required": False})
+    path.write_text(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match="must not be empty or dot paths"):
+        collect(tmp_path)

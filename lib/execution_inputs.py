@@ -27,6 +27,8 @@ class ExecutionInputs:
 
 def resolve_input(root: Path, value: str) -> Path:
     path = Path(value)
+    if not path.parts:
+        raise ValueError(f"manifest paths must not be empty or dot paths: {value!r}")
     if path.is_absolute() or ".." in path.parts:
         raise ValueError(f"manifest paths must be checkout-relative: {value!r}")
     resolved = (root / path).resolve()
