@@ -1166,7 +1166,7 @@ def test_main_full_scope_downloads_xml_from_object_store(monkeypatch, tmp_path):
     assert [xml.object_relative_path for xml in uploaded_xml] == ["linux/job-1/results.xml"]
 
 
-def test_main_aggregate_attaches_job_artifacts_to_source_not_root(monkeypatch):
+def test_main_aggregate_keeps_job_artifacts_for_source_matching_and_build_browsing(monkeypatch):
     monkeypatch.setattr(
         "os.environ",
         {
@@ -1257,7 +1257,7 @@ def test_main_aggregate_attaches_job_artifacts_to_source_not_root(monkeypatch):
     )
 
     assert main() == 0
-    assert captured["artifacts"] == []
+    assert captured["artifacts"] == captured["source_artifacts_by_job_id"]["job-1"]
     links_by_job = captured["source_artifacts_by_job_id"]
     assert list(links_by_job) == ["job-1"]
     assert links_by_job["job-1"][0].name == "Test logs"
@@ -1391,6 +1391,8 @@ def test_main_aggregate_renders_job_manifest_artifacts_in_html(monkeypatch, tmp_
     )
     assert match is not None
     data = json.loads(match.group(1))
+    assert data[0]["artifacts"][0]["url"] == artifact_url
+    assert not any(node.get("sourceArtifacts") for node in data[0]["testNodes"])
     node_names = [node["name"] for node in data[0]["testNodes"]]
     assert "qdb_aggregation_test" in node_names
     assert "aggregation.correlation" in node_names

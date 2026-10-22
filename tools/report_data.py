@@ -63,6 +63,10 @@ def artifact_link_data(artifact: ArtifactLink) -> dict[str, Any]:
         "key": artifact.key,
         "sizeBytes": artifact.size_bytes,
     }
+    if artifact.execution_id:
+        data["executionId"] = artifact.execution_id
+    if artifact.execution_name:
+        data["executionName"] = artifact.execution_name
     if artifact.url:
         data["url"] = artifact.url
     return data
@@ -283,6 +287,9 @@ def report_to_report_ui_data(
         "Suites": len(report.suites),
         "Logical tests": report.logical_test_count,
         "Platform executions": report.platform_execution_count,
+        "CTest executions": report.ctest_execution_count,
+        "Summed case time (s)": round(report.duration_seconds, 3),
+        "Summed CTest time (s)": round(report.ctest_duration_seconds, 3),
         "Status": report.root_status,
         "Generated at": report.generated_at,
     }
@@ -377,8 +384,15 @@ def report_to_report_ui_data(
                 for suite in report.suites.values()
                 for test_file in suite.test_files.values()
             )
-            + report.logical_test_count,
-            "statusCounts": dict(report.status_counts),
+            + sum(
+                len(test_file.logical_tests)
+                for suite in report.suites.values()
+                for test_file in suite.test_files.values()
+            ),
+            "statusCounts": dict(report.test_status_counts),
+            "ctestExecutions": report.ctest_execution_count,
+            "ctestStatusCounts": dict(report.ctest_status_counts),
+            "durationKind": "summed-case-time",
             "logicalStatusCounts": dict(report.logical_status_counts),
             "rootStatus": report.root_status,
         },
@@ -397,12 +411,9 @@ def report_to_report_ui_data(
         "testNodes": builder.test_nodes,
     }
     if report.artifacts:
-        artifact_content: dict[str, Any] = {}
-        for artifact in report.artifacts:
-            artifact_content[artifact_display_label(artifact, report.artifacts)] = artifact_value(
-                artifact
-            )
-        execution_data["sections"].append(kvp_section("Artifacts", artifact_content))
+        execution_data["artifacts"] = [
+            artifact_link_data(artifact) for artifact in report.artifacts
+        ]
     if report.malformed_junit_xml:
         malformed_content: dict[str, Any] = {}
         for item in report.malformed_junit_xml:

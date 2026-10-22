@@ -20,12 +20,16 @@ export declare global {
     statusCounts: Record<string, number>;
     logicalStatusCounts: Record<string, number>;
     rootStatus: string;
+    ctestExecutions?: number;
+    ctestStatusCounts?: Record<string, number>;
+    durationKind?: string;
   }
 
   interface ExecutionData extends Data {
     summary: ExecutionSummaryData | undefined;
     sourceTables: SourceTables | undefined;
     sourceArtifactTable: SourceArtifactData[] | undefined;
+    artifacts?: SourceArtifactData[];
     tagTables: TagTables | undefined;
     roots: string[];
     children: Record<string, ChildMetadata>;
@@ -45,6 +49,8 @@ export declare global {
     key: string;
     url: string | undefined;
     sizeBytes: number;
+    executionId?: string;
+    executionName?: string;
   }
 
   type TagData = Array<number | number[]>;

@@ -7,6 +7,7 @@ import {
   archiveDownloadLimits,
   extractMember,
   downloadMember,
+  downloadMembers,
 } from "../src/components/details/archive-download.ts";
 
 async function fixture() {
@@ -19,6 +20,49 @@ async function fixture() {
   });
   return zip.generateAsync({ type: "arraybuffer" });
 }
+
+test("execution ZIP includes only selected members and preserves binary data", async (t) => {
+  const bytes = await zipWithFiles({
+    "run/stdout.log": "selected output",
+    "run/crash.dmp": new Uint8Array([0, 255, 17]),
+    "other/stdout.log": "unrelated",
+  });
+  const fetch = t.mock.method(
+    globalThis,
+    "fetch",
+    async () => new Response(bytes),
+  );
+  let blob;
+  t.mock.method(URL, "createObjectURL", (value) => {
+    blob = value;
+    return "blob:execution";
+  });
+  const link = { click() {}, remove() {} };
+  globalThis.document = { createElement: () => link, body: { append() {} } };
+  t.after(() => delete globalThis.document);
+  t.mock.method(globalThis, "setTimeout", () => 0);
+  const reference = {
+    url: "https://example.com/execution-subset.zip",
+    member: "run/stdout.log",
+  };
+  await downloadMembers(
+    [reference, reference, { url: reference.url, member: "run/crash.dmp" }],
+    "execution-artifacts.zip",
+  );
+  assert.equal(fetch.mock.callCount(), 1);
+  assert.equal(link.download, "execution-artifacts.zip");
+  const archive = await JSZip.loadAsync(await blob.arrayBuffer());
+  assert.deepEqual(
+    Object.keys(archive.files)
+      .filter((name) => !archive.files[name].dir)
+      .sort(),
+    ["run/crash.dmp", "run/stdout.log"],
+  );
+  assert.deepEqual(
+    await archive.file("run/crash.dmp").async("uint8array"),
+    new Uint8Array([0, 255, 17]),
+  );
+});
 
 function useTinyLimits(t, values) {
   const original = { ...archiveDownloadLimits };
@@ -100,7 +144,11 @@ test("stops a streamed archive without Content-Length when it exceeds the byte l
 
 test("rejects archives with too many members before extracting a member", async (t) => {
   useTinyLimits(t, { memberCount: 2 });
-  const bytes = await zipWithFiles({ "a.xml": "a", "b.xml": "b", "c.xml": "c" });
+  const bytes = await zipWithFiles({
+    "a.xml": "a",
+    "b.xml": "b",
+    "c.xml": "c",
+  });
   t.mock.method(globalThis, "fetch", async () => new Response(bytes));
 
   await assert.rejects(

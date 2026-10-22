@@ -145,6 +145,7 @@ def artifact_links_from_metadata(metadata: ArtifactMetadata) -> list[ArtifactLin
                     url=file_info.get("url"),
                     size_bytes=int(file_info.get("size_bytes", 0)),
                     execution_id=file_info.get("execution_id"),
+                    execution_name=file_info.get("execution_name"),
                 )
             )
     return links
@@ -600,6 +601,9 @@ def main() -> int:
                                 file_info["execution_id"] = execution_inputs.execution_ids[
                                     file_info["relative_path"]
                                 ]
+                                file_info["execution_name"] = execution_inputs.execution_names[
+                                    file_info["execution_id"]
+                                ]
                 uploaded_artifact_names = {item["name"] for item in artifact_metadata}
                 for artifact in config.artifacts:
                     if artifact.name not in uploaded_artifact_names:
@@ -629,7 +633,7 @@ def main() -> int:
                 config,
                 tmp_base,
                 source_artifacts_by_job_id=source_artifacts_by_job_id,
-                artifacts=report_artifacts if config.scope == "job" else [],
+                artifacts=report_artifacts,
                 artifact_metadata=artifact_metadata if config.scope == "job" else None,
                 xml_source_links=xml_source_links,
                 junit_archive_errors=junit_archive_errors,

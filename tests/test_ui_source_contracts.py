@@ -1,23 +1,32 @@
+import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def contains_source(source, fragment):
+    return re.sub(r"\s+", "", fragment) in re.sub(r"\s+", "", source)
 
 
 def test_tree_row_aggregates_skipped_only_containers_to_skipped_status():
     tree_row = REPO_ROOT / "ui/report-ui/src/components/sidebar/TreeRow.vue"
     source = tree_row.read_text(encoding="utf-8")
 
-    assert 'statuses.includes("SKIPPED")' in source
-    assert 'return "SKIPPED"' in source
+    assert "props.row.execution.displayStatus" in source
+    model = (REPO_ROOT / "ui/report-ui/src/components/common/TestExecution.ts").read_text(
+        encoding="utf-8"
+    )
+    assert "displayStatus(node: TestNodeData)" in model
+    assert '"SKIPPED"' in model
 
 
 def test_execution_summary_uses_logical_tests_not_platform_executions_for_header_count():
     execution_summary = REPO_ROOT / "ui/report-ui/src/components/header/ExecutionSummary.vue"
     source = execution_summary.read_text(encoding="utf-8")
 
-    assert 'summaryCount("logicalTests")' in source
-    assert 'summaryCount("platformExecutions")' not in source
-    assert "executionSummary.testCount" in source
+    assert contains_source(source, 'summaryCount(props.executions, "logicalTests")')
+    assert not contains_source(source, 'summaryCount(props.executions, "platformExecutions")')
+    assert "logical tests" in source
     assert "executionSummary.testsPerTargetCount" not in source
 
 
@@ -45,19 +54,21 @@ def test_main_reads_embedded_report_data_as_json_and_removes_script_node():
 
 
 def test_app_times_initial_selection():
-    source = (REPO_ROOT / "ui/report-ui/src/App.vue").read_text(encoding="utf-8")
+    source = (REPO_ROOT / "ui/report-ui/src/components/ReportPresentation.vue").read_text(
+        encoding="utf-8"
+    )
 
     assert '"report-initial-selection"' in source
     assert "performance.mark" in source
     assert "performance.measure" in source
 
 
-def test_sidebar_times_tree_state_creation():
-    source = (REPO_ROOT / "ui/report-ui/src/components/sidebar/SideBar.vue").read_text(
+def test_report_times_result_index_creation():
+    source = (REPO_ROOT / "ui/report-ui/src/components/ReportPresentation.vue").read_text(
         encoding="utf-8"
     )
 
-    assert '"report-tree-state-create"' in source
+    assert '"report-result-index-create"' in source
     assert "performance.mark" in source
     assert "performance.measure" in source
 
@@ -76,7 +87,7 @@ def test_tree_row_computes_selection_locally():
         encoding="utf-8"
     )
 
-    assert "const isSelected = computed" in source
+    assert contains_source(source, "const selected = computed")
     assert "selection.value?.item" in source
     assert "row.selected" not in source
 
@@ -88,16 +99,16 @@ def test_test_node_details_synthesizes_source_and_tag_sections_from_compact_meta
 
     assert "props.execution.sourceDataForNode(props.node)" in source
     assert "props.execution.tagLabels(props.node)" in source
-    assert 'title: "Source"' in source
-    assert 'title: "Tags"' in source
-    assert 'type: "labels"' in source
+    assert contains_source(source, 'title: "Source"')
+    assert contains_source(source, 'title: "Tags"')
+    assert contains_source(source, 'type: "labels"')
     assert "Buildkite build" in source
     assert "link:${source.buildUrl}" in source
     assert "Buildkite job" in source
     assert "link:${source.jobUrl}" in source
     assert "props.execution.sourceArtifactsForNode(props.node)" in source
-    assert 'title: "Artifacts"' in source
-    assert "artifactContent[label]" in source
+    assert "<ExecutionArtifacts" in source
+    assert ':artifacts="artifacts"' in source
     assert 'sourceContent["Artifact:' not in source
     assert "Artifact:" not in source
     assert ':sections="sections"' in source
@@ -105,14 +116,15 @@ def test_test_node_details_synthesizes_source_and_tag_sections_from_compact_meta
 
 
 def test_artifact_links_display_the_uploaded_relative_path():
-    details = (REPO_ROOT / "ui/report-ui/src/components/details/TestNodeDetails.vue").read_text(
+    details = (REPO_ROOT / "ui/report-ui/src/components/details/ExecutionArtifacts.vue").read_text(
         encoding="utf-8"
     )
     rendered_block = (
         REPO_ROOT / "ui/report-ui/src/components/details/RenderedBlock.vue"
     ).read_text(encoding="utf-8")
 
-    assert "`link:${artifact.url}\\n${artifact.relativePath}`" in details
+    assert ':title="file.relativePath"' in details
+    assert "{{ file.relativePath }}" in details
     assert "function linkText(value: string): string" in rendered_block
     assert 'value.substring(5).split("\\n", 2)' in rendered_block
 
@@ -137,7 +149,9 @@ def test_ui_source_contract_supports_optional_junit_xml_links():
     assert "this.children(current).forEach(collect)" in test_execution
     assert "link:${source.xmlUrl}" in details
     assert 'sourceContent["QDB PID"] = source.qdbProcessId' in details
-    assert "JUnit XML ${index + 1} (${source.target} / ${source.suite} / ${source.xml})" in details
+    assert contains_source(
+        details, "JUnit XML ${index + 1} (${source.target} / ${source.suite} / ${source.xml})"
+    )
     assert "Modified from original source" in "\n".join(test_execution.splitlines()[:3])
     assert "Modified from original source" in "\n".join(details.splitlines()[:3])
 
@@ -150,20 +164,21 @@ def test_test_execution_caches_aggregate_values():
     assert "private readonly overallStatusValue" in source
     assert "private readonly statusCounts" in source
     assert "private readonly nodesWithChildrenValue" in source
-    assert "private readonly firstFailedOrErroredNode" in source
+    assert "private readonly problemNodesValue" in source
+    assert "private readonly subtreeCounts" in source
     assert "private readonly tagTables" in source
     assert "tagLabels(node: TestNodeData)" in source
 
 
-def test_execution_details_uses_summary_style_header():
+def test_execution_details_uses_actionable_overview():
     source = (REPO_ROOT / "ui/report-ui/src/components/details/ExecutionDetails.vue").read_text(
         encoding="utf-8"
     )
 
     assert "Modified from original source" in "\n".join(source.splitlines()[:3])
-    assert "summaryMessage" in source
-    assert "testResultStatusBackgroundColorClasses(execution.overallStatus())" in source
-    assert "TestResultStatusIcon" in source
+    assert '<DetailsHeader :title="execution.name"' in source
+    assert '<BranchOverview v-model:selection="selection" :execution="execution"' in source
+    assert "Source and provenance" in source
 
 
 def test_edited_ui_files_have_modified_from_original_source_comment():
@@ -255,13 +270,15 @@ def test_sidebar_defaults_to_alphabetical_sorting_at_every_tree_depth():
     )
     main = (REPO_ROOT / "ui/report-ui/src/main.ts").read_text(encoding="utf-8")
 
-    assert 'public sortMode: "alphabetical" | "execution" = "alphabetical"' in tree_state
+    assert contains_source(
+        tree_state, 'public sortMode: "alphabetical" | "execution" = "alphabetical"'
+    )
     assert "toggleSortMode()" in tree_state
     assert "sortedChildren" in visible_tree
     assert 'treeState.sortMode === "alphabetical"' in visible_tree
     assert "localeCompare" in visible_tree
     assert "treeState.toggleSortMode()" in toolbar
-    assert "toolbar.sortAlphabetically" in toolbar
+    assert "Sort alphabetically" in toolbar
     assert 'sortAlphabetically: "Sort alphabetically"' in main
     assert 'sortByExecutionOrder: "Sort by execution order"' in main
 
@@ -277,9 +294,12 @@ def test_sidebar_syncs_selected_nodes_with_static_url_fragments():
         encoding="utf-8"
     )
 
-    assert "node(id: string): TestNodeData | TestExecution | undefined" in execution
+    assert contains_source(execution, "node(id: string): TestNodeData | TestExecution | undefined")
     assert "clearFilters()" in tree_state
-    assert "revealNode(execution: TestExecution, node: TestNodeData | TestExecution)" in tree_state
+    assert contains_source(
+        tree_state,
+        "revealNode(execution: TestExecution, node: TestNodeData | TestExecution, clearFilters = true)",
+    )
     assert 'hash.startsWith("#node=")' in sidebar
     assert "decodeURIComponent" in sidebar
     assert "execution.node(nodeId)" in sidebar

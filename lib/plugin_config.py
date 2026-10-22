@@ -189,6 +189,7 @@ def load_plugin_config() -> PluginConfig:
         artifacts = []
         platforms = []
 
+    manifest_input = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_MANIFEST_INPUT_PATH")
     return PluginConfig(
         scope=scope,
         title=title,

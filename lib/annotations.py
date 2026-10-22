@@ -138,7 +138,7 @@ def build_annotation_body(
     """
     Builds the markdown body for the Buildkite annotation.
     """
-    counts = summary.get("logical_status_counts") or summary.get("status_counts", {})
+    counts = summary.get("logical_status_counts", summary.get("status_counts", {}))
     failed = counts.get("FAILED", 0)
     errored = counts.get("ERRORED", 0)
     skipped = counts.get("SKIPPED", 0)
@@ -158,6 +158,8 @@ def build_annotation_body(
     parts.append(f"{failed} failed")
     parts.append(f"{errored} errored")
     parts.append(f"{skipped} skipped")
+    if summary.get("ctest_executions"):
+        parts.append(f"{summary['ctest_executions']} CTest executions")
 
     stats_line = ", ".join(parts)
     warnings = get_annotation_warnings(summary, scope=scope)

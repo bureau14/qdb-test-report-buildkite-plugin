@@ -7,9 +7,29 @@ A [Buildkite plugin](https://buildkite.com/docs/plugins) for generating self-con
 - **Job report** — after a test step finishes, reads that job's local JUnit XML from `job.junit_input_path`, generates a per-job HTML report, uploads the HTML/summary/raw XML, and optionally fails the step when tests failed.
 - **Aggregate report** — in a later reporting step, discovers XML uploaded by earlier job-report steps for the current build, downloads it, generates one aggregate HTML report, and uploads the aggregate HTML/summary.
 
-Each platform-execution leaf is labeled `{test name} - {platform}`, preserving test identity in the sidebar and detail header. When `ARTIFACTS_DOMAIN` is configured, its Source panel links `JUnit XML` directly to the exact raw XML that produced the selected execution. Without a browser-facing artifacts domain, the XML name remains visible but is not made clickable.
+The report opens with the full report selected. When tests, CTest checks, or report inputs fail, the combined Failed / Errored filter is enabled automatically and affected branches are expanded down to logical tests. Direct links take priority and reveal their selected node even when it would otherwise be filtered out.
 
-The self-contained report supports case-insensitive sidebar search without a server. It also updates the browser URL to `#node=<id>` for the selected report node; share that full URL to open the same static report with the node selected, its path expanded, and the sidebar scrolled to it. Node IDs are specific to the generated report file.
+The tree shows execution status counts, summed case time, and short failure reasons on logical tests. Platform leaves show the platform once, with the full test identity available on hover and in the test path. The overview keeps full logical-test counts separate from platform executions and CTest checks, and links affected branches back into the tree. Selecting a logical test compares its platform executions. Previous / Next failure moves through failing and errored executions. Diagnostic blocks support copy, line wrapping, and expansion; source metadata and provenance are collapsible.
+
+When `ARTIFACTS_DOMAIN` is configured, the selected execution links `JUnit XML` directly to the exact raw XML that produced it. Without a browser-facing artifacts domain, the XML name remains visible but is not made clickable.
+
+The self-contained report opens on a grouped problem overview. Test outcomes and
+CTest execution checks have separate summaries, filters, and navigation. Matching
+failures are grouped by test name, status, and exact message; expanding a group
+retains every affected suite and platform execution. Query value mismatches show
+expected and actual values alongside the original message.
+
+Search matches names, suite paths, platforms, and failure messages. Status filters
+preserve the search; Reset filters clears it explicitly. Results are paginated in
+batches of 100. Single-platform reports avoid a redundant platform tree level.
+The desktop panes resize with a pointer or arrow keys; narrow screens switch
+between results and details. Build/commit links and generation time appear in the
+header. Headline outcomes count logical tests; lists retain platform executions.
+
+Node links use `#report=<report-id>&node=<node-id>` and groups use
+`#report=<report-id>&group=<first-node-id>`. Legacy `#node=<id>` links continue to
+work. Node IDs belong to one generated report. Navigating to an item outside the
+current filters keeps those filters and displays that scope explicitly.
 
 Configure exactly one mode per plugin invocation:
 
@@ -26,7 +46,7 @@ The plugin exits `64` when `job.fail_on_test_failures` is true and the generated
 
 ## Requirements
 
-- **Python 3** must be available on the host agent (`python3` in `PATH`).
+- **Python 3.7 or newer** must be available on the host agent (`python3` in `PATH`).
 - The agent must have IAM permissions (S3) or SSM-stored R2 credentials configured. See [Backend configuration](#backend-configuration).
 - Test jobs must write JUnit XML before the `post-command` hook runs.
 - Aggregate steps must depend on the test/reporting jobs whose uploaded XML they should include.
@@ -96,6 +116,16 @@ result. Valid XML that already describes a failed process is not duplicated.
 Successful executions with no JUnit report declared receive a successful launcher
 result. Optional missing logs and dumps are normal; missing required artifacts
 produce an error result. Aggregate steps need no additional configuration.
+
+The report groups execution artifacts into reports, runner logs, server logs,
+crash diagnostics, and execution details. Empty files are hidden by default;
+paths and full job ZIPs remain available. Download all creates a ZIP containing
+only the selected execution's files, subject to the browser download limits.
+
+Headline test counts and summed case time exclude outer CTest execution checks
+and legacy process-ID metadata cases. CTest counts and summed time are shown
+separately, and CTest failures still fail the report. A skipped case without a
+runner-provided reason is explicitly labelled as such.
 
 By default, job mode exits `64` when the report contains failed or errored tests. Disable that if your pipeline already handles test failures another way:
 
