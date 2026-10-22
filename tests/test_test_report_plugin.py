@@ -1418,7 +1418,20 @@ def test_create_zip_preserves_group_paths_and_stores_compressed_logs(tmp_path):
         assert archive.getinfo("server/server.tar.gz").compress_type == ZIP_STORED
 
 
-def test_main_manifest_only_job_without_declared_reports(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    "artifact_name,expected_status",
+    [
+        (None, 0),
+        ("Runner logs", 0),
+        ("Test execution artifacts", 1),
+        ("test-execution-artifacts", 1),
+        ("TEST EXECUTION ARTIFACTS", 1),
+        ("Test_execution_artifacts", 1),
+    ],
+)
+def test_main_manifest_only_job_without_declared_reports(
+    monkeypatch, tmp_path, artifact_name, expected_status, capsys
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         "os.environ",
@@ -1447,7 +1460,14 @@ def test_main_manifest_only_job_without_declared_reports(monkeypatch, tmp_path):
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr("test_report_plugin.upload_extra_artifacts", lambda *args: [])
+    if artifact_name:
+        monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_ARTIFACTS_0_NAME", artifact_name)
+        monkeypatch.setenv(
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_ARTIFACTS_0_INPUT_PATH", "runner.log"
+        )
+        (tmp_path / "runner.log").write_text("log content", encoding="utf-8")
+    upload_artifacts = MagicMock(return_value=[])
+    monkeypatch.setattr("test_report_plugin.upload_extra_artifacts", upload_artifacts)
     captured = {}
 
     def capture_report(config, generation, xml_uploads, store_context=None):
@@ -1458,6 +1478,14 @@ def test_main_manifest_only_job_without_declared_reports(monkeypatch, tmp_path):
 
     monkeypatch.setattr("test_report_plugin.upload_report_artifacts", capture_report)
 
-    assert main() == 0
-    assert captured["root_status"] == "SUCCESSFUL"
-    assert captured["status_counts"]["SUCCESSFUL"] == 1
+    assert main() == expected_status
+    if expected_status:
+        upload_artifacts.assert_not_called()
+        assert captured == {}
+        assert (
+            "Test execution artifacts is reserved for launcher manifests" in capsys.readouterr().err
+        )
+    else:
+        upload_artifacts.assert_called_once()
+        assert captured["root_status"] == "SUCCESSFUL"
+        assert captured["status_counts"]["SUCCESSFUL"] == 1

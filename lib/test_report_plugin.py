@@ -581,7 +581,9 @@ def main() -> int:
                 artifact_files = collect_artifact_files(config.artifacts)
                 if execution_inputs is not None:
                     if any(
-                        artifact.name == "Test execution artifacts" for artifact in config.artifacts
+                        slugify_artifact_name(artifact.name)
+                        == slugify_artifact_name("Test execution artifacts")
+                        for artifact in config.artifacts
                     ):
                         raise ValueError(
                             "Test execution artifacts is reserved for launcher manifests"
