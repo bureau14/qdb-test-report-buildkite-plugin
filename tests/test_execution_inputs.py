@@ -347,3 +347,31 @@ def test_declared_directory_link_inside_checkout_collects_files(tmp_path):
 
     assert [artifact.local_path for artifact in inputs.artifact_files] == [log]
     assert inputs.execution_ids == {"data/runner.log": "execution"}
+
+
+def test_boost_filtering_preserves_execution_associations_and_launcher_errors(tmp_path):
+    xml = write_execution(tmp_path, status="aborted", exit_code=143)
+    xml.write_text(
+        '<testsuite name="boost"><testcase name="passed"/>'
+        '<testcase name="excluded"><skipped/><system-out>'
+        "Test case disabled because of the following chain of decision:\n"
+        "- disabled test unit: 'excluded'\n- reason: 'disabled'"
+        "</system-out></testcase></testsuite>"
+    )
+    original = xml.read_bytes()
+    inputs = collect(tmp_path)
+    report = build_report(
+        "report",
+        [("linux", item.local_path) for item in inputs.xml_uploads],
+        source_job_id="job",
+        source_artifacts_by_job_id={"job": links_from_inputs(inputs)},
+    )
+    assert report.status_counts == {"SUCCESSFUL": 1, "ERRORED": 1}
+    for suite in report.suites.values():
+        for test_file in suite.test_files.values():
+            for logical in test_file.logical_tests.values():
+                execution = logical.executions["linux"]
+                assert execution.execution_id == "example"
+                assert execution.source_artifacts
+                assert all(item.execution_id == "example" for item in execution.source_artifacts)
+    assert xml.read_bytes() == original
