@@ -149,12 +149,11 @@
 .presentation-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .presentation-actions .report-text-button { font-size: 11px; }
 .presentation-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 18px 30px; }
-.summary-card { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; background: var(--report-paper); border: 1px solid var(--report-line); border-radius: 10px; padding: 14px 18px; text-align: left; cursor: pointer; }
+.summary-card { display: flex; flex-direction: column; align-items: flex-start; gap: 0; background: var(--report-paper); border: 1px solid var(--report-line); border-radius: 10px; padding: 16px 18px; text-align: left; cursor: pointer; }
 .summary-card:hover { border-color: var(--report-blue); }
-.summary-card strong { font-size: 27px; font-weight: 650; letter-spacing: -.7px; font-variant-numeric: tabular-nums; }
-.summary-card strong small { font-size: 13px; font-weight: 500; letter-spacing: 0; }
-.summary-card > span { color: var(--report-muted); font-size: 12px; }
-.summary-card > small { color: var(--report-muted); font-size: 11px; }
+.summary-card .summary-title { color: var(--report-ink); font-size: 13px; font-weight: 600; line-height: 1.4; }
+.summary-card .summary-value { margin: 8px 0 6px; font-size: 30px; font-weight: 650; line-height: 1.15; letter-spacing: -.7px; font-variant-numeric: tabular-nums; }
+.summary-card .summary-description { display: grid; gap: 2px; color: var(--report-muted); font-size: 12px; line-height: 1.45; }
 .passed-count { color: var(--report-green); }
 .skipped-count { color: var(--report-amber); }
 .presentation-workspace { display: grid; grid-template-columns: var(--sidebar-width, 380px) 5px minmax(0, 1fr); flex: 1; min-height: 0; margin: 0 30px 24px; border: 1px solid var(--report-line); border-radius: 12px; overflow: hidden; background: var(--report-paper); }
@@ -209,11 +208,12 @@
   .presentation-workspace { margin: 0 16px 16px; }
   .presentation-summary { padding: 14px 16px; gap: 8px; }
   .summary-card { padding: 12px; }
-  .summary-card strong { font-size: 23px; }
+  .summary-card .summary-value { font-size: 26px; }
 }
 @media (max-width: 760px) {
   .presentation-app .report-topbar { padding: 14px 16px; }
   .presentation-summary { grid-template-columns: 1fr 1fr; padding: 10px 12px; }
+  .summary-card .summary-title { min-height: 2.8em; }
   .presentation-workspace { display: block; margin: 0 12px 12px; }
   .presentation-sidebar, .presentation-details { height: 100%; }
   .presentation-divider, .presentation-details { display: none; }

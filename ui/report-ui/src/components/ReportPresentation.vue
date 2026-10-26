@@ -268,11 +268,30 @@ onBeforeUnmount(() => {
       </div>
       <div class="presentation-actions"><button type="button" class="report-button" @click="selectOverview">Overview</button><DarkModeSwitch /></div>
     </header>
-    <section class="presentation-summary" aria-label="Logical test outcomes and separate CTest checks">
-      <button type="button" class="summary-card" @click="setScope('problems')"><strong class="failed-count">{{ formatCount(logicalCounts.FAILED || 0) }} <small>failed</small> / {{ formatCount(logicalCounts.ERRORED || 0) }} <small>{{ logicalCounts.ERRORED === 1 ? 'error' : 'errors' }}</small></strong><span>Test problems</span><small>{{ formatCount(testProblemCount) }} logical {{ testProblemCount === 1 ? 'test' : 'tests' }} · {{ groups.length }} matching {{ groups.length === 1 ? 'group' : 'groups' }}</small></button>
-      <button type="button" class="summary-card" @click="setScope('tests', 'SUCCESSFUL')"><strong class="passed-count">{{ formatCount(logicalCounts.SUCCESSFUL || 0) }}</strong><span>Tests passed</span><small>Logical test outcomes</small></button>
-      <button type="button" class="summary-card" @click="setScope('tests', 'SKIPPED')"><strong class="skipped-count">{{ formatCount(logicalCounts.SKIPPED || 0) }}</strong><span>Tests skipped</span><small>Browse recorded skip reasons</small></button>
-      <button type="button" class="summary-card" @click="setScope('ctest', 'PROBLEMS')"><strong>{{ formatCount(ctestProblemCount) }} <small>/ {{ formatCount(ctestCount) }}</small></strong><span>CTest checks with problems</span><small>Separate execution-level checks</small></button>
+    <section class="presentation-summary" aria-label="Test results and separate CTest checks">
+      <button type="button" class="summary-card" @click="setScope('problems')">
+        <span class="summary-title">Tests with problems</span>
+        <strong class="summary-value" :class="testProblemCount ? 'failed-count' : 'report-muted'">{{ formatCount(testProblemCount) }}</strong>
+        <small class="summary-description">
+          <span>{{ formatCount(logicalCounts.FAILED || 0) }} {{ logicalCounts.FAILED === 1 ? 'failed test' : 'failed tests' }}</span>
+          <span>{{ formatCount(logicalCounts.ERRORED || 0) }} {{ logicalCounts.ERRORED === 1 ? 'test with an execution error' : 'tests with execution errors' }}</span>
+        </small>
+      </button>
+      <button type="button" class="summary-card" @click="setScope('tests', 'SUCCESSFUL')">
+        <span class="summary-title">Passed tests</span>
+        <strong class="summary-value passed-count">{{ formatCount(logicalCounts.SUCCESSFUL || 0) }}</strong>
+        <small class="summary-description">Tests reported as successful.</small>
+      </button>
+      <button type="button" class="summary-card" @click="setScope('tests', 'SKIPPED')">
+        <span class="summary-title">Skipped tests</span>
+        <strong class="summary-value skipped-count">{{ formatCount(logicalCounts.SKIPPED || 0) }}</strong>
+        <small class="summary-description">Tests reported as skipped.<span>Select to view their reasons.</span></small>
+      </button>
+      <button type="button" class="summary-card" @click="setScope('ctest', 'PROBLEMS')">
+        <span class="summary-title">CTest checks with problems</span>
+        <strong class="summary-value" :class="ctestProblemCount ? 'failed-count' : 'report-muted'">{{ formatCount(ctestProblemCount) }}</strong>
+        <small class="summary-description"><span>Out of {{ formatCount(ctestCount) }} CTest {{ ctestCount === 1 ? 'check' : 'checks' }}.</span><span>Counted separately from individual tests.</span></small>
+      </button>
     </section>
     <div ref="workspace" class="presentation-workspace" :class="{'show-details': showDetails}" :style="{'--sidebar-width': sidebarWidth + 'px'}">
       <aside class="presentation-sidebar" aria-label="Results browser">
@@ -280,7 +299,7 @@ onBeforeUnmount(() => {
           <nav class="presentation-tabs" aria-label="Result views"><button v-for="scope in (['problems', 'tests', 'ctest'] as const)" :key="scope" type="button" :aria-pressed="filter.scope === scope" @click="setScope(scope)">{{ scope === 'problems' ? 'Problems' : scope === 'tests' ? 'All tests' : 'CTest checks' }}</button></nav>
           <label class="sr-only" for="result-search">Search names, paths, or failure messages</label><input id="result-search" v-model="filter.search" class="report-search" type="search" placeholder="Search names, paths, or messages…">
           <label class="presentation-field" for="result-suite">Suite</label><select id="result-suite" v-model="filter.suite" class="report-search" :disabled="filter.scope === 'ctest'"><option value="">All suites</option><option v-for="suite in suites" :key="suite">{{ suite }}</option></select>
-          <div class="presentation-filters" aria-label="Filter result statuses"><button v-if="filter.scope === 'ctest'" type="button" class="report-button" :aria-pressed="filter.status === 'PROBLEMS'" @click="filter.status = 'PROBLEMS'">Failed / errors</button><button type="button" class="report-button" :aria-pressed="!filter.status" @click="filter.status = ''">All statuses</button><button v-for="status in outcomes" :key="status" type="button" class="report-button" :aria-pressed="filter.status === status" @click="filter.status = status">{{ statusLabel(status) }}</button></div>
+          <div class="presentation-filters" aria-label="Filter result statuses"><button v-if="filter.scope === 'ctest'" type="button" class="report-button" :aria-pressed="filter.status === 'PROBLEMS'" @click="filter.status = 'PROBLEMS'">With problems</button><button type="button" class="report-button" :aria-pressed="!filter.status" @click="filter.status = ''">All statuses</button><button v-for="status in outcomes" :key="status" type="button" class="report-button" :aria-pressed="filter.status === status" @click="filter.status = status">{{ statusLabel(status) }}</button></div>
           <div class="presentation-actions"><button type="button" class="report-text-button" @click="resetFilters">Reset filters</button><button v-if="filter.scope === 'problems'" type="button" class="report-text-button" :aria-pressed="grouped" @click="grouped = !grouped">Group matching failures: {{ grouped ? 'on' : 'off' }}</button></div>
         </div>
         <div class="presentation-list-caption"><span role="status" aria-live="polite">{{ groupedView ? rows.length + (rows.length === 1 ? ' group · ' : ' groups · ') : '' }}{{ formatCount(filtered.length) }} {{ filter.scope === 'ctest' ? (filtered.length === 1 ? 'check' : 'checks') : (filtered.length === 1 ? 'execution' : 'executions') }}</span><label class="sr-only" for="result-sort">Sort results</label><select id="result-sort" v-model="sortMode" class="presentation-sort"><option v-if="groupedView" value="problems">Problem count ↓</option><option value="status">Status · problems first</option><option value="name">Name A–Z</option><option value="duration">Duration ↓</option></select></div>

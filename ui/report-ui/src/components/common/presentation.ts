@@ -9,7 +9,7 @@ export function formatDuration(millis: number): string {
     return "—";
   if (millis >= 60000)
     return `${Math.floor(millis / 60000)}m ${
-      Math.floor((millis % 60000) / 1000)}s`;
+        Math.floor((millis % 60000) / 1000)}s`;
   if (millis >= 1000)
     return `${(millis / 1000).toFixed(2)}s`;
   return `${Math.max(0, Math.round(millis))}ms`;
@@ -17,25 +17,26 @@ export function formatDuration(millis: number): string {
 
 export function statusLabel(status: string): string {
   return ({
-    SUCCESSFUL : "Passed",
-    FAILED : "Failed",
-    ERRORED : "Errored",
-    SKIPPED : "Skipped",
-    ABORTED : "Aborted"
-  } as Record<string, string>)[status] ||
+           SUCCESSFUL : "Passed",
+           FAILED : "Failed",
+           ERRORED : "Execution error",
+           SKIPPED : "Skipped",
+           ABORTED : "Aborted"
+         } as Record<string, string>)[status] ||
          status;
 }
 
 export function summaryCount(executions: TestExecution[], field: "logicalTests"|
-  "targets"|"platformExecutions"|"ctestExecutions"): number|undefined {
+                             "targets"|"platformExecutions"|
+                             "ctestExecutions"): number|undefined {
   if (executions.some((execution) => execution.summary?.[field] === undefined))
     return undefined;
   return executions.reduce(
-    (sum, execution) => sum + (execution.summary?.[field] || 0), 0);
+      (sum, execution) => sum + (execution.summary?.[field] || 0), 0);
 }
 
-export function statusCounts(
-  executions: TestExecution[]): Record<string, number> {
+export function statusCounts(executions: TestExecution[]):
+    Record<string, number> {
   const result: Record<string, number> = {};
   for (const execution of executions) {
     for (const [status, count] of Object.entries(execution.counts())) {

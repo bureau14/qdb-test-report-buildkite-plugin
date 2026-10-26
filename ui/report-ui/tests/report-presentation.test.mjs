@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
 
+import {statusLabel} from "../src/components/common/presentation.ts";
 import {
   collectResults,
   countOutcomes,
@@ -260,3 +261,8 @@ test(
       assert.deepEqual(groups.map((group) => group.name),
                        [ "Zulu", "Alpha", "Beta" ]);
     });
+
+test("user-facing status labels identify execution errors explicitly", () => {
+  assert.equal(statusLabel("ERRORED"), "Execution error");
+  assert.equal(statusLabel("FAILED"), "Failed");
+});
