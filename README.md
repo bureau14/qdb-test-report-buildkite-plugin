@@ -24,6 +24,72 @@ The plugin runs from the Buildkite `post-command` hook, so reports are still pub
 
 The plugin exits `64` when `job.fail_on_test_failures` is true and the generated job report contains failed or errored tests or malformed JUnit XML, whether collected through legacy inputs or execution manifests. Setting it to `false` allows those results to exit `0`. Malformed legacy XML remains listed in the report and summary and creates an error annotation listing the malformed files when `annotate: true`. Malformed manifest-owned XML remains an errored launcher result. When the HTML report is available through `ARTIFACTS_DOMAIN`, that annotation includes its link; if the report is unavailable, it still creates the error annotation without a link. When the original job command exits non-zero but every reported test passes, the plugin creates a warning annotation explaining the mismatch, even without `ARTIFACTS_DOMAIN`. It also exits `1` for other internal plugin errors and otherwise exits `0` so Buildkite can preserve the original command status. Aggregate mode does not fail on test failures or malformed JUnit XML; it exits `0` while retaining diagnostics and error-style annotations when enabled. It also exits `0` when no XML is discovered, but creates an error-style annotation unless `annotate: false` is set.
 
+## Historical test health
+
+Run `tools/test_history.py` to analyze the latest N completed builds on `master`.
+It writes a searchable, self-contained `history.html` and a machine-readable
+`history.json`. This is a standalone command; existing job and aggregate report
+steps do not change.
+
+```powershell
+# Set BUILDKITE_API_TOKEN in the environment (read_builds scope).
+python tools/test_history.py --organization quasardb --pipeline quasardb-build --builds 30 --output reports/history
+```
+
+Install `lib/requirements.txt` first. The command uses the standard AWS credential
+chain and requires `s3:ListBucket` and `s3:GetObject` on the report objects. Tokens
+are read from the environment, never from command-line arguments or output.
+Build metadata comes from the [Buildkite Builds API](https://buildkite.com/docs/apis/rest-api/builds),
+with pagination and a branch filter. The sample organization is configurable;
+use your organization's Buildkite slug.
+
+`--branch` defaults to `master`; `--destination` defaults to
+`s3://qdb-cicd-artifacts`; `--project` defaults to `quasardb-build`.
+The build **UUID** (`id`), rather than the build number, resolves reports beneath:
+
+```text
+s3://qdb-cicd-artifacts/quasardb-build/refs/heads/{branch}/reports/builds/{build_id}/variants/{platform}/jobs/{job_id}/xml/**
+```
+
+Both loose XML and `junit.zip` uploads use the existing aggregate downloader,
+including archive validation. One build is downloaded at a time into temporary
+storage and deleted after parsing. Builds are selected by creation order, with
+unfinished builds excluded. Failed and canceled completed builds remain in the
+window so failures are not filtered away. Fewer than N builds are returned if
+the available completed branch history is shorter.
+
+The report displays:
+
+| Signal | Meaning |
+| --- | --- |
+| Suspected flaky | At least two pass/fail transitions in measured history, or both passing and failing observations in one build. A single regression is insufficient. |
+| Failed since | Start of the current uninterrupted failure streak, with its build number. A window edge or missing/skipped predecessor makes this a lower bound. |
+| New failure / resolved | Latest build failed/passed after the previous measured outcome passed/failed. Gaps can separate those observations. |
+| Failure frequency | Failing builds divided by builds with a passing or failing observation; errors count as failures. |
+| Duration regression | Latest passing duration is at least twice the median of at least three earlier passing build durations. |
+| Coverage / timeline | Per-build XML counts and report error counts; pass/fail/skip/missing cells link to each Buildkite build. |
+
+Identity is `(platform, relative XML path, suite, class, test name)`; job and build
+UUIDs are excluded. Platforms remain separate. Renamed tests or report paths
+start new histories. Repeated observations in one build retain all statuses and
+job IDs in JSON, with a failure taking precedence in the timeline. Passing
+durations are reduced to a per-build median so retries do not overweight the
+historical baseline. Mixed results can indicate retries, repeated tests, or
+identity collisions; cross-build changes can indicate regressions or fixes.
+The flaky flag is therefore a triage signal, not proof of nondeterminism.
+
+Missing and skipped results never imply a pass or recovery. Malformed XML and
+rejected archives appear in report diagnostics (full details in JSON); zero-XML
+builds remain visible. Transport/authentication errors abort the command rather
+than silently publishing incomplete history. The command cannot infer which
+tests an unreported job should have run, so inspect coverage before acting on
+signals from partially reported builds.
+
+Useful future additions include same-commit retry recovery rates, failure-reason
+clusters, platform-specific failure comparisons, slowest tests and cumulative CI
+time, and links to owners or quarantine decisions. These need job retry metadata,
+stable ownership data, or agreed policy before they can become reliable actions.
+
 ## Requirements
 
 - **Python 3** must be available on the host agent (`python3` in `PATH`).
