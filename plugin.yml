@@ -74,7 +74,7 @@ configuration:
         build_timing:
           type: boolean
           default: false
-          description: Publish cumulative job runtime and agent queue wait for the build, including failed jobs and retries, excluding this report step.
+          description: Publish build, test, and total runtimes grouped by platform and variant, including failed jobs and retries, excluding this report step.
         timing_only:
           type: boolean
           default: false

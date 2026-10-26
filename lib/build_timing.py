@@ -1,10 +1,12 @@
-"""Publish cumulative job runtime and agent wait from an aggregate report."""
+"""Publish build and test runtimes grouped by platform and variant."""
 
 from __future__ import annotations
 
 import html
 import json
 import os
+import re
+from collections import defaultdict
 from datetime import datetime
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -69,6 +71,26 @@ def fetch_build() -> dict:
         return json.load(response)
 
 
+def render_runtime_table(title: str, groups: dict) -> list[str]:
+    lines = [
+        f"**{title}**",
+        "",
+        "| "
+        + ("Platform" if title == "Platform summary" else "Variant")
+        + " | Build | Tests | Total |",
+        "|---|---:|---:|---:|",
+    ]
+    for name, (build_time, test_time) in sorted(
+        groups.items(), key=lambda item: sum(item[1]), reverse=True
+    ):
+        name = html.escape(name).replace("|", "&#124;").replace("\\", "&#92;")
+        lines.append(
+            f"| {name} | {format_duration(build_time)} | {format_duration(test_time)} | "
+            f"{format_duration(build_time + test_time)} |"
+        )
+    return lines
+
+
 def render_summary(build: dict) -> str:
     jobs = [
         job
@@ -80,13 +102,15 @@ def render_summary(build: dict) -> str:
         )
         and job.get("id") != os.environ.get("BUILDKITE_JOB_ID")
     ]
-    rows = []
+    variants = defaultdict(lambda: [0.0, 0.0])
+    platforms = defaultdict(lambda: [0.0, 0.0])
     finishes = []
     incomplete = 0
+    missing = 0
+    other_time = 0.0
     for job in jobs:
         started = timestamp(job.get("started_at"))
         finished = timestamp(job.get("finished_at"))
-        runnable = timestamp(job.get("runnable_at"))
         if finished is None:
             if job.get("state") not in {
                 "skipped",
@@ -99,50 +123,62 @@ def render_summary(build: dict) -> str:
                 incomplete += 1
             continue
         finishes.append(finished)
-        if started is None and runnable is None:
-            continue
         runtime = duration(started, finished)
-        # A canceled job can spend time in the agent queue without ever starting.
-        wait = duration(runnable, started or finished)
-        name = job.get("name") or job.get("step_key") or job["id"]
-        name = html.escape(name).replace("|", "\\|").replace("\n", " ").replace("\r", " ")
-        if job.get("retried"):
-            name += " (retried)"
-        rows.append((name, runtime, wait))
+        if runtime is None:
+            if job.get("state") in {"passed", "failed", "timed_out"}:
+                missing += 1
+            continue
+        # QuasarDB labels preserve the same variant across build, regular test,
+        # parallel test, and protocol-compatibility steps.
+        match = re.fullmatch(r"(build|test)(?: - [^(]+)? \(([^)]+)\)", job.get("name") or "")
+        if match is None:
+            other_time += runtime
+            continue
+        stage, variant = match.groups()
+        column = 0 if stage == "build" else 1
+        platform = variant.split("-", 1)[0]
+        platform = {
+            "linux": "Linux",
+            "freebsd": "FreeBSD",
+            "windows": "Windows",
+            "macos": "macOS",
+        }.get(platform, platform)
+        variants[variant][column] += runtime
+        platforms[platform][column] += runtime
 
-    total_runtime = sum(runtime for _, runtime, _ in rows if runtime is not None)
-    total_wait = sum(wait for _, _, wait in rows if wait is not None)
+    build_time = sum(times[0] for times in variants.values())
+    test_time = sum(times[1] for times in variants.values())
+    total_runtime = build_time + test_time + other_time
     elapsed = duration(timestamp(build.get("created_at")), max(finishes) if finishes else None)
     lines = [
-        "### Build timing — excluding test report",
+        "### Build timing",
         "",
         (
-            f"**Total runtime: {format_duration(total_runtime)} · "
-            f"Total agent wait: {format_duration(total_wait)}**"
+            f"**Build runtime: {format_duration(build_time)} · "
+            f"Test runtime: {format_duration(test_time)} · "
+            f"Total runtime: {format_duration(total_runtime)}**"
         ),
         "",
-        f"Elapsed: {format_duration(elapsed)}",
-        "",
-        "| Job | Runtime | Agent wait |",
-        "|---|---:|---:|",
+        f"Build and tests elapsed: {format_duration(elapsed)}",
     ]
-    for name, runtime, wait in sorted(rows, key=lambda row: row[1] or 0, reverse=True):
-        lines.append(f"| {name} | {format_duration(runtime)} | {format_duration(wait)} |")
+    if other_time:
+        lines.extend(
+            ["", f"Other jobs: {format_duration(other_time)} (included in total runtime)."]
+        )
+    if variants:
+        lines.extend(["", *render_runtime_table("Platform summary", platforms)])
+        lines.extend(["", *render_runtime_table("Variant totals", variants)])
     lines.extend(
         [
-            (
-                f"| **Total** | **{format_duration(total_runtime)}** | "
-                f"**{format_duration(total_wait)}** |"
-            ),
             "",
             (
-                "*Totals sum across job attempts, including retries. Parallel execution means "
-                "they can exceed elapsed time. Agent wait excludes dependency wait.*"
+                "*Runtimes sum across job attempts, including retries. Parallel execution means "
+                "totals can exceed elapsed time. Report step excluded; durations rounded independently.*"
             ),
         ]
     )
-    if any(runtime is None or wait is None for _, runtime, wait in rows):
-        lines.extend(["", "Unavailable timings are shown as — and excluded from totals."])
+    if missing:
+        lines.extend(["", f"Runtime unavailable for {missing} job(s); excluded from totals."])
     if incomplete:
         lines.extend(["", f"Partial summary: {incomplete} unfinished job(s) excluded."])
     return "\n".join(lines)

@@ -414,11 +414,16 @@ remain intact. No additional manifest metadata is required.
 ### Aggregate build timing
 
 Set `aggregate.build_timing: true` on the final report step to publish a separate
-annotation with cumulative job runtime, agent queue wait, elapsed time, and a
-per-job breakdown. Failed attempts and retries are included; the report step
-and its retries are excluded using `BUILDKITE_STEP_KEY` and `BUILDKITE_JOB_ID`.
-Dependency wait is excluded from agent queue wait. Filtered or dependency-blocked
-jobs without timing data do not contribute to the totals.
+annotation with separate build, test, and total runtimes, plus platform and
+variant summaries. “Build and tests elapsed” measures wall-clock time from build
+creation until the final included job finishes. Failed attempts and retries are
+included; the report step and its retries are excluded using
+`BUILDKITE_STEP_KEY` and `BUILDKITE_JOB_ID`.
+Labels matching `build (variant)`, `test (variant)`, or `test - kind (variant)`
+are grouped by variant; its first hyphen-delimited component identifies the
+platform. Other jobs contribute to total runtime and are shown separately.
+Agent wait is not displayed. Filtered or dependency-blocked jobs without timing
+data do not contribute to the totals.
 
 The API token is read with decryption from the SSM parameter
 `/services/buildkite/credentials/bk-time-annotations`, using the existing AWS
