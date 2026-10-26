@@ -71,6 +71,14 @@ configuration:
       type: object
       description: Aggregate report configuration that discovers raw XML uploaded by job reports for the current build.
       properties:
+        build_timing:
+          type: boolean
+          default: false
+          description: Publish cumulative job runtime and agent queue wait for the build, including failed jobs and retries, excluding this report step.
+        timing_only:
+          type: boolean
+          default: false
+          description: Publish only the build timing annotation, without discovering test reports. Implies build_timing.
         download_parallel:
           type: integer
           description: Number of XML files to download in parallel during aggregate discovery. Default 32.

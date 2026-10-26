@@ -24,6 +24,7 @@ from annotations import (
     get_job_annotation_style,
 )
 from artifact_inputs import ArtifactFile, collect_artifact_files, slugify_artifact_name
+from build_timing import publish_build_timing
 from execution_inputs import collect_execution_inputs
 from git_links import build_commit_url
 from junit_report_model import ArtifactLink
@@ -432,6 +433,11 @@ def main() -> int:
     try:
         config = load_plugin_config()
         configure_logging(config.log_level)
+        if config.scope == "aggregate":
+            if config.annotate and (config.aggregate_build_timing or config.aggregate_timing_only):
+                publish_build_timing()
+            if config.aggregate_timing_only:
+                return 0
 
         with trace("plugin.total", scope=config.scope), tempfile.TemporaryDirectory(
             prefix="test-report-"

@@ -410,3 +410,32 @@ remain intact. No additional manifest metadata is required.
 ## Licensing and Attribution
 
 - This project includes a vendored and modified version of the **Open Test Reporting (OTR) UI**, licensed under the **Apache License 2.0**. The original license is at `ui/LICENSE.md`.
+
+### Aggregate build timing
+
+Set `aggregate.build_timing: true` on the final report step to publish a separate
+annotation with cumulative job runtime, agent queue wait, elapsed time, and a
+per-job breakdown. Failed attempts and retries are included; the report step
+and its retries are excluded using `BUILDKITE_STEP_KEY` and `BUILDKITE_JOB_ID`.
+Dependency wait is excluded from agent queue wait. Filtered or dependency-blocked
+jobs without timing data do not contribute to the totals.
+
+The API token is read with decryption from the SSM parameter
+`/services/buildkite/credentials/bk-time-annotations`, using the existing AWS
+client configuration (`AWS_DEFAULT_REGION`, default `eu-west-1`). The agent role
+needs access to that parameter and its KMS key, and the token needs `read_builds`.
+SSM or API failures create a warning annotation and do not block test reporting.
+`annotate: false` disables the timing annotation and its API/SSM requests.
+
+For build-only pipelines, use `aggregate.timing_only: true`. This implies build
+timing and skips XML discovery and object-store report publishing, so no missing
+JUnit warning is emitted. Both options default to false. The final report must
+depend on every selected build and test job and use `allow_dependency_failure: true`.
+
+```yaml
+plugins:
+  - bureau14/qdb-test-report#master:
+      title: "Full test report"
+      aggregate:
+        build_timing: true
+```

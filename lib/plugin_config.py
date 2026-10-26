@@ -39,6 +39,8 @@ class PluginConfig:
     commit: str | None = None
     repo: str | None = None
     artifacts: list[ArtifactConfig] = field(default_factory=list)
+    aggregate_build_timing: bool = False
+    aggregate_timing_only: bool = False
     aggregate_download_parallel: int = 32
     aggregate_download_concurrency: int = 4
     log_level: str = "error"
@@ -208,6 +210,12 @@ def load_plugin_config() -> PluginConfig:
         commit=commit,
         repo=repo,
         artifacts=artifacts,
+        aggregate_build_timing=_get_bool_env(
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_BUILD_TIMING", False
+        ),
+        aggregate_timing_only=_get_bool_env(
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_TIMING_ONLY", False
+        ),
         aggregate_download_parallel=aggregate_download_parallel,
         aggregate_download_concurrency=aggregate_download_concurrency,
         log_level=log_level,
