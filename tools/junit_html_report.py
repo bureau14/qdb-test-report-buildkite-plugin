@@ -12,7 +12,7 @@ from typing import Any
 
 from html_report_writer import DEFAULT_TEMPLATE, write_html_report
 from junit_report_model import ArtifactLink, build_report, format_counts, parse_platform_arg
-from report_data import report_to_report_ui_data, suite_duration
+from report_data import report_to_report_ui_data
 from report_logging import LOG_LEVELS, configure_logging, logger, trace
 
 
@@ -121,9 +121,7 @@ def generate_html_report(
                 "logical_tests": report.logical_test_count,
                 "platform_executions": report.platform_execution_count,
                 "duration_seconds": report.duration_seconds,
-                "suite_durations_seconds": {
-                    name: suite_duration(suite) for name, suite in report.suites.items()
-                },
+                "report_durations_seconds": report.report_durations_seconds,
                 "targets": len(report.platforms),
                 "platforms": report.platforms,
                 "resolved_platforms": report.resolved_platforms,

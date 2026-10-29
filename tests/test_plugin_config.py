@@ -36,6 +36,7 @@ def test_load_plugin_config_job_block_minimal(monkeypatch):
     assert cfg.commit == "0123456789abcdef0123456789abcdef01234567"
     assert cfg.repo == "https://github.com/acme/project.git"
     assert cfg.annotate is True
+    assert cfg.annotation_report_limit == 20
     assert cfg.fail_on_test_failures is True
     assert cfg.artifacts == []
     assert cfg.log_level == "error"
@@ -55,6 +56,20 @@ def test_upload_parallel_rejects_invalid_values(monkeypatch, value):
     monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_UPLOAD_PARALLEL", value)
     with pytest.raises(ValueError, match="UPLOAD_PARALLEL"):
         load_plugin_config()
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "invalid", "1.5"])
+def test_annotation_report_limit_rejects_invalid_values(monkeypatch, value):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_ANNOTATION_REPORT_LIMIT", value)
+    with pytest.raises(ValueError, match="ANNOTATION_REPORT_LIMIT"):
+        load_plugin_config()
+
+
+def test_annotation_report_limit_can_be_configured(monkeypatch):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_ANNOTATION_REPORT_LIMIT", "7")
+    assert load_plugin_config().annotation_report_limit == 7
 
 
 def test_upload_parallel_can_be_configured(monkeypatch):

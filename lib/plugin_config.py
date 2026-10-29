@@ -43,6 +43,7 @@ class PluginConfig:
     aggregate_download_concurrency: int = 4
     log_level: str = "error"
     upload_parallel: int = field(default_factory=lambda: os.cpu_count() or 1)
+    annotation_report_limit: int = 20
 
 
 def _get_env(key: str, default: str | None = None) -> str | None:
@@ -146,6 +147,9 @@ def load_plugin_config() -> PluginConfig:
 
     only_failures = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_ONLY_FAILURES", False)
     annotate = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_ANNOTATE", True)
+    annotation_report_limit = _get_int_env(
+        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_ANNOTATION_REPORT_LIMIT", 20
+    )
     log_level = validate_log_level(_get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_LOG_LEVEL", "error"))
     aggregate_download_parallel = _get_int_env(
         "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_DOWNLOAD_PARALLEL", 32
@@ -202,6 +206,7 @@ def load_plugin_config() -> PluginConfig:
         platforms=platforms,
         only_failures=only_failures,
         annotate=annotate,
+        annotation_report_limit=annotation_report_limit,
         fail_on_test_failures=fail_on_test_failures,
         junit_input_path=junit_input_path,
         manifest_input_path=Path(manifest_input) if manifest_input else None,

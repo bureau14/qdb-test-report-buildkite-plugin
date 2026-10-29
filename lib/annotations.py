@@ -21,28 +21,30 @@ def format_duration(seconds: float) -> str:
     return " ".join(parts)
 
 
-def suite_timing_table(summary: dict, available_bytes: int) -> str:
+def report_timing_table(summary: dict, available_bytes: int, report_limit: int = 20) -> str:
     durations = {
         name: duration
-        for name, duration in (summary.get("suite_durations_seconds") or {}).items()
-        if name.startswith("qdb_")
+        for name, duration in (summary.get("report_durations_seconds") or {}).items()
+        if duration >= 1
     }
     if not durations:
         return ""
     header = (
-        "\n\n### Cumulative test time per suite\n\n"
-        "| Suite | Cumulative test time |\n"
+        "\n\n### Cumulative test time per report\n\n"
+        "| Report | Cumulative test time |\n"
         "| --- | ---: |\n"
     )
     rows = []
     size = len(header.encode("utf-8"))
-    for name, duration in sorted(durations.items()):
+    for name, duration in sorted(durations.items(), key=lambda item: (-item[1], item[0]))[
+        :report_limit
+    ]:
         label = escape(" ".join(name.split()))
         for char in "\\|`*_[]~":
             label = label.replace(char, f"&#{ord(char)};")
         row = f"| {label} | {format_duration(duration)} |\n"
         omitted = len(durations) - len(rows) - 1
-        notice = f"\n\n{omitted} suite(s) omitted due to the annotation size limit."
+        notice = f"\n\n{omitted} additional reports omitted. See full report for all timings."
         reserve = len(notice.encode("utf-8")) if omitted else 0
         row_bytes = len(row.encode("utf-8"))
         if size + row_bytes + reserve <= available_bytes:
@@ -51,7 +53,7 @@ def suite_timing_table(summary: dict, available_bytes: int) -> str:
     table = header + "".join(rows) if rows else ""
     omitted = len(durations) - len(rows)
     if omitted:
-        table += f"\n\n{omitted} suite(s) omitted due to the annotation size limit."
+        table += f"\n\n{omitted} additional reports omitted. See full report for all timings."
     return table if len(table.encode("utf-8")) <= available_bytes else ""
 
 
@@ -179,7 +181,11 @@ def get_malformed_junit_xml(summary: dict) -> list[dict]:
 
 @traced("annotation.render")
 def build_annotation_body(
-    title: str, summary: dict, html_url: str | None, scope: str = "build"
+    title: str,
+    summary: dict,
+    html_url: str | None,
+    scope: str = "build",
+    annotation_report_limit: int = 20,
 ) -> str:
     """
     Builds the markdown body for the Buildkite annotation.
@@ -242,7 +248,9 @@ def build_annotation_body(
     if html_url:
         body += f'\n\n<a href="{html_url}" target="_blank" rel="noopener noreferrer">Open full report</a>'
     body += failed_test_table(summary, MAX_ANNOTATION_BYTES - len(body.encode("utf-8")))
-    body += suite_timing_table(summary, MAX_ANNOTATION_BYTES - len(body.encode("utf-8")))
+    body += report_timing_table(
+        summary, MAX_ANNOTATION_BYTES - len(body.encode("utf-8")), annotation_report_limit
+    )
     return body
 
 

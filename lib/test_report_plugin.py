@@ -676,7 +676,11 @@ def main() -> int:
                     )
                 else:
                     body = build_annotation_body(
-                        config.title, summary, html_url, scope=config.scope
+                        config.title,
+                        summary,
+                        html_url,
+                        scope=config.scope,
+                        annotation_report_limit=config.annotation_report_limit,
                     )
                     if config.scope == "job":
                         context = f"test-report:{config.variant}:{config.job_id}"

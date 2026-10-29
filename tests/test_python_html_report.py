@@ -1204,7 +1204,7 @@ def test_cli_writes_summary_json(tmp_path):
         "logical_tests": 3,
         "platform_executions": 3,
         "duration_seconds": 0.0,
-        "suite_durations_seconds": {"suite": 0.0},
+        "report_durations_seconds": {"junit": 0.0},
         "targets": 1,
         "platforms": ["linux"],
         "resolved_platforms": ["linux"],
@@ -1265,10 +1265,10 @@ def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
     summary = json.loads(summary_path.read_text())
     assert len(summary["failed_test_cases"]) == 2
     assert summary["duration_seconds"] == 65
-    assert summary["suite_durations_seconds"] == {"suite": 65}
+    assert summary["report_durations_seconds"] == {"tests": 65}
     body = build_annotation_body("Tests", summary, None)
     assert "**Cumulative test time: 01m 05s**" in body
-    assert "### Cumulative test time per suite" not in body
+    assert body.endswith("| tests | 01m 05s |\n")
     assert "| suite::tests | S::bad | Expected 42 |" in body
     assert body.count("| suite::tests | S::bad |") == 1
     assert "ERRORED: Timeout" not in body
@@ -1277,7 +1277,7 @@ def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
     assert "S::skip" not in body
 
 
-def test_summary_suite_durations_group_files_and_targets(tmp_path):
+def test_summary_report_durations_group_suites_and_targets(tmp_path):
     from annotations import build_annotation_body
     from junit_html_report import generate_html_report
 
@@ -1286,7 +1286,7 @@ def test_summary_suite_durations_group_files_and_targets(tmp_path):
     for directory, filename, suite, seconds in [
         (linux, "a.xml", "qdb_shared", 10),
         (linux, "b.xml", "qdb_shared", 20),
-        (windows, "a.xml", "qdb_shared", 30),
+        (windows, "a.xml", "different_suite", 30),
         (windows, "c.xml", "other", 5),
     ]:
         write(
@@ -1302,11 +1302,10 @@ def test_summary_suite_durations_group_files_and_targets(tmp_path):
         only_failures=True,
     )
     summary = json.loads(summary_path.read_text())
-    assert summary["suite_durations_seconds"] == {"qdb_shared": 60, "other": 5}
-    assert sum(summary["suite_durations_seconds"].values()) == summary["duration_seconds"]
+    assert summary["report_durations_seconds"] == {"a": 40, "b": 20, "c": 5}
+    assert sum(summary["report_durations_seconds"].values()) == summary["duration_seconds"]
     body = build_annotation_body("Tests", summary, None)
-    assert body.endswith("| qdb&#95;shared | 01m 00s |\n")
-    assert "| other |" not in body
+    assert body.endswith("| a | 40s |\n| b | 20s |\n| c | 05s |\n")
 
 
 def test_summary_distinguishes_ctest_and_test_runner_reports(tmp_path):
@@ -1351,6 +1350,8 @@ def test_summary_distinguishes_ctest_and_test_runner_reports(tmp_path):
         "test",
         "test",
     ]
+    assert summary["report_durations_seconds"] == {"runner": 0.125, "boost": 0.0}
+    assert summary["duration_seconds"] == 1.125
     body = build_annotation_body("Tests", summary, None)
     ctest_table, detailed_table = body.split("### Failed test cases — Boost.Test / test-runner")
     assert "qdb&#95;test&#95;runner::runner | query | Expected rows | 0.125 s |" in detailed_table
