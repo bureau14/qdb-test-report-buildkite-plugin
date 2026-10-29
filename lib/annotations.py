@@ -9,6 +9,18 @@ MAX_ANNOTATION_BYTES = 1024 * 1024
 MAX_FAILURE_REASON_CHARS = 240
 
 
+def format_duration(seconds: float) -> str:
+    hours, remainder = divmod(round(seconds), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes or hours:
+        parts.append(f"{minutes:02d}m")
+    parts.append(f"{seconds:02d}s")
+    return " ".join(parts)
+
+
 def failed_test_table(summary: dict, available_bytes: int) -> str:
     cases = []
     seen = set()
@@ -163,6 +175,9 @@ def build_annotation_body(
     warnings = get_annotation_warnings(summary, scope=scope)
 
     body = f"## {title}\n\n{stats_line}"
+    duration = summary.get("duration_seconds")
+    if duration is not None:
+        body += f"\n\n**Cumulative test time: {format_duration(duration)}**"
     if warnings:
         warning_lines = "\n".join(f"- {warning}" for warning in warnings)
         body += f"\n\n⚠️ Warnings\n\n{warning_lines}"

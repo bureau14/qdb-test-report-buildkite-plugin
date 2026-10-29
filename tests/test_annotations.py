@@ -16,6 +16,25 @@ def failed_case(name="Class::test", status="FAILED", platform="linux"):
 
 
 @pytest.mark.parametrize("scope", ["build", "job"])
+@pytest.mark.parametrize(
+    "seconds, expected",
+    [(0, "00s"), (9.4, "09s"), (59.6, "01m 00s"), (3600, "1h 00m 00s"), (13338, "3h 42m 18s")],
+)
+def test_annotation_cumulative_test_time(scope, seconds, expected):
+    body = build_annotation_body(
+        "Tests", {"duration_seconds": seconds}, "https://example.com/report", scope=scope
+    )
+    timing = f"**Cumulative test time: {expected}**"
+    assert timing in body
+    assert body.index("0 skipped") < body.index(timing) < body.index("Open full report")
+
+
+@pytest.mark.parametrize("summary", [{}, {"duration_seconds": None}])
+def test_annotation_omits_unavailable_cumulative_test_time(summary):
+    assert "Cumulative test time" not in build_annotation_body("Tests", summary, None)
+
+
+@pytest.mark.parametrize("scope", ["build", "job"])
 def test_failed_test_table(scope):
     summary = {
         "logical_tests": 2,

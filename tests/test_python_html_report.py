@@ -1203,6 +1203,7 @@ def test_cli_writes_summary_json(tmp_path):
         "suites": 1,
         "logical_tests": 3,
         "platform_executions": 3,
+        "duration_seconds": 0.0,
         "targets": 1,
         "platforms": ["linux"],
         "resolved_platforms": ["linux"],
@@ -1233,16 +1234,16 @@ def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
     linux = write(
         tmp_path / "linux" / "tests.xml",
         junit_xml(
-            '<testcase classname="S" name="pass"/>',
+            '<testcase classname="S" name="pass" time="60"/>',
             '<testcase classname="S" name="skip"><skipped/></testcase>',
-            '<testcase classname="S" name="bad"><failure message="Expected 42"/></testcase>',
-            '<testcase classname="S" name="bad"/>',
+            '<testcase classname="S" name="bad" time="2"><failure message="Expected 42"/></testcase>',
+            '<testcase classname="S" name="bad" time="99"/>',
         ),
     )
     windows = write(
         tmp_path / "windows" / "tests.xml",
         junit_xml(
-            '<testcase classname="S" name="bad"><error message="Timeout"/></testcase>',
+            '<testcase classname="S" name="bad" time="3"><error message="Timeout"/></testcase>',
         ),
     )
     summary_path = tmp_path / "summary.json"
@@ -1262,7 +1263,9 @@ def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
     )
     summary = json.loads(summary_path.read_text())
     assert len(summary["failed_test_cases"]) == 2
+    assert summary["duration_seconds"] == 65
     body = build_annotation_body("Tests", summary, None)
+    assert "**Cumulative test time: 01m 05s**" in body
     assert "| suite::tests | S::bad | Expected 42 |" in body
     assert body.count("| suite::tests | S::bad |") == 1
     assert "ERRORED: Timeout" not in body

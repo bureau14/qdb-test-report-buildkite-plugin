@@ -120,6 +120,7 @@ def generate_html_report(
                 "suites": len(report.suites),
                 "logical_tests": report.logical_test_count,
                 "platform_executions": report.platform_execution_count,
+                "duration_seconds": report.duration_seconds,
                 "targets": len(report.platforms),
                 "platforms": report.platforms,
                 "resolved_platforms": report.resolved_platforms,
