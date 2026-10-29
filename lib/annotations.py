@@ -22,7 +22,11 @@ def format_duration(seconds: float) -> str:
 
 
 def suite_timing_table(summary: dict, available_bytes: int) -> str:
-    durations = summary.get("suite_durations_seconds") or {}
+    durations = {
+        name: duration
+        for name, duration in (summary.get("suite_durations_seconds") or {}).items()
+        if name.startswith("qdb_")
+    }
     if not durations:
         return ""
     header = (

@@ -1268,7 +1268,7 @@ def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
     assert summary["suite_durations_seconds"] == {"suite": 65}
     body = build_annotation_body("Tests", summary, None)
     assert "**Cumulative test time: 01m 05s**" in body
-    assert body.endswith("| suite | 01m 05s |\n")
+    assert "### Cumulative test time per suite" not in body
     assert "| suite::tests | S::bad | Expected 42 |" in body
     assert body.count("| suite::tests | S::bad |") == 1
     assert "ERRORED: Timeout" not in body
@@ -1284,9 +1284,9 @@ def test_summary_suite_durations_group_files_and_targets(tmp_path):
     linux = tmp_path / "linux"
     windows = tmp_path / "windows"
     for directory, filename, suite, seconds in [
-        (linux, "a.xml", "shared", 10),
-        (linux, "b.xml", "shared", 20),
-        (windows, "a.xml", "shared", 30),
+        (linux, "a.xml", "qdb_shared", 10),
+        (linux, "b.xml", "qdb_shared", 20),
+        (windows, "a.xml", "qdb_shared", 30),
         (windows, "c.xml", "other", 5),
     ]:
         write(
@@ -1302,10 +1302,11 @@ def test_summary_suite_durations_group_files_and_targets(tmp_path):
         only_failures=True,
     )
     summary = json.loads(summary_path.read_text())
-    assert summary["suite_durations_seconds"] == {"shared": 60, "other": 5}
+    assert summary["suite_durations_seconds"] == {"qdb_shared": 60, "other": 5}
     assert sum(summary["suite_durations_seconds"].values()) == summary["duration_seconds"]
     body = build_annotation_body("Tests", summary, None)
-    assert body.endswith("| other | 05s |\n| shared | 01m 00s |\n")
+    assert body.endswith("| qdb&#95;shared | 01m 00s |\n")
+    assert "| other |" not in body
 
 
 def test_summary_distinguishes_ctest_and_test_runner_reports(tmp_path):
