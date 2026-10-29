@@ -21,6 +21,36 @@ def format_duration(seconds: float) -> str:
     return " ".join(parts)
 
 
+def suite_timing_table(summary: dict, available_bytes: int) -> str:
+    durations = summary.get("suite_durations_seconds") or {}
+    if not durations:
+        return ""
+    header = (
+        "\n\n### Cumulative test time per suite\n\n"
+        "| Suite | Cumulative test time |\n"
+        "| --- | ---: |\n"
+    )
+    rows = []
+    size = len(header.encode("utf-8"))
+    for name, duration in sorted(durations.items()):
+        label = escape(" ".join(name.split()))
+        for char in "\\|`*_[]~":
+            label = label.replace(char, f"&#{ord(char)};")
+        row = f"| {label} | {format_duration(duration)} |\n"
+        omitted = len(durations) - len(rows) - 1
+        notice = f"\n\n{omitted} suite(s) omitted due to the annotation size limit."
+        reserve = len(notice.encode("utf-8")) if omitted else 0
+        row_bytes = len(row.encode("utf-8"))
+        if size + row_bytes + reserve <= available_bytes:
+            rows.append(row)
+            size += row_bytes
+    table = header + "".join(rows) if rows else ""
+    omitted = len(durations) - len(rows)
+    if omitted:
+        table += f"\n\n{omitted} suite(s) omitted due to the annotation size limit."
+    return table if len(table.encode("utf-8")) <= available_bytes else ""
+
+
 def failed_test_table(summary: dict, available_bytes: int) -> str:
     cases = []
     seen = set()
@@ -208,6 +238,7 @@ def build_annotation_body(
     if html_url:
         body += f'\n\n<a href="{html_url}" target="_blank" rel="noopener noreferrer">Open full report</a>'
     body += failed_test_table(summary, MAX_ANNOTATION_BYTES - len(body.encode("utf-8")))
+    body += suite_timing_table(summary, MAX_ANNOTATION_BYTES - len(body.encode("utf-8")))
     return body
 
 

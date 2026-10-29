@@ -1204,6 +1204,7 @@ def test_cli_writes_summary_json(tmp_path):
         "logical_tests": 3,
         "platform_executions": 3,
         "duration_seconds": 0.0,
+        "suite_durations_seconds": {"suite": 0.0},
         "targets": 1,
         "platforms": ["linux"],
         "resolved_platforms": ["linux"],
@@ -1264,14 +1265,47 @@ def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
     summary = json.loads(summary_path.read_text())
     assert len(summary["failed_test_cases"]) == 2
     assert summary["duration_seconds"] == 65
+    assert summary["suite_durations_seconds"] == {"suite": 65}
     body = build_annotation_body("Tests", summary, None)
     assert "**Cumulative test time: 01m 05s**" in body
+    assert body.endswith("| suite | 01m 05s |\n")
     assert "| suite::tests | S::bad | Expected 42 |" in body
     assert body.count("| suite::tests | S::bad |") == 1
     assert "ERRORED: Timeout" not in body
     assert "<a " not in body
     assert "S::pass" not in body
     assert "S::skip" not in body
+
+
+def test_summary_suite_durations_group_files_and_targets(tmp_path):
+    from annotations import build_annotation_body
+    from junit_html_report import generate_html_report
+
+    linux = tmp_path / "linux"
+    windows = tmp_path / "windows"
+    for directory, filename, suite, seconds in [
+        (linux, "a.xml", "shared", 10),
+        (linux, "b.xml", "shared", 20),
+        (windows, "a.xml", "shared", 30),
+        (windows, "c.xml", "other", 5),
+    ]:
+        write(
+            directory / filename,
+            junit_xml(f'<testcase name="passes" time="{seconds}"/>', suite_name=suite),
+        )
+    summary_path = tmp_path / "summary.json"
+    generate_html_report(
+        title="Tests",
+        platform_specs=[("linux", linux), ("windows", windows)],
+        output=tmp_path / "report.html",
+        summary_json=summary_path,
+        only_failures=True,
+    )
+    summary = json.loads(summary_path.read_text())
+    assert summary["suite_durations_seconds"] == {"shared": 60, "other": 5}
+    assert sum(summary["suite_durations_seconds"].values()) == summary["duration_seconds"]
+    body = build_annotation_body("Tests", summary, None)
+    assert body.endswith("| other | 05s |\n| shared | 01m 00s |\n")
 
 
 def test_summary_distinguishes_ctest_and_test_runner_reports(tmp_path):
