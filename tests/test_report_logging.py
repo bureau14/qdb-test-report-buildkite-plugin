@@ -24,6 +24,11 @@ def test_trace_pairs_nested_stages_and_preserves_exception(monkeypatch, capsys):
     assert caught.value is error
     assert trace_timings == {"outer": 5.0, "inner": 2.0}
     lines = capsys.readouterr().err.splitlines()
+    assert [line for line in lines if line.startswith("Entering category:")] == [
+        "Entering category: outer",
+        "Entering category: inner",
+    ]
+    lines = [line for line in lines if not line.startswith("Entering category:")]
     assert len(lines) == 4
     outer_id = lines[0].split("id=")[1].split()[0]
     inner_id = lines[1].split("id=")[1].split()[0]
@@ -37,6 +42,7 @@ def test_trace_retains_categories_without_verbose_logging(monkeypatch, capsys):
     monkeypatch.setattr("report_logging.time.perf_counter", lambda: clock[0])
 
     with trace("outer", category="outer"):
+        assert capsys.readouterr().err == "Entering category: outer\n"
         with trace("nested"):
             clock[0] += 2.0
         clock[0] += 3.0
@@ -47,6 +53,14 @@ def test_trace_retains_categories_without_verbose_logging(monkeypatch, capsys):
         raise RuntimeError("failed operation")
 
     assert trace_timings == {"outer": 5.0, "repeated": 18.0}
+    assert capsys.readouterr().err == "Entering category: repeated\n"
+
+    with trace("third", category="outer"), trace("fourth", category="repeated"):
+        pass
+    assert capsys.readouterr().err.splitlines() == [
+        "Entering category: outer",
+        "Entering category: repeated",
+    ]
 
 
 def test_disabled_trace_does_not_read_clocks_or_dump_arguments(monkeypatch, capsys):
