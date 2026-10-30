@@ -10,12 +10,17 @@ from functools import wraps
 from itertools import count
 
 _trace_ids = count(1)
+_last_category: str | None = None
+trace_timings: dict[str, float] = {}
 
 LOG_LEVELS = ("debug", "info", "warning", "error", "fatal")
 
 
 class StderrHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
+        if getattr(record, "omit_level", False):
+            print(record.getMessage(), file=sys.stderr)
+            return
         label = {logging.WARNING: "WARN", logging.CRITICAL: "FATAL"}.get(
             record.levelno, record.levelname
         )
@@ -36,15 +41,22 @@ def validate_log_level(level: str) -> str:
 
 
 def configure_logging(level: str = "error") -> None:
+    global _last_category
     logger.setLevel(validate_log_level(level).upper())
+    _last_category = None
 
 
 @contextmanager
-def trace(stage: str, *, level: int = logging.INFO, **fields):
-    """Log paired, inclusive wall/thread-CPU timings without argument or secret dumps."""
-    if not logger.isEnabledFor(level):
+def trace(stage: str, *, level: int = logging.INFO, category: str | None = None, **fields):
+    """Log inclusive timings and retain categorized wall time."""
+    global _last_category
+    # Categorize outer operations only, since their elapsed time includes nested work.
+    if not logger.isEnabledFor(level) and category is None:
         yield
         return
+    if category is not None and category != _last_category:
+        logger.error("Entering category: %s", category, extra={"omit_level": True})
+        _last_category = category
     trace_id = next(_trace_ids)
     details = " ".join(f"{key}={value!r}" for key, value in fields.items())
     logger.log(level, "trace start id=%s stage=%s %s", trace_id, stage, details)
@@ -57,25 +69,28 @@ def trace(stage: str, *, level: int = logging.INFO, **fields):
         status = "error"
         raise
     finally:
+        elapsed = time.perf_counter() - started
+        if category is not None:
+            trace_timings[category] = trace_timings.get(category, 0.0) + elapsed
         logger.log(
             level,
             "trace end id=%s stage=%s wall_s=%.3f thread_cpu_s=%.3f status=%s %s",
             trace_id,
             stage,
-            time.perf_counter() - started,
+            elapsed,
             time.thread_time() - cpu_started,
             status,
             details,
         )
 
 
-def traced(stage: str, *, level: int = logging.INFO):
+def traced(stage: str, *, level: int = logging.INFO, category: str | None = None):
     """Time a function without changing its return value or exception handling."""
 
     def decorate(fn):
         @wraps(fn)
         def wrapped(*args, **kwargs):
-            with trace(stage, level=level):
+            with trace(stage, level=level, category=category):
                 return fn(*args, **kwargs)
 
         return wrapped

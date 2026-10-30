@@ -16,9 +16,11 @@ if tools_path not in sys.path:
 
 @pytest.fixture(autouse=True)
 def reset_report_logging():
-    from report_logging import configure_logging, logger
+    from report_logging import configure_logging, logger, trace_timings
 
     previous_level = logger.level
     configure_logging()
+    trace_timings.clear()
     yield
+    trace_timings.clear()
     logger.setLevel(previous_level)

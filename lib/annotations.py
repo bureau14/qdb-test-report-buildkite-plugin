@@ -179,7 +179,7 @@ def get_malformed_junit_xml(summary: dict) -> list[dict]:
     return list(summary.get("malformed_junit_xml", []))
 
 
-@traced("annotation.render")
+@traced("annotation.render", category="annotations")
 def build_annotation_body(
     title: str,
     summary: dict,
@@ -299,7 +299,7 @@ def get_job_annotation_style(summary: dict) -> str:
     return style
 
 
-@traced("annotation.publish")
+@traced("annotation.publish", category="annotations")
 def create_buildkite_annotation(
     body: str, context: str, style: str, priority: int, scope: str = "build"
 ):
