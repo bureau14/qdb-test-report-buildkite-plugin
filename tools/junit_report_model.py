@@ -502,6 +502,7 @@ def parse_junit_file(
     if not suites:
         log_warn(f"no testsuite elements found file={path} platform={platform}")
         return executions
+    source_test_file = test_file_name(source_id)
     for suite in suites:
         suite_name = suite.attrib.get("name") or path.stem
         execution_id = next(
@@ -535,7 +536,7 @@ def parse_junit_file(
                     platform=platform,
                     source_file=path,
                     source_id=source_id,
-                    test_file=test_file_name(source_id),
+                    test_file=source_test_file,
                     source_job_id=source_job_id,
                     source_job_url=source_job_url,
                     source_xml_url=source_xml_url,
