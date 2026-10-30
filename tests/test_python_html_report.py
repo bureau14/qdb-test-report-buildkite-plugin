@@ -1203,6 +1203,8 @@ def test_cli_writes_summary_json(tmp_path):
         "suites": 1,
         "logical_tests": 3,
         "platform_executions": 3,
+        "duration_seconds": 0.0,
+        "report_durations_seconds": {"junit": 0.0},
         "targets": 1,
         "platforms": ["linux"],
         "resolved_platforms": ["linux"],
@@ -1233,16 +1235,16 @@ def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
     linux = write(
         tmp_path / "linux" / "tests.xml",
         junit_xml(
-            '<testcase classname="S" name="pass"/>',
+            '<testcase classname="S" name="pass" time="60"/>',
             '<testcase classname="S" name="skip"><skipped/></testcase>',
-            '<testcase classname="S" name="bad"><failure message="Expected 42"/></testcase>',
-            '<testcase classname="S" name="bad"/>',
+            '<testcase classname="S" name="bad" time="2"><failure message="Expected 42"/></testcase>',
+            '<testcase classname="S" name="bad" time="99"/>',
         ),
     )
     windows = write(
         tmp_path / "windows" / "tests.xml",
         junit_xml(
-            '<testcase classname="S" name="bad"><error message="Timeout"/></testcase>',
+            '<testcase classname="S" name="bad" time="3"><error message="Timeout"/></testcase>',
         ),
     )
     summary_path = tmp_path / "summary.json"
@@ -1262,13 +1264,48 @@ def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
     )
     summary = json.loads(summary_path.read_text())
     assert len(summary["failed_test_cases"]) == 2
+    assert summary["duration_seconds"] == 65
+    assert summary["report_durations_seconds"] == {"tests": 65}
     body = build_annotation_body("Tests", summary, None)
+    assert "**Cumulative test time: 01m 05s**" in body
+    assert body.endswith("| tests | 01m 05s |\n")
     assert "| suite::tests | S::bad | Expected 42 |" in body
     assert body.count("| suite::tests | S::bad |") == 1
     assert "ERRORED: Timeout" not in body
     assert "<a " not in body
     assert "S::pass" not in body
     assert "S::skip" not in body
+
+
+def test_summary_report_durations_group_suites_and_targets(tmp_path):
+    from annotations import build_annotation_body
+    from junit_html_report import generate_html_report
+
+    linux = tmp_path / "linux"
+    windows = tmp_path / "windows"
+    for directory, filename, suite, seconds in [
+        (linux, "a.xml", "qdb_shared", 10),
+        (linux, "b.xml", "qdb_shared", 20),
+        (windows, "a.xml", "different_suite", 30),
+        (windows, "c.xml", "other", 5),
+    ]:
+        write(
+            directory / filename,
+            junit_xml(f'<testcase name="passes" time="{seconds}"/>', suite_name=suite),
+        )
+    summary_path = tmp_path / "summary.json"
+    generate_html_report(
+        title="Tests",
+        platform_specs=[("linux", linux), ("windows", windows)],
+        output=tmp_path / "report.html",
+        summary_json=summary_path,
+        only_failures=True,
+    )
+    summary = json.loads(summary_path.read_text())
+    assert summary["report_durations_seconds"] == {"a": 40, "b": 20, "c": 5}
+    assert sum(summary["report_durations_seconds"].values()) == summary["duration_seconds"]
+    body = build_annotation_body("Tests", summary, None)
+    assert body.endswith("| a | 40s |\n| b | 20s |\n| c | 05s |\n")
 
 
 def test_summary_distinguishes_ctest_and_test_runner_reports(tmp_path):
@@ -1313,6 +1350,8 @@ def test_summary_distinguishes_ctest_and_test_runner_reports(tmp_path):
         "test",
         "test",
     ]
+    assert summary["report_durations_seconds"] == {"runner": 0.125, "boost": 0.0}
+    assert summary["duration_seconds"] == 1.125
     body = build_annotation_body("Tests", summary, None)
     ctest_table, detailed_table = body.split("### Failed test cases — Boost.Test / test-runner")
     assert "qdb&#95;test&#95;runner::runner | query | Expected rows | 0.125 s |" in detailed_table

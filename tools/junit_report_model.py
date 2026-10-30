@@ -170,6 +170,19 @@ class Report:
         )
 
     @property
+    def report_durations_seconds(self) -> dict[str, float]:
+        durations: dict[str, float] = {}
+        for suite in self.suites.values():
+            for test_file in suite.test_files.values():
+                for logical in test_file.logical_tests.values():
+                    for execution in logical.executions.values():
+                        if execution.report_kind != "ctest":
+                            durations[test_file.name] = (
+                                durations.get(test_file.name, 0.0) + execution.duration_seconds
+                            )
+        return durations
+
+    @property
     def status_counts(self) -> Counter[str]:
         return Counter(
             execution.status

@@ -9,6 +9,54 @@ MAX_ANNOTATION_BYTES = 1024 * 1024
 MAX_FAILURE_REASON_CHARS = 240
 
 
+def format_duration(seconds: float) -> str:
+    hours, remainder = divmod(round(seconds), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes or hours:
+        parts.append(f"{minutes:02d}m")
+    parts.append(f"{seconds:02d}s")
+    return " ".join(parts)
+
+
+def report_timing_table(summary: dict, available_bytes: int, report_limit: int = 20) -> str:
+    durations = {
+        name: duration
+        for name, duration in (summary.get("report_durations_seconds") or {}).items()
+        if duration >= 1
+    }
+    if not durations:
+        return ""
+    header = (
+        "\n\n### Cumulative test time per report\n\n"
+        "| Report | Cumulative test time |\n"
+        "| --- | ---: |\n"
+    )
+    rows = []
+    size = len(header.encode("utf-8"))
+    for name, duration in sorted(durations.items(), key=lambda item: (-item[1], item[0]))[
+        :report_limit
+    ]:
+        label = escape(" ".join(name.split()))
+        for char in "\\|`*_[]~":
+            label = label.replace(char, f"&#{ord(char)};")
+        row = f"| {label} | {format_duration(duration)} |\n"
+        omitted = len(durations) - len(rows) - 1
+        notice = f"\n\n{omitted} additional reports omitted. See full report for all timings."
+        reserve = len(notice.encode("utf-8")) if omitted else 0
+        row_bytes = len(row.encode("utf-8"))
+        if size + row_bytes + reserve <= available_bytes:
+            rows.append(row)
+            size += row_bytes
+    table = header + "".join(rows) if rows else ""
+    omitted = len(durations) - len(rows)
+    if omitted:
+        table += f"\n\n{omitted} additional reports omitted. See full report for all timings."
+    return table if len(table.encode("utf-8")) <= available_bytes else ""
+
+
 def failed_test_table(summary: dict, available_bytes: int) -> str:
     cases = []
     seen = set()
@@ -133,7 +181,11 @@ def get_malformed_junit_xml(summary: dict) -> list[dict]:
 
 @traced("annotation.render")
 def build_annotation_body(
-    title: str, summary: dict, html_url: str | None, scope: str = "build"
+    title: str,
+    summary: dict,
+    html_url: str | None,
+    scope: str = "build",
+    annotation_report_limit: int = 20,
 ) -> str:
     """
     Builds the markdown body for the Buildkite annotation.
@@ -163,6 +215,9 @@ def build_annotation_body(
     warnings = get_annotation_warnings(summary, scope=scope)
 
     body = f"## {title}\n\n{stats_line}"
+    duration = summary.get("duration_seconds")
+    if duration is not None:
+        body += f"\n\n**Cumulative test time: {format_duration(duration)}**"
     if warnings:
         warning_lines = "\n".join(f"- {warning}" for warning in warnings)
         body += f"\n\n⚠️ Warnings\n\n{warning_lines}"
@@ -193,6 +248,9 @@ def build_annotation_body(
     if html_url:
         body += f'\n\n<a href="{html_url}" target="_blank" rel="noopener noreferrer">Open full report</a>'
     body += failed_test_table(summary, MAX_ANNOTATION_BYTES - len(body.encode("utf-8")))
+    body += report_timing_table(
+        summary, MAX_ANNOTATION_BYTES - len(body.encode("utf-8")), annotation_report_limit
+    )
     return body
 
 

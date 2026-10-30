@@ -20,6 +20,11 @@ configuration:
     annotate:
       type: boolean
       description: Create Buildkite annotation linking to HTML; default true.
+    annotation_report_limit:
+      type: integer
+      minimum: 1
+      default: 20
+      description: Maximum report timing rows in each annotation, sorted slowest first. Reports below one second and CTest wrapper executions are excluded.
     debug:
       type: boolean
       description: Enable bash debug tracing.
