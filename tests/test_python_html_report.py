@@ -720,21 +720,28 @@ def test_build_report_keeps_source_file_aware_identity_and_worst_duplicate_statu
     assert report.duplicates_replaced == 1
 
 
-def test_report_ui_groups_suite_test_file_classname_test_and_platform_without_sorting(tmp_path):
+def test_report_ui_groups_suite_test_file_classname_test_and_platform_without_sorting(
+    tmp_path, monkeypatch
+):
     from junit_report_model import build_report
     from report_data import report_to_report_ui_data
 
     linux = tmp_path / "linux"
-    write(
+    regression = write(
         linux / "build" / "Release" / "test-reports" / "qdb_regression_test.xml",
         junit_xml(
             '<testcase classname="BoostSuite" name="same_name" time="0.1"/>',
             '<testcase classname="OtherSuite" name="other_test" time="0.3"/>',
         ),
     )
-    write(
+    aggregation = write(
         linux / "build" / "Release" / "test-reports" / "qdb_aggregation_test.xml",
         junit_xml('<testcase classname="BoostSuite" name="same_name" time="0.2"/>'),
+    )
+
+    # Supply discovery order explicitly; filesystem enumeration order is unspecified.
+    monkeypatch.setattr(
+        "junit_report_model.discover_xml_files", lambda path: [regression, aggregation]
     )
 
     execution = report_to_report_ui_data(build_report("boost", [("linux", linux)]))[0]
