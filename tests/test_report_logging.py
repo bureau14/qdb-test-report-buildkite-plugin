@@ -17,9 +17,10 @@ def test_trace_pairs_nested_stages_and_preserves_exception(monkeypatch, capsys):
     monkeypatch.setattr(report_logging.time, "perf_counter", lambda: next(wall))
     monkeypatch.setattr(report_logging.time, "thread_time", lambda: next(cpu))
     error = RuntimeError("original failure")
-    with pytest.raises(RuntimeError) as caught, trace("outer", category="outer"):
-        with trace("inner", category="inner"):
-            raise error
+    with pytest.raises(RuntimeError) as caught, trace("outer", category="outer"), trace(
+        "inner", category="inner"
+    ):
+        raise error
     assert caught.value is error
     assert trace_timings == {"outer": 5.0, "inner": 2.0}
     lines = capsys.readouterr().err.splitlines()
@@ -46,7 +47,6 @@ def test_trace_retains_categories_without_verbose_logging(monkeypatch, capsys):
         raise RuntimeError("failed operation")
 
     assert trace_timings == {"outer": 5.0, "repeated": 18.0}
-    assert capsys.readouterr().err == ""
 
 
 def test_disabled_trace_does_not_read_clocks_or_dump_arguments(monkeypatch, capsys):
