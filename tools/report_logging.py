@@ -50,6 +50,8 @@ def trace(stage: str, *, level: int = logging.INFO, category: str | None = None,
     if not logger.isEnabledFor(level) and category is None:
         yield
         return
+    if category is not None:
+        logger.error("Starting category: %s", category, extra={"omit_level": True})
     trace_id = next(_trace_ids)
     details = " ".join(f"{key}={value!r}" for key, value in fields.items())
     logger.log(level, "trace start id=%s stage=%s %s", trace_id, stage, details)
