@@ -238,6 +238,7 @@ def run_report_generation(
         only_failures=config.only_failures,
         fail_on_test_failures=False,
         log_level=config.log_level,
+        parse_workers=config.aggregate_parse_workers if config.scope == "aggregate" else 1,
     )
 
     return GenerationResult(

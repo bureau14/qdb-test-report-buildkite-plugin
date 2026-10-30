@@ -7,12 +7,15 @@ import glob
 import logging
 import re
 import xml.etree.ElementTree as ET
-from collections import Counter, OrderedDict
+from collections import Counter, OrderedDict, deque
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from itertools import islice
+from multiprocessing import get_context
 from pathlib import Path
 
-from report_logging import logger, traced
+from report_logging import configure_logging, logger, traced
 
 STATUS_ORDER = ["SUCCESSFUL", "SKIPPED", "FAILED", "ERRORED"]
 STATUS_SEVERITY = {"SUCCESSFUL": 0, "SKIPPED": 1, "FAILED": 2, "ERRORED": 3}
@@ -570,6 +573,71 @@ def parse_junit_file(
     return executions
 
 
+def _parse_junit_batch(batch):
+    """Parse files without mutating the parent report or its diagnostics."""
+    results = []
+    for platform, path, source_id, job_id, job_url, xml_url in batch:
+        diagnostics = []
+        executions = parse_junit_file(
+            path,
+            platform,
+            source_id,
+            source_job_id=job_id,
+            source_job_url=job_url,
+            source_xml_url=xml_url,
+            malformed_junit_xml=diagnostics,
+        )
+        results.append((platform, job_id, executions, diagnostics))
+    return results
+
+
+def _iter_junit_batches(files):
+    """Group small XML files while leaving oversized files in their own batch."""
+    batch = []
+    batch_bytes = 0
+    for item in files:
+        size = item[1].stat().st_size
+        if batch and (len(batch) >= 16 or batch_bytes + size > 16 * 1024 * 1024):
+            yield batch
+            batch = []
+            batch_bytes = 0
+        batch.append(item)
+        batch_bytes += size
+    if batch:
+        yield batch
+
+
+def _iter_parsed_junit_files(files, workers: int):
+    """Yield results in discovery order with a bounded number of pending batches."""
+    if workers < 1:
+        raise ValueError("parse_workers must be at least 1")
+    if workers == 1 or len(files) < 2:
+        for item in files:
+            yield _parse_junit_batch([item])[0]
+        return
+    batches = iter(_iter_junit_batches(files))
+    initial_batches = list(islice(batches, 2 * workers))
+    if len(initial_batches) == 1:
+        yield from _parse_junit_batch(initial_batches[0])
+        return
+    with ProcessPoolExecutor(
+        max_workers=min(workers, len(initial_batches)),
+        mp_context=get_context("spawn"),
+        initializer=configure_logging,
+        initargs=(logging.getLevelName(logger.getEffectiveLevel()).lower(),),
+    ) as pool:
+        pending = deque()
+        for batch in initial_batches:
+            pending.append(pool.submit(_parse_junit_batch, batch))
+        while pending:
+            # Equal-severity duplicates must keep the same first execution as serial parsing.
+            results = pending.popleft().result()
+            batch = next(batches, None)
+            if batch is not None:
+                pending.append(pool.submit(_parse_junit_batch, batch))
+            yield from results
+
+
 @traced("model.build")
 def build_report(
     title: str,
@@ -580,6 +648,7 @@ def build_report(
     source_artifacts_by_job_id: dict[str, list[ArtifactLink]] | None = None,
     artifacts: list[ArtifactLink] | None = None,
     xml_source_links: dict[Path, str | None] | None = None,
+    parse_workers: int = 1,
 ) -> Report:
     log_info(f"Start JUnit report model build title={title!r} platforms={len(platform_specs)}")
     suites: OrderedDict[str, TestSuite] = OrderedDict()
@@ -640,23 +709,11 @@ def build_report(
 
     log_info("Omitting filename prefix from all test identities")
 
-    for (
-        platform,
-        xml_file,
-        source_id,
-        effective_source_job_id,
-        source_job_url,
-        source_xml_url,
-    ) in all_files_to_process:
-        file_executions = parse_junit_file(
-            xml_file,
-            platform,
-            source_id,
-            source_job_id=effective_source_job_id,
-            source_job_url=source_job_url,
-            source_xml_url=source_xml_url,
-            malformed_junit_xml=malformed_junit_xml,
-        )
+    log_info(f"Parsing JUnit XML with workers={parse_workers}")
+    for platform, effective_source_job_id, file_executions, diagnostics in _iter_parsed_junit_files(
+        all_files_to_process, parse_workers
+    ):
+        malformed_junit_xml.extend(diagnostics)
         if file_executions:
             first_execution = file_executions[0]
             # The source XML's process ID and filename apply to every testcase,

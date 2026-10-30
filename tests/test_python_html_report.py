@@ -1536,3 +1536,72 @@ def test_boost_disabled_cases_are_omitted_without_hiding_runtime_results(tmp_pat
         "ERRORED": 1,
     }
     assert xml.read_bytes() == original
+
+
+def test_parallel_parsing_preserves_order_diagnostics_and_artifact_associations(
+    tmp_path, monkeypatch
+):
+    from dataclasses import asdict
+
+    from junit_report_model import ArtifactLink, build_report
+
+    linux = tmp_path / "linux"
+    paths = []
+    for index in range(40):
+        xml = junit_xml(
+            f'<testcase classname="dup" name="same"><failure message="winner-{index}"/></testcase>',
+            f'<testcase name="case-{index}" time="0.1"/>',
+            '<testcase name="disabled"><skipped/><system-out>'
+            "Test case disabled because of the following chain of decision:\n"
+            "- reason: 'disabled'</system-out></testcase>",
+        )
+        if index % 2:
+            xml = xml.replace("<testsuite tests=", '<testsuite xmlns="urn:junit" tests=')
+        paths.append(write(linux / f"run-{index}" / "junit.xml", xml))
+    paths.append(write(linux / "malformed.xml", "<testsuite>"))
+    monkeypatch.setattr("junit_report_model.discover_xml_files", lambda path: paths)
+    artifacts = [ArtifactLink("Logs", "server.txt", "logs/server.txt", "https://reports/logs", 12)]
+    options = {
+        "title": "Report",
+        "platform_specs": [("linux", linux)],
+        "source_job_id": "job-1",
+        "build_url": "https://buildkite.com/org/pipeline/builds/1",
+        "source_artifacts_by_job_id": {"job-1": artifacts},
+        "xml_source_links": {p.resolve(): f"https://reports/{i}.xml" for i, p in enumerate(paths)},
+    }
+    serial = build_report(**options, parse_workers=1)
+    parallel = build_report(**options, parse_workers=2)
+    before = asdict(serial)
+    after = asdict(parallel)
+    before.pop("generated_at")
+    after.pop("generated_at")
+    assert after == before
+    assert parallel.raw_testcases == 80
+    assert parallel.duplicates_seen == 39
+    assert len(parallel.malformed_junit_xml) == 1
+    duplicate = parallel.suites["suite"].test_files["junit"].logical_tests["dup::same"]
+    assert duplicate.executions["linux"].reason == "winner-0"
+    assert duplicate.executions["linux"].source_artifacts == artifacts
+
+
+def test_parallel_parsing_propagates_worker_errors(tmp_path):
+    import pytest
+    from junit_report_model import _iter_parsed_junit_files
+
+    inputs = []
+    for index in range(40):
+        path = tmp_path / str(index)
+        write(path, junit_xml('<testcase name="ok"/>'))
+        # Invalid metadata must propagate an unexpected exception from the worker.
+        source_id = 123 if index == 39 else "junit.xml"
+        inputs.append(("linux", path, source_id, None, None, None))
+    with pytest.raises(TypeError):
+        list(_iter_parsed_junit_files(inputs, 2))
+
+
+def test_parse_workers_must_be_positive(tmp_path):
+    import pytest
+    from junit_report_model import build_report
+
+    with pytest.raises(ValueError, match="parse_workers must be at least 1"):
+        build_report("Report", [("linux", tmp_path)], parse_workers=0)

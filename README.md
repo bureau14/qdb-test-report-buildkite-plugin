@@ -218,6 +218,7 @@ plugins:
 
 | Key | Type | Required | Description |
 | --- | --- | :---: | --- |
+| `parse_workers` | integer |  | Maximum XML parsing processes. Defaults to the logical CPU count (or `1` if unavailable), capped at `61` on Windows. Use `1` for serial parsing. Job reports remain serial. |
 | `download_parallel` | integer |  | Number of XML files to download in parallel after S3/R2 listing. Default: `32`. |
 | `download_concurrency` | integer |  | Per-file boto3 transfer concurrency for XML downloads. Default: `4`. |
 
@@ -334,7 +335,10 @@ python3 tools/junit_html_report.py \
 | `--commit-url` | No | - | Git commit URL metadata. |
 | `--only-failures` | No | `false` | Filter report to only show `FAILED`/`ERRORED` tests in the tree while keeping full summary counts. |
 | `--fail-on-test-failures` | No | `false` | Exit code `64` if any test has status `FAILED` or `ERRORED`. |
+| `--parse-workers` | No | `1` | Maximum XML parsing processes; use `1` for serial parsing. |
 | `--log-level` | No | `error` | Minimum message severity: `debug`, `info`, `warning`, `error`, or `fatal`. Use `info` for progress and phase timings, or `debug` for per-file details. |
+
+Aggregate parsing uses spawned worker processes, bounded batches, and discovery-order merging. Completed results preserve duplicate selection, artifact associations, and report ordering. Empty inputs and single-batch inputs are parsed without starting a process pool. The standalone converter supports `--parse-workers N` and defaults to serial parsing.
 
 The standalone converter is quiet by default; errors are written to stderr. Empty XML files are skipped with warnings visible at `warning` or more verbose levels. Malformed XML files emit errors and are recorded in `summary.json` so the Buildkite plugin can fail the build and annotate the invalid inputs. If no XML files are discovered across all configured inputs, it still writes an empty report and logs a warning when enabled.
 
