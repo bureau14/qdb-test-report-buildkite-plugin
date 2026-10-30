@@ -1414,9 +1414,16 @@ def test_main_aggregate_renders_job_manifest_artifacts_in_html(monkeypatch, tmp_
 
     monkeypatch.setattr("report_downloads.list_objects", fake_list_objects)
     monkeypatch.setattr("report_downloads.download_file", fake_download_file)
+    monkeypatch.setattr("report_downloads.create_s3_client", lambda cfg, auth: MagicMock())
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_DOWNLOAD_PARALLEL", "2")
+
+    def collect_summaries(**kwargs):
+        assert kwargs["download_parallel"] == 2
+        return collect_full_scope_job_summaries(**kwargs)
+
     monkeypatch.setattr(
         "test_report_plugin.collect_full_scope_job_summaries",
-        collect_full_scope_job_summaries,
+        collect_summaries,
     )
     monkeypatch.setattr(
         "test_report_plugin.resolve_object_store_context",

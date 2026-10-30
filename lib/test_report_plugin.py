@@ -547,6 +547,7 @@ def main() -> int:
                         git_ref=config.git_ref,
                         build_id=config.build_id,
                         output_dir=staging_root / "downloaded-summaries",
+                        download_parallel=config.aggregate_download_parallel,
                     )
                 for summary in job_summaries.values():
                     artifacts = summary.get("artifacts", [])
