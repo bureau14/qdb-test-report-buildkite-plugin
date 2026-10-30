@@ -133,7 +133,7 @@ def add_command_failure_warning(summary: dict[str, Any], command_exit_status: st
     return True
 
 
-@traced("artifacts.links", category="metadata")
+@traced("artifacts.links", category="report_metadata")
 def artifact_links_from_metadata(metadata: ArtifactMetadata) -> list[ArtifactLink]:
     links: list[ArtifactLink] = []
     for artifact in metadata:
@@ -151,7 +151,7 @@ def artifact_links_from_metadata(metadata: ArtifactMetadata) -> list[ArtifactLin
     return links
 
 
-@traced("job.xml.links", category="metadata")
+@traced("job.xml.links", category="report_metadata")
 def build_job_xml_source_links(
     config: PluginConfig,
     xml_uploads: list[XmlUpload],
@@ -175,7 +175,7 @@ def build_job_xml_source_links(
     return links
 
 
-@traced("aggregate.xml.links", category="metadata")
+@traced("aggregate.xml.links", category="report_metadata")
 def build_aggregate_xml_source_links(
     downloaded_xml: list[DownloadedJobXml], store_context: ObjectStoreContext
 ) -> dict[Path, XmlSourceLink]:
@@ -202,7 +202,7 @@ def build_zero_xml_annotation_body(title: str) -> str:
     )
 
 
-@traced("report.generate", category="generating")
+@traced("report.generate", category="report_generation")
 def run_report_generation(
     config: PluginConfig,
     output_dir: Path,
@@ -276,7 +276,7 @@ def create_zip(files: list[tuple[Path, str]], output: Path) -> None:
         log(f"Created ZIP archive={output.name} files={len(files)} bytes={output.stat().st_size}")
 
 
-@traced("artifacts.upload", category="uploading")
+@traced("artifacts.upload", category="uploads")
 def upload_extra_artifacts(
     config: PluginConfig,
     artifact_files: list[ArtifactFile],
@@ -366,7 +366,7 @@ def upload_extra_artifacts(
     return list(grouped.values())
 
 
-@traced("report.upload", category="uploading")
+@traced("report.upload", category="uploads")
 def upload_report_artifacts(
     config: PluginConfig,
     generation: GenerationResult,
@@ -437,13 +437,13 @@ def main() -> int:
         dict.fromkeys(
             (
                 "total",
-                "setup",
-                "collecting",
-                "downloading",
-                "generating",
-                "metadata",
-                "uploading",
-                "annotating",
+                "storage_setup",
+                "input_collection",
+                "downloads",
+                "report_generation",
+                "report_metadata",
+                "uploads",
+                "annotations",
             ),
             0.0,
         )
@@ -468,7 +468,7 @@ def main() -> int:
             xml_source_links: dict[Path, XmlSourceLink] = {}
             junit_archive_errors: list[dict[str, str]] = []
             if config.scope == "aggregate":
-                with trace("plugin.store_setup", category="setup"):
+                with trace("plugin.store_setup", category="storage_setup"):
                     store_context = resolve_object_store_context()
                 log("Discovering aggregate JUnit XML object keys from object storage")
                 downloaded_xml = collect_full_scope_xml(
@@ -574,7 +574,7 @@ def main() -> int:
                     raise ValueError("scope=job requires variant")
                 if config.junit_input_path is None and config.manifest_input_path is None:
                     raise ValueError("scope=job requires junit_input_path or manifest_input_path")
-                with trace("job.inputs", category="collecting"):
+                with trace("job.inputs", category="input_collection"):
                     xml_uploads = []
                     if config.junit_input_path is not None:
                         try:
@@ -599,10 +599,10 @@ def main() -> int:
                                 for xml in xml_uploads
                             ],
                         )
-                with trace("plugin.store_setup", category="setup"):
+                with trace("plugin.store_setup", category="storage_setup"):
                     store_context = resolve_object_store_context()
                 xml_source_links = build_job_xml_source_links(config, xml_uploads, store_context)
-                with trace("job.artifact_inputs", category="collecting"):
+                with trace("job.artifact_inputs", category="input_collection"):
                     artifact_files = collect_artifact_files(config.artifacts)
                 if execution_inputs is not None:
                     if any(
@@ -659,7 +659,7 @@ def main() -> int:
                 xml_source_links=xml_source_links,
                 junit_archive_errors=junit_archive_errors,
             )
-            with trace("summary.prepare", category="metadata"):
+            with trace("summary.prepare", category="report_metadata"):
                 if config.scope == "aggregate":
                     add_summary_metadata(
                         generation.summary_path,
@@ -739,7 +739,7 @@ def main() -> int:
         timings = {
             category: elapsed for category, elapsed in trace_timings.items() if category != "total"
         }
-        timings["other"] = max(0.0, total - sum(timings.values()))
+        timings["overhead"] = max(0.0, total - sum(timings.values()))
         parts = [f"total={total:.1f}s"]
         parts.extend(
             f"{stage}={elapsed:.1f}s"

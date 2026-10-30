@@ -290,7 +290,7 @@ def extract_junit_archive(
         raise InvalidJUnitArchive(str(exc)) from exc
 
 
-@traced("aggregate.xml", category="downloading")
+@traced("aggregate.xml", category="downloads")
 def collect_full_scope_xml(
     *,
     cfg: StoreConfig,
@@ -416,7 +416,7 @@ def collect_full_scope_xml(
     return [item for batch in downloaded if batch is not None for item in batch]
 
 
-@traced("aggregate.summaries.fallback", category="downloading")
+@traced("aggregate.summaries.fallback", category="downloads")
 def collect_full_scope_job_summaries(
     *,
     cfg: StoreConfig,
@@ -461,7 +461,7 @@ def _summary_key_from_xml_key(key: str) -> str | None:
     return key.split(marker, 1)[0] + "/summary.json"
 
 
-@traced("aggregate.summaries.direct", category="downloading")
+@traced("aggregate.summaries.direct", category="downloads")
 def collect_full_scope_job_summaries_for_xml(
     *,
     cfg: StoreConfig,

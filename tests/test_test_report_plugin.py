@@ -360,7 +360,7 @@ def test_main_job_logs_uploaded_html_url(
 ):
     import test_report_plugin
 
-    trace_timings.update({"generating": 99.0, "stale.category": 99.0})
+    trace_timings.update({"report_generation": 99.0, "stale.category": 99.0})
     clock = [0.0]
     monkeypatch.setattr("report_logging.time.perf_counter", lambda: clock[0])
 
@@ -398,7 +398,7 @@ def test_main_job_logs_uploaded_html_url(
         },
     )
 
-    @traced("report.generate", category="generating")
+    @traced("report.generate", category="report_generation")
     def fake_run_report_generation(config, output_dir, **kwargs):
         clock[0] += 2.0
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -411,7 +411,7 @@ def test_main_job_logs_uploaded_html_url(
         )
         return GenerationResult(html_path=html_path, summary_path=summary_path)
 
-    @traced("report.upload", category="uploading")
+    @traced("report.upload", category="uploads")
     def fake_upload_report_artifacts(config, generation, xml_uploads, store_context=None):
         from object_store import PublishedObject
 
@@ -433,11 +433,11 @@ def test_main_job_logs_uploaded_html_url(
 
     assert main() == (1 if upload_fails else 0)
     assert "stale.category" not in trace_timings
-    assert trace_timings["generating"] == pytest.approx(2.0)
-    assert trace_timings["uploading"] == pytest.approx(3.0)
-    assert trace_timings["setup"] == pytest.approx(phase_delay)
-    assert trace_timings["collecting"] == pytest.approx(2 * phase_delay)
-    assert trace_timings["metadata"] == pytest.approx(phase_delay)
+    assert trace_timings["report_generation"] == pytest.approx(2.0)
+    assert trace_timings["uploads"] == pytest.approx(3.0)
+    assert trace_timings["storage_setup"] == pytest.approx(phase_delay)
+    assert trace_timings["input_collection"] == pytest.approx(2 * phase_delay)
+    assert trace_timings["report_metadata"] == pytest.approx(phase_delay)
     stderr = capsys.readouterr().err
     if log_level == "info" and not upload_fails:
         assert "HTML report: https://reports.example.com/job/index.html" in stderr
@@ -449,12 +449,12 @@ def test_main_job_logs_uploaded_html_url(
         assert stderr.count("Timing summary:") == 1
         if phase_delay == 0.2:
             assert stderr.splitlines()[-1] == (
-                "Timing summary: total=5.8s setup=0.2s collecting=0.4s generating=2.0s "
-                "metadata=0.2s uploading=3.0s"
+                "Timing summary: total=5.8s storage_setup=0.2s input_collection=0.4s report_generation=2.0s "
+                "report_metadata=0.2s uploads=3.0s"
             )
         else:
             assert stderr.splitlines()[-1] == (
-                "Timing summary: total=5.0s generating=2.0s uploading=3.0s"
+                "Timing summary: total=5.0s report_generation=2.0s uploads=3.0s"
             )
     if log_level == "error":
         assert "trace start" not in stderr
@@ -1043,8 +1043,8 @@ def test_main_full_zero_xml_creates_error_annotation(monkeypatch, tmp_path, caps
     stderr = capsys.readouterr().err
     assert "No JUnit XML was found" in stderr
     assert stderr.count("Timing summary:") == 1
-    assert "generating=" not in stderr.splitlines()[-1]
-    assert "uploading=" not in stderr.splitlines()[-1]
+    assert "report_generation=" not in stderr.splitlines()[-1]
+    assert "uploads=" not in stderr.splitlines()[-1]
 
 
 def test_main_full_variant_annotation_context(monkeypatch, tmp_path):
