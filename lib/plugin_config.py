@@ -161,6 +161,8 @@ def load_plugin_config() -> PluginConfig:
     aggregate_parse_workers = _get_int_env(
         "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_PARSE_WORKERS", _get_default_parse_workers()
     )
+    if os.name == "nt":
+        aggregate_parse_workers = min(aggregate_parse_workers, 61)
     aggregate_download_parallel = _get_int_env(
         "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_DOWNLOAD_PARALLEL", 32
     )
