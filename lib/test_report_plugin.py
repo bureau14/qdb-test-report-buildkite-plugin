@@ -133,6 +133,7 @@ def add_command_failure_warning(summary: dict[str, Any], command_exit_status: st
     return True
 
 
+@traced("artifacts.links", category="metadata")
 def artifact_links_from_metadata(metadata: ArtifactMetadata) -> list[ArtifactLink]:
     links: list[ArtifactLink] = []
     for artifact in metadata:
@@ -150,6 +151,7 @@ def artifact_links_from_metadata(metadata: ArtifactMetadata) -> list[ArtifactLin
     return links
 
 
+@traced("job.xml.links", category="metadata")
 def build_job_xml_source_links(
     config: PluginConfig,
     xml_uploads: list[XmlUpload],
@@ -173,6 +175,7 @@ def build_job_xml_source_links(
     return links
 
 
+@traced("aggregate.xml.links", category="metadata")
 def build_aggregate_xml_source_links(
     downloaded_xml: list[DownloadedJobXml], store_context: ObjectStoreContext
 ) -> dict[Path, XmlSourceLink]:
@@ -431,7 +434,19 @@ def upload_report_artifacts(
 def main() -> int:
     trace_timings.clear()
     trace_timings.update(
-        dict.fromkeys(("total", "downloading", "generating", "uploading", "annotating"), 0.0)
+        dict.fromkeys(
+            (
+                "total",
+                "setup",
+                "collecting",
+                "downloading",
+                "generating",
+                "metadata",
+                "uploading",
+                "annotating",
+            ),
+            0.0,
+        )
     )
 
     try:
@@ -453,7 +468,8 @@ def main() -> int:
             xml_source_links: dict[Path, XmlSourceLink] = {}
             junit_archive_errors: list[dict[str, str]] = []
             if config.scope == "aggregate":
-                store_context = resolve_object_store_context()
+                with trace("plugin.store_setup", category="setup"):
+                    store_context = resolve_object_store_context()
                 log("Discovering aggregate JUnit XML object keys from object storage")
                 downloaded_xml = collect_full_scope_xml(
                     cfg=store_context.store_cfg,
@@ -558,32 +574,36 @@ def main() -> int:
                     raise ValueError("scope=job requires variant")
                 if config.junit_input_path is None and config.manifest_input_path is None:
                     raise ValueError("scope=job requires junit_input_path or manifest_input_path")
-                xml_uploads = []
-                if config.junit_input_path is not None:
-                    try:
-                        xml_uploads = collect_job_xml_uploads(
-                            config.junit_input_path, config.variant
+                with trace("job.inputs", category="collecting"):
+                    xml_uploads = []
+                    if config.junit_input_path is not None:
+                        try:
+                            xml_uploads = collect_job_xml_uploads(
+                                config.junit_input_path, config.variant
+                            )
+                        except FileNotFoundError:
+                            if config.manifest_input_path is None:
+                                raise
+                    execution_inputs = None
+                    if config.manifest_input_path is not None:
+                        execution_inputs = collect_execution_inputs(
+                            config.manifest_input_path, xml_uploads, staging_root / "executions"
                         )
-                    except FileNotFoundError:
-                        if config.manifest_input_path is None:
-                            raise
-                execution_inputs = None
-                if config.manifest_input_path is not None:
-                    execution_inputs = collect_execution_inputs(
-                        config.manifest_input_path, xml_uploads, staging_root / "executions"
-                    )
-                    xml_uploads = execution_inputs.xml_uploads
-                    if not xml_uploads:
-                        raise FileNotFoundError("No JUnit reports or execution manifests found")
-                    config = replace(
-                        config,
-                        platforms=[
-                            PlatformConfig(config.variant, xml.local_path) for xml in xml_uploads
-                        ],
-                    )
-                store_context = resolve_object_store_context()
+                        xml_uploads = execution_inputs.xml_uploads
+                        if not xml_uploads:
+                            raise FileNotFoundError("No JUnit reports or execution manifests found")
+                        config = replace(
+                            config,
+                            platforms=[
+                                PlatformConfig(config.variant, xml.local_path)
+                                for xml in xml_uploads
+                            ],
+                        )
+                with trace("plugin.store_setup", category="setup"):
+                    store_context = resolve_object_store_context()
                 xml_source_links = build_job_xml_source_links(config, xml_uploads, store_context)
-                artifact_files = collect_artifact_files(config.artifacts)
+                with trace("job.artifact_inputs", category="collecting"):
+                    artifact_files = collect_artifact_files(config.artifacts)
                 if execution_inputs is not None:
                     if any(
                         slugify_artifact_name(artifact.name)
@@ -639,18 +659,19 @@ def main() -> int:
                 xml_source_links=xml_source_links,
                 junit_archive_errors=junit_archive_errors,
             )
-            if config.scope == "aggregate":
-                add_summary_metadata(
-                    generation.summary_path,
-                    discovered_xml=aggregate_counts,
-                    job_artifacts=job_artifacts_metadata,
-                )
+            with trace("summary.prepare", category="metadata"):
+                if config.scope == "aggregate":
+                    add_summary_metadata(
+                        generation.summary_path,
+                        discovered_xml=aggregate_counts,
+                        job_artifacts=job_artifacts_metadata,
+                    )
 
-            summary = json.loads(generation.summary_path.read_text())
-            if config.scope == "job" and add_command_failure_warning(
-                summary, os.environ.get("BUILDKITE_COMMAND_EXIT_STATUS")
-            ):
-                generation.summary_path.write_text(json.dumps(summary, indent=2))
+                summary = json.loads(generation.summary_path.read_text())
+                if config.scope == "job" and add_command_failure_warning(
+                    summary, os.environ.get("BUILDKITE_COMMAND_EXIT_STATUS")
+                ):
+                    generation.summary_path.write_text(json.dumps(summary, indent=2))
 
             # Upload JUNIT reports, HTML report, summary
             uploads = upload_report_artifacts(
@@ -718,11 +739,18 @@ def main() -> int:
         timings = {
             category: elapsed for category, elapsed in trace_timings.items() if category != "total"
         }
+        timings["other"] = max(0.0, total - sum(timings.values()))
+        parts = [f"total={total:.1f}s"]
+        parts.extend(
+            f"{stage}={elapsed:.1f}s"
+            for stage, elapsed in timings.items()
+            if f"{elapsed:.1f}" != "0.0"
+        )
+        # Keep the summary visible at default verbosity without labeling it as an error.
         logger.error(
-            "Timing summary: total=%.1fs %s other=%.1fs",
-            total,
-            " ".join(f"{stage}={elapsed:.1f}s" for stage, elapsed in timings.items()),
-            max(0.0, total - sum(timings.values())),
+            "Timing summary: %s",
+            " ".join(parts),
+            extra={"omit_level": True},
         )
 
 

@@ -17,6 +17,9 @@ LOG_LEVELS = ("debug", "info", "warning", "error", "fatal")
 
 class StderrHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
+        if getattr(record, "omit_level", False):
+            print(record.getMessage(), file=sys.stderr)
+            return
         label = {logging.WARNING: "WARN", logging.CRITICAL: "FATAL"}.get(
             record.levelno, record.levelname
         )
