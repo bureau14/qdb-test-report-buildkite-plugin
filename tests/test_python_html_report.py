@@ -1605,3 +1605,23 @@ def test_parse_workers_must_be_positive(tmp_path):
 
     with pytest.raises(ValueError, match="parse_workers must be at least 1"):
         build_report("Report", [("linux", tmp_path)], parse_workers=0)
+
+
+def test_parser_pool_caps_windows_workers_for_api_and_cli_callers(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    import junit_report_model
+
+    xml = write(tmp_path / "input.xml", junit_xml('<testcase name="ok"/>'))
+    files = [("linux", xml, "input.xml", None, None, None)] * (16 * 64)
+    for platform, requested, expected in [("nt", 128, 61), ("nt", 8, 8), ("posix", 128, 64)]:
+        pool = MagicMock()
+        pool.__enter__.return_value = pool
+        pool.submit.return_value.result.return_value = []
+        factory = MagicMock(return_value=pool)
+        monkeypatch.setattr(junit_report_model, "os", SimpleNamespace(name=platform))
+        monkeypatch.setattr(junit_report_model, "ProcessPoolExecutor", factory)
+        assert list(junit_report_model._iter_parsed_junit_files(files, requested)) == []
+        factory.assert_called_once()
+        assert factory.call_args[1]["max_workers"] == expected

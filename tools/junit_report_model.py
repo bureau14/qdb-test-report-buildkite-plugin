@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import glob
 import logging
+import os
 import re
 import xml.etree.ElementTree as ET
 from collections import Counter, OrderedDict, deque
@@ -611,6 +612,8 @@ def _iter_parsed_junit_files(files, workers: int):
     """Yield results in discovery order with a bounded number of pending batches."""
     if workers < 1:
         raise ValueError("parse_workers must be at least 1")
+    if os.name == "nt":
+        workers = min(workers, 61)
     if workers == 1 or len(files) < 2:
         for item in files:
             yield _parse_junit_batch([item])[0]
