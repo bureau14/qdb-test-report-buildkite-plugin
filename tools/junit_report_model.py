@@ -623,11 +623,13 @@ def _iter_parsed_junit_files(files, workers: int):
     if len(initial_batches) == 1:
         yield from _parse_junit_batch(initial_batches[0])
         return
+    level = logger.getEffectiveLevel()
+    worker_log_level = "fatal" if level == logging.CRITICAL else logging.getLevelName(level).lower()
     with ProcessPoolExecutor(
         max_workers=min(workers, len(initial_batches)),
         mp_context=get_context("spawn"),
         initializer=configure_logging,
-        initargs=(logging.getLevelName(logger.getEffectiveLevel()).lower(),),
+        initargs=(worker_log_level,),
     ) as pool:
         pending = deque()
         for batch in initial_batches:

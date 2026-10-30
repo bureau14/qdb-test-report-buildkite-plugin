@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TOOLS_DIR = REPO_ROOT / "tools"
 sys.path.insert(0, str(TOOLS_DIR))
@@ -1538,13 +1540,16 @@ def test_boost_disabled_cases_are_omitted_without_hiding_runtime_results(tmp_pat
     assert xml.read_bytes() == original
 
 
+@pytest.mark.parametrize("log_level", ["error", "fatal"])
 def test_parallel_parsing_preserves_order_diagnostics_and_artifact_associations(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, log_level
 ):
     from dataclasses import asdict
 
     from junit_report_model import ArtifactLink, build_report
+    from report_logging import configure_logging
 
+    configure_logging(log_level)
     linux = tmp_path / "linux"
     paths = []
     for index in range(40):
