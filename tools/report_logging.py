@@ -10,6 +10,7 @@ from functools import wraps
 from itertools import count
 
 _trace_ids = count(1)
+_last_category: str | None = None
 trace_timings: dict[str, float] = {}
 
 LOG_LEVELS = ("debug", "info", "warning", "error", "fatal")
@@ -40,18 +41,22 @@ def validate_log_level(level: str) -> str:
 
 
 def configure_logging(level: str = "error") -> None:
+    global _last_category
     logger.setLevel(validate_log_level(level).upper())
+    _last_category = None
 
 
 @contextmanager
 def trace(stage: str, *, level: int = logging.INFO, category: str | None = None, **fields):
     """Log inclusive timings and retain categorized wall time."""
+    global _last_category
     # Categorize outer operations only, since their elapsed time includes nested work.
     if not logger.isEnabledFor(level) and category is None:
         yield
         return
-    if category is not None:
+    if category is not None and category != _last_category:
         logger.error("Starting category: %s", category, extra={"omit_level": True})
+        _last_category = category
     trace_id = next(_trace_ids)
     details = " ".join(f"{key}={value!r}" for key, value in fields.items())
     logger.log(level, "trace start id=%s stage=%s %s", trace_id, stage, details)
