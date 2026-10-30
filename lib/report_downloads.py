@@ -416,6 +416,80 @@ def collect_full_scope_xml(
     return [item for batch in downloaded if batch is not None for item in batch]
 
 
+def _download_job_summaries(
+    *,
+    cfg: StoreConfig,
+    auth: ObjectAuth,
+    bucket: str,
+    objects: list[JobSummaryObject],
+    output_dir: Path,
+    download_parallel: int,
+    optional: bool,
+) -> dict[str, dict[str, Any]]:
+    """Download summaries with bounded concurrency and input-order results."""
+    if download_parallel < 1:
+        raise ValueError("summary download parallelism must be greater than 0")
+    if not objects:
+        return {}
+    workers = min(download_parallel, len(objects))
+    logger.info("Downloading aggregate job summaries: files=%s parallel=%s", len(objects), workers)
+    thread_state = threading.local()
+    clients = []
+    clients_lock = threading.Lock()
+    transfer_config = TransferConfig(use_threads=False, preferred_transfer_client="classic")
+
+    def download_summary(obj: JobSummaryObject) -> dict[str, Any] | None:
+        local_path = Path(output_dir) / obj.variant / obj.job_id / "summary.json"
+        try:
+            client = getattr(thread_state, "client", None)
+            if client is None:
+                client = create_s3_client(cfg, auth)
+                thread_state.client = client
+                with clients_lock:
+                    clients.append(client)
+            download_file(
+                cfg,
+                auth,
+                bucket,
+                obj.key,
+                local_path,
+                client=client,
+                transfer_config=transfer_config,
+            )
+        except Exception as exc:
+            if not optional:
+                raise
+            logger.debug(
+                "Optional summary download skipped key=%s error_type=%s",
+                obj.key,
+                type(exc).__name__,
+            )
+            return None
+        try:
+            summary = json.loads(local_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+        summary["variant"] = obj.variant
+        summary["job_id"] = obj.job_id
+        return summary
+
+    summaries: dict[str, dict[str, Any]] = {}
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            # Retain discovery order even when downloads finish out of order.
+            for summary in pool.map(download_summary, objects):
+                if summary is not None:
+                    summaries[summary["job_id"]] = summary
+    finally:
+        # Workers have joined before their clients are closed, including on failure.
+        for client in clients:
+            client.close()
+    logger.info(
+        "Downloaded aggregate job summaries: %s/%s usable manifests", len(summaries), len(objects)
+    )
+    return summaries
+
+
 @traced("aggregate.summaries.fallback", category="downloads")
 def collect_full_scope_job_summaries(
     *,
@@ -427,6 +501,7 @@ def collect_full_scope_job_summaries(
     git_ref: str,
     build_id: str,
     output_dir: Path,
+    download_parallel: int = 32,
 ) -> dict[str, dict[str, Any]]:
     """Download discovered job summary manifests keyed by Buildkite job id."""
 
@@ -440,18 +515,15 @@ def collect_full_scope_job_summaries(
         build_id=build_id,
     )
 
-    summaries: dict[str, dict[str, Any]] = {}
-    for obj in objects:
-        local_path = Path(output_dir) / obj.variant / obj.job_id / "summary.json"
-        download_file(cfg, auth, bucket, obj.key, local_path)
-        try:
-            summary = json.loads(local_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            continue
-        summary["variant"] = obj.variant
-        summary["job_id"] = obj.job_id
-        summaries[obj.job_id] = summary
-    return summaries
+    return _download_job_summaries(
+        cfg=cfg,
+        auth=auth,
+        bucket=bucket,
+        objects=objects,
+        output_dir=output_dir,
+        download_parallel=download_parallel,
+        optional=False,
+    )
 
 
 def _summary_key_from_xml_key(key: str) -> str | None:
@@ -469,6 +541,7 @@ def collect_full_scope_job_summaries_for_xml(
     bucket: str,
     downloaded_xml: list[DownloadedJobXml],
     output_dir: Path,
+    download_parallel: int = 32,
 ) -> dict[str, dict[str, Any]]:
     """Download job summary manifests directly from discovered XML job prefixes."""
 
@@ -484,23 +557,12 @@ def collect_full_scope_job_summaries_for_xml(
             size_bytes=0,
         )
 
-    summaries: dict[str, dict[str, Any]] = {}
-    for obj in summary_keys.values():
-        local_path = Path(output_dir) / obj.variant / obj.job_id / "summary.json"
-        try:
-            download_file(cfg, auth, bucket, obj.key, local_path)
-        except Exception as exc:  # noqa: BLE001 - optional summary sidecar
-            logger.debug(
-                "Optional summary download skipped key=%s error_type=%s",
-                obj.key,
-                type(exc).__name__,
-            )
-            continue
-        try:
-            summary = json.loads(local_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            continue
-        summary["variant"] = obj.variant
-        summary["job_id"] = obj.job_id
-        summaries[obj.job_id] = summary
-    return summaries
+    return _download_job_summaries(
+        cfg=cfg,
+        auth=auth,
+        bucket=bucket,
+        objects=list(summary_keys.values()),
+        output_dir=output_dir,
+        download_parallel=download_parallel,
+        optional=True,
+    )

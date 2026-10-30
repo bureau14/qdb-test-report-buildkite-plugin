@@ -218,18 +218,19 @@ plugins:
 
 | Key | Type | Required | Description |
 | --- | --- | :---: | --- |
-| `download_parallel` | integer |  | Number of XML files to download in parallel after S3/R2 listing. Default: `32`. |
+| `parse_workers` | integer |  | Maximum XML parsing processes. Defaults to the logical CPU count (or `1` if unavailable), capped at `61` on Windows. Use `1` for serial parsing. Job reports remain serial. |
+| `download_parallel` | integer |  | Maximum concurrent aggregate XML and job-summary downloads. Default: `32`. Summary downloads reuse one client per worker. |
 | `download_concurrency` | integer |  | Per-file boto3 transfer concurrency for XML downloads. Default: `4`. |
 
 Set `log_level: info` to show progress, listing/download durations, and model/UI/HTML generation timings. Set `log_level: debug` for per-file parsing, test details, and duplicate decisions. Warnings remain in report metadata where applicable even when console output is quiet. `debug: true` independently enables shell tracing and can produce output at any log level.
 
 Timing traces at `info` include environment setup (venv creation/upgrades and dependency installation), object-store configuration, XML discovery/downloads, direct/fallback summary collection, model/UI construction, JSON/HTML/summary writing, uploads, annotations, and the total report invocation. Python traces pair `trace start` and `trace end` by `id` and report `wall_s`, `thread_cpu_s`, and exception status. Shell traces report whole seconds and the command exit code; `hook.report` also includes Python startup/imports and temporary-directory cleanup. `plugin.total` starts after plugin configuration/logging and includes staging cleanup. Nested stages are inclusive, so do not add parent and child durations together. Thread CPU measures only the calling thread, not download workers or subprocesses; a large wall/CPU gap is a clue to waiting, not proof of network latency.
 
-Use `log_level: debug` for individual XML parsing, S3 client creation, SSM requests (parameter names only), download keys, and outer retry attempts. Outer retry sleeps are traced at `info`; boto3's internal retries/timeouts are included in each attempt's wall time. Start with the largest `info` stage, then use its nested stages or `debug` traces to narrow it down. Setup currently recreates the environment on every checkout and summary downloads are serial; timings will show whether these costs matter on your agents. Trace logging preserves the default quiet `error` level and does not log credentials or full function arguments.
+Use `log_level: debug` for individual XML parsing, S3 client creation, SSM requests (parameter names only), download keys, and outer retry attempts. Outer retry sleeps are traced at `info`; boto3's internal retries/timeouts are included in each attempt's wall time. Start with the largest `info` stage, then use its nested stages or `debug` traces to narrow it down. Setup currently recreates the environment on every checkout. Direct and fallback summary downloads run concurrently up to `aggregate.download_parallel`, reusing one client per worker; timings will show whether setup, transfers, or parsing dominate on your agents. Trace logging preserves the default quiet `error` level and does not log credentials or full function arguments.
 
 Uploads use up to `upload_parallel` workers, defaulting to the agent's logical CPU count and capped by the number of files, each owning a separate boto3 session and reused client. Per-file multipart transfers use no additional transfer threads, keeping simultaneous file uploads bounded. Additional artifacts finish before report generation so their links and metadata are available. HTML and job XML upload concurrently; `summary.json` is published last, after every required file succeeds. Upload failures retain the existing retries, fail the plugin, and cancel queued uploads; uploads already running finish before staging cleanup. Batch traces remain inclusive wall timings, while individual upload traces can overlap and must not be summed to obtain batch elapsed time.
 
-One known source of long waits: a missing optional summary is retried like any other download failure before being skipped. The default outer retry schedule alone sleeps for 375 seconds (6 minutes 15 seconds) across ten attempts, excluding request time and boto3 retries. Serial summary collection can accumulate that delay per missing manifest. Look for `store.backoff` entries inside `aggregate.summaries.direct` to confirm whether this affects a run.
+One known source of long waits: a missing optional summary is retried like any other download failure before being skipped. The default outer retry schedule alone sleeps for 375 seconds (6 minutes 15 seconds) across ten attempts, excluding request time and boto3 retries. Summary downloads overlap, but a retried missing manifest can still hold up completion of the download batch. Look for `store.backoff` entries inside `aggregate.summaries.direct` to confirm whether this affects a run.
 
 ## Object-store layout
 
@@ -334,7 +335,10 @@ python3 tools/junit_html_report.py \
 | `--commit-url` | No | - | Git commit URL metadata. |
 | `--only-failures` | No | `false` | Filter report to only show `FAILED`/`ERRORED` tests in the tree while keeping full summary counts. |
 | `--fail-on-test-failures` | No | `false` | Exit code `64` if any test has status `FAILED` or `ERRORED`. |
+| `--parse-workers` | No | `1` | Maximum XML parsing processes; use `1` for serial parsing. |
 | `--log-level` | No | `error` | Minimum message severity: `debug`, `info`, `warning`, `error`, or `fatal`. Use `info` for progress and phase timings, or `debug` for per-file details. |
+
+Aggregate parsing uses spawned worker processes, bounded batches, and discovery-order merging. Completed results preserve duplicate selection, artifact associations, and report ordering. Empty inputs and single-batch inputs are parsed without starting a process pool. The standalone converter supports `--parse-workers N` and defaults to serial parsing.
 
 The standalone converter is quiet by default; errors are written to stderr. Empty XML files are skipped with warnings visible at `warning` or more verbose levels. Malformed XML files emit errors and are recorded in `summary.json` so the Buildkite plugin can fail the build and annotate the invalid inputs. If no XML files are discovered across all configured inputs, it still writes an empty report and logs a warning when enabled.
 

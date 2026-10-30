@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TOOLS_DIR = REPO_ROOT / "tools"
 sys.path.insert(0, str(TOOLS_DIR))
@@ -720,21 +722,28 @@ def test_build_report_keeps_source_file_aware_identity_and_worst_duplicate_statu
     assert report.duplicates_replaced == 1
 
 
-def test_report_ui_groups_suite_test_file_classname_test_and_platform_without_sorting(tmp_path):
+def test_report_ui_groups_suite_test_file_classname_test_and_platform_without_sorting(
+    tmp_path, monkeypatch
+):
     from junit_report_model import build_report
     from report_data import report_to_report_ui_data
 
     linux = tmp_path / "linux"
-    write(
+    regression = write(
         linux / "build" / "Release" / "test-reports" / "qdb_regression_test.xml",
         junit_xml(
             '<testcase classname="BoostSuite" name="same_name" time="0.1"/>',
             '<testcase classname="OtherSuite" name="other_test" time="0.3"/>',
         ),
     )
-    write(
+    aggregation = write(
         linux / "build" / "Release" / "test-reports" / "qdb_aggregation_test.xml",
         junit_xml('<testcase classname="BoostSuite" name="same_name" time="0.2"/>'),
+    )
+
+    # Supply discovery order explicitly; filesystem enumeration order is unspecified.
+    monkeypatch.setattr(
+        "junit_report_model.discover_xml_files", lambda path: [regression, aggregation]
     )
 
     execution = report_to_report_ui_data(build_report("boost", [("linux", linux)]))[0]
@@ -1529,3 +1538,95 @@ def test_boost_disabled_cases_are_omitted_without_hiding_runtime_results(tmp_pat
         "ERRORED": 1,
     }
     assert xml.read_bytes() == original
+
+
+@pytest.mark.parametrize("log_level", ["error", "fatal"])
+def test_parallel_parsing_preserves_order_diagnostics_and_artifact_associations(
+    tmp_path, monkeypatch, log_level
+):
+    from dataclasses import asdict
+
+    from junit_report_model import ArtifactLink, build_report
+    from report_logging import configure_logging
+
+    configure_logging(log_level)
+    linux = tmp_path / "linux"
+    paths = []
+    for index in range(40):
+        xml = junit_xml(
+            f'<testcase classname="dup" name="same"><failure message="winner-{index}"/></testcase>',
+            f'<testcase name="case-{index}" time="0.1"/>',
+            '<testcase name="disabled"><skipped/><system-out>'
+            "Test case disabled because of the following chain of decision:\n"
+            "- reason: 'disabled'</system-out></testcase>",
+        )
+        if index % 2:
+            xml = xml.replace("<testsuite tests=", '<testsuite xmlns="urn:junit" tests=')
+        paths.append(write(linux / f"run-{index}" / "junit.xml", xml))
+    paths.append(write(linux / "malformed.xml", "<testsuite>"))
+    monkeypatch.setattr("junit_report_model.discover_xml_files", lambda path: paths)
+    artifacts = [ArtifactLink("Logs", "server.txt", "logs/server.txt", "https://reports/logs", 12)]
+    options = {
+        "title": "Report",
+        "platform_specs": [("linux", linux)],
+        "source_job_id": "job-1",
+        "build_url": "https://buildkite.com/org/pipeline/builds/1",
+        "source_artifacts_by_job_id": {"job-1": artifacts},
+        "xml_source_links": {p.resolve(): f"https://reports/{i}.xml" for i, p in enumerate(paths)},
+    }
+    serial = build_report(**options, parse_workers=1)
+    parallel = build_report(**options, parse_workers=2)
+    before = asdict(serial)
+    after = asdict(parallel)
+    before.pop("generated_at")
+    after.pop("generated_at")
+    assert after == before
+    assert parallel.raw_testcases == 80
+    assert parallel.duplicates_seen == 39
+    assert len(parallel.malformed_junit_xml) == 1
+    duplicate = parallel.suites["suite"].test_files["junit"].logical_tests["dup::same"]
+    assert duplicate.executions["linux"].reason == "winner-0"
+    assert duplicate.executions["linux"].source_artifacts == artifacts
+
+
+def test_parallel_parsing_propagates_worker_errors(tmp_path):
+    import pytest
+    from junit_report_model import _iter_parsed_junit_files
+
+    inputs = []
+    for index in range(40):
+        path = tmp_path / str(index)
+        write(path, junit_xml('<testcase name="ok"/>'))
+        # Invalid metadata must propagate an unexpected exception from the worker.
+        source_id = 123 if index == 39 else "junit.xml"
+        inputs.append(("linux", path, source_id, None, None, None))
+    with pytest.raises(TypeError):
+        list(_iter_parsed_junit_files(inputs, 2))
+
+
+def test_parse_workers_must_be_positive(tmp_path):
+    import pytest
+    from junit_report_model import build_report
+
+    with pytest.raises(ValueError, match="parse_workers must be at least 1"):
+        build_report("Report", [("linux", tmp_path)], parse_workers=0)
+
+
+def test_parser_pool_caps_windows_workers_for_api_and_cli_callers(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    import junit_report_model
+
+    xml = write(tmp_path / "input.xml", junit_xml('<testcase name="ok"/>'))
+    files = [("linux", xml, "input.xml", None, None, None)] * (16 * 64)
+    for platform, requested, expected in [("nt", 128, 61), ("nt", 8, 8), ("posix", 128, 64)]:
+        pool = MagicMock()
+        pool.__enter__.return_value = pool
+        pool.submit.return_value.result.return_value = []
+        factory = MagicMock(return_value=pool)
+        monkeypatch.setattr(junit_report_model, "os", SimpleNamespace(name=platform))
+        monkeypatch.setattr(junit_report_model, "ProcessPoolExecutor", factory)
+        assert list(junit_report_model._iter_parsed_junit_files(files, requested)) == []
+        factory.assert_called_once()
+        assert factory.call_args[1]["max_workers"] == expected

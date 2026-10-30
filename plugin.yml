@@ -76,9 +76,13 @@ configuration:
       type: object
       description: Aggregate report configuration that discovers raw XML uploaded by job reports for the current build.
       properties:
+        parse_workers:
+          type: integer
+          minimum: 1
+          description: Maximum XML parsing processes. Defaults to the logical CPU count (at most 61 on Windows); use 1 for serial parsing.
         download_parallel:
           type: integer
-          description: Number of XML files to download in parallel during aggregate discovery. Default 32.
+          description: Maximum concurrent aggregate XML and job-summary downloads. Default 32.
         download_concurrency:
           type: integer
           description: Per-file boto3 transfer concurrency for aggregate XML downloads. Default 4.

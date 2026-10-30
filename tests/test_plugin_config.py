@@ -233,3 +233,48 @@ def test_load_plugin_config_accepts_manifest_input(monkeypatch, junit_path):
     assert config.manifest_input_path == Path("metadata")
     assert config.junit_input_path == (Path(junit_path) if junit_path else None)
     assert config.platforms == ([PlatformConfig("linux", Path(junit_path))] if junit_path else [])
+
+
+@pytest.mark.parametrize(("cores", "expected"), [(12, 12), (None, 1)])
+def test_aggregate_parse_workers_default_to_agent_cores(monkeypatch, cores, expected):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setattr("plugin_config.os.cpu_count", lambda: cores)
+    assert load_plugin_config().aggregate_parse_workers == expected
+
+
+def test_aggregate_parse_workers_respect_windows_process_limit(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setattr(
+        "plugin_config.os", SimpleNamespace(cpu_count=lambda: 128, name="nt", environ=os.environ)
+    )
+    assert load_plugin_config().aggregate_parse_workers == 61
+
+
+def test_aggregate_parse_workers_override(monkeypatch):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_PARSE_WORKERS", "8")
+    assert load_plugin_config().aggregate_parse_workers == 8
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "invalid"])
+def test_aggregate_parse_workers_reject_invalid_values(monkeypatch, value):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_PARSE_WORKERS", value)
+    with pytest.raises(ValueError, match="AGGREGATE_PARSE_WORKERS must be"):
+        load_plugin_config()
+
+
+@pytest.mark.parametrize(
+    ("platform", "requested", "expected"), [("nt", 128, 61), ("nt", 8, 8), ("posix", 128, 128)]
+)
+def test_explicit_parse_workers_respect_platform_limit(monkeypatch, platform, requested, expected):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_PARSE_WORKERS", str(requested))
+    monkeypatch.setattr(
+        "plugin_config.os", SimpleNamespace(name=platform, cpu_count=lambda: 8, environ=os.environ)
+    )
+    assert load_plugin_config().aggregate_parse_workers == expected

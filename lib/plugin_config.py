@@ -19,6 +19,12 @@ class ArtifactConfig:
     input_path: Path
 
 
+def _get_default_parse_workers() -> int:
+    cores = os.cpu_count() or 1
+    # ProcessPoolExecutor supports at most 61 workers on Windows.
+    return min(cores, 61) if os.name == "nt" else cores
+
+
 @dataclass(frozen=True)
 class PluginConfig:
     scope: str
@@ -39,6 +45,7 @@ class PluginConfig:
     commit: str | None = None
     repo: str | None = None
     artifacts: list[ArtifactConfig] = field(default_factory=list)
+    aggregate_parse_workers: int = field(default_factory=_get_default_parse_workers)
     aggregate_download_parallel: int = 32
     aggregate_download_concurrency: int = 4
     log_level: str = "error"
@@ -151,6 +158,11 @@ def load_plugin_config() -> PluginConfig:
         "BUILDKITE_PLUGIN_QDB_TEST_REPORT_ANNOTATION_REPORT_LIMIT", 20
     )
     log_level = validate_log_level(_get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_LOG_LEVEL", "error"))
+    aggregate_parse_workers = _get_int_env(
+        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_PARSE_WORKERS", _get_default_parse_workers()
+    )
+    if os.name == "nt":
+        aggregate_parse_workers = min(aggregate_parse_workers, 61)
     aggregate_download_parallel = _get_int_env(
         "BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_DOWNLOAD_PARALLEL", 32
     )
@@ -213,6 +225,7 @@ def load_plugin_config() -> PluginConfig:
         commit=commit,
         repo=repo,
         artifacts=artifacts,
+        aggregate_parse_workers=aggregate_parse_workers,
         aggregate_download_parallel=aggregate_download_parallel,
         aggregate_download_concurrency=aggregate_download_concurrency,
         log_level=log_level,

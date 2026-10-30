@@ -269,3 +269,155 @@ def test_collect_full_scope_xml_downloads_in_parallel_with_trace_logs(monkeypatc
     assert any("Listed aggregate JUnit XML objects: 6 XML files" in msg for msg in logs)
     assert any("parallel=3, concurrency=3" in msg for msg in logs)
     assert any("Downloaded aggregate JUnit XML objects: 6 files" in msg for msg in logs)
+
+
+@pytest.mark.parametrize("mode", ["direct", "fallback"])
+def test_job_summary_downloads_overlap_deduplicate_and_preserve_order(tmp_path, monkeypatch, mode):
+    import json
+    from collections import Counter
+    from unittest.mock import MagicMock
+
+    from report_downloads import (
+        DownloadedJobXml,
+        JobSummaryObject,
+        collect_full_scope_job_summaries,
+        collect_full_scope_job_summaries_for_xml,
+    )
+
+    barrier = threading.Barrier(2)
+    clients = []
+    keys = []
+    lock = threading.Lock()
+
+    def create_client(cfg, auth):
+        client = MagicMock()
+        client.owner = threading.get_ident()
+        with lock:
+            clients.append(client)
+        return client
+
+    def download(cfg, auth, bucket, key, local_path, *, client, transfer_config):
+        assert client.owner == threading.get_ident()
+        assert transfer_config.use_threads is False
+        with lock:
+            keys.append(key)
+        barrier.wait(timeout=5)
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_text(json.dumps({"source": key}), encoding="utf-8")
+
+    monkeypatch.setattr("report_downloads.create_s3_client", create_client)
+    monkeypatch.setattr("report_downloads.download_file", download)
+    xml = [
+        DownloadedJobXml(
+            JobXmlObject("linux", f"job-{i}", f"p/linux/jobs/job-{i}/xml/{j}.xml", f"{j}.xml", 1),
+            tmp_path / f"{i}-{j}.xml",
+        )
+        for i in range(4)
+        for j in range(2)
+    ]
+    if mode == "direct":
+        summaries = collect_full_scope_job_summaries_for_xml(
+            cfg=StoreConfig("s3", "s3://bucket"),
+            auth=ObjectAuth(),
+            bucket="bucket",
+            downloaded_xml=xml,
+            output_dir=tmp_path / "summaries",
+            download_parallel=2,
+        )
+    else:
+        objects = [
+            JobSummaryObject("linux", f"job-{i}", f"p/linux/jobs/job-{i}/summary.json", 1)
+            for i in range(4)
+        ]
+        monkeypatch.setattr("report_downloads.find_job_summary_objects", lambda **kwargs: objects)
+        summaries = collect_full_scope_job_summaries(
+            cfg=StoreConfig("s3", "s3://bucket"),
+            auth=ObjectAuth(),
+            bucket="bucket",
+            destination_prefix="",
+            project_id="p",
+            git_ref="main",
+            build_id="b",
+            output_dir=tmp_path / "summaries",
+            download_parallel=2,
+        )
+    assert list(summaries) == [f"job-{i}" for i in range(4)]
+    assert Counter(keys) == Counter(f"p/linux/jobs/job-{i}/summary.json" for i in range(4))
+    assert len(clients) == 2
+    for client in clients:
+        client.close.assert_called_once()
+    assert summaries["job-0"]["variant"] == "linux"
+    assert summaries["job-0"]["source"] == "p/linux/jobs/job-0/summary.json"
+
+
+def test_job_summary_downloads_keep_missing_and_invalid_sidecars_optional(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from report_downloads import DownloadedJobXml, collect_full_scope_job_summaries_for_xml
+
+    clients = []
+
+    def create_client(cfg, auth):
+        client = MagicMock()
+        clients.append(client)
+        return client
+
+    def download(cfg, auth, bucket, key, local_path, **kwargs):
+        if "/job-1/" in key:
+            raise OSError("missing sidecar")
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_text("{" if "/job-2/" in key else "{}", encoding="utf-8")
+
+    monkeypatch.setattr("report_downloads.create_s3_client", create_client)
+    monkeypatch.setattr("report_downloads.download_file", download)
+    xml = [
+        DownloadedJobXml(
+            JobXmlObject(
+                "linux", f"job-{i}", f"p/linux/jobs/job-{i}/xml/junit.zip", "junit.zip", 1
+            ),
+            tmp_path / f"{i}.xml",
+        )
+        for i in range(4)
+    ]
+    summaries = collect_full_scope_job_summaries_for_xml(
+        cfg=StoreConfig("s3", "s3://bucket"),
+        auth=ObjectAuth(),
+        bucket="bucket",
+        downloaded_xml=xml,
+        output_dir=tmp_path / "summaries",
+        download_parallel=2,
+    )
+    assert list(summaries) == ["job-0", "job-3"]
+    for client in clients:
+        client.close.assert_called_once()
+
+
+def test_fallback_summary_transport_failure_propagates_and_closes_clients(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from report_downloads import JobSummaryObject, collect_full_scope_job_summaries
+
+    client = MagicMock()
+    monkeypatch.setattr("report_downloads.create_s3_client", lambda cfg, auth: client)
+    monkeypatch.setattr(
+        "report_downloads.find_job_summary_objects",
+        lambda **kwargs: [JobSummaryObject("linux", "job", "summary.json", 1)],
+    )
+
+    def fail_download(*args, **kwargs):
+        raise OSError("download failed")
+
+    monkeypatch.setattr("report_downloads.download_file", fail_download)
+    with pytest.raises(OSError, match="download failed"):
+        collect_full_scope_job_summaries(
+            cfg=StoreConfig("s3", "s3://bucket"),
+            auth=ObjectAuth(),
+            bucket="bucket",
+            destination_prefix="",
+            project_id="p",
+            git_ref="main",
+            build_id="b",
+            output_dir=tmp_path,
+            download_parallel=2,
+        )
+    client.close.assert_called_once()
