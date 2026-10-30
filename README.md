@@ -219,7 +219,7 @@ plugins:
 | Key | Type | Required | Description |
 | --- | --- | :---: | --- |
 | `parse_workers` | integer |  | Maximum XML parsing processes. Defaults to the logical CPU count (or `1` if unavailable), capped at `61` on Windows. Use `1` for serial parsing. Job reports remain serial. |
-| `download_parallel` | integer |  | Number of XML files to download in parallel after S3/R2 listing. Default: `32`. |
+| `download_parallel` | integer |  | Maximum concurrent aggregate XML and job-summary downloads. Default: `32`. Summary downloads reuse one client per worker. |
 | `download_concurrency` | integer |  | Per-file boto3 transfer concurrency for XML downloads. Default: `4`. |
 
 Set `log_level: info` to show progress, listing/download durations, and model/UI/HTML generation timings. Set `log_level: debug` for per-file parsing, test details, and duplicate decisions. Warnings remain in report metadata where applicable even when console output is quiet. `debug: true` independently enables shell tracing and can produce output at any log level.

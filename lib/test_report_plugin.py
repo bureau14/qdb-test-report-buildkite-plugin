@@ -535,6 +535,7 @@ def main() -> int:
                     bucket=store_context.bucket,
                     downloaded_xml=downloaded_xml,
                     output_dir=staging_root / "downloaded-summaries",
+                    download_parallel=config.aggregate_download_parallel,
                 )
                 if not job_summaries:
                     job_summaries = collect_full_scope_job_summaries(
