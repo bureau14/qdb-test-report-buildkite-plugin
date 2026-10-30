@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from report_logging import configure_logging, logger, trace, traced
+from report_logging import configure_logging, logger, trace, trace_timings, traced
 
 
 def test_trace_pairs_nested_stages_and_preserves_exception(monkeypatch, capsys):
@@ -17,9 +17,11 @@ def test_trace_pairs_nested_stages_and_preserves_exception(monkeypatch, capsys):
     monkeypatch.setattr(report_logging.time, "perf_counter", lambda: next(wall))
     monkeypatch.setattr(report_logging.time, "thread_time", lambda: next(cpu))
     error = RuntimeError("original failure")
-    with pytest.raises(RuntimeError) as caught, trace("outer"), trace("inner"):
-        raise error
+    with pytest.raises(RuntimeError) as caught, trace("outer", category="outer"):
+        with trace("inner", category="inner"):
+            raise error
     assert caught.value is error
+    assert trace_timings == {"outer": 5.0, "inner": 2.0}
     lines = capsys.readouterr().err.splitlines()
     assert len(lines) == 4
     outer_id = lines[0].split("id=")[1].split()[0]
@@ -27,6 +29,24 @@ def test_trace_pairs_nested_stages_and_preserves_exception(monkeypatch, capsys):
     assert outer_id != inner_id
     assert f"id={inner_id} stage=inner wall_s=2.000 thread_cpu_s=0.100 status=error" in lines[2]
     assert f"id={outer_id} stage=outer wall_s=5.000 thread_cpu_s=0.300 status=error" in lines[3]
+
+
+def test_trace_retains_categories_without_verbose_logging(monkeypatch, capsys):
+    clock = [0.0]
+    monkeypatch.setattr("report_logging.time.perf_counter", lambda: clock[0])
+
+    with trace("outer", category="outer"):
+        with trace("nested"):
+            clock[0] += 2.0
+        clock[0] += 3.0
+    with trace("first", category="repeated"):
+        clock[0] += 7.0
+    with pytest.raises(RuntimeError), trace("second", category="repeated"):
+        clock[0] += 11.0
+        raise RuntimeError("failed operation")
+
+    assert trace_timings == {"outer": 5.0, "repeated": 18.0}
+    assert capsys.readouterr().err == ""
 
 
 def test_disabled_trace_does_not_read_clocks_or_dump_arguments(monkeypatch, capsys):

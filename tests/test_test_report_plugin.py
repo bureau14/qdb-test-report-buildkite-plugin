@@ -7,6 +7,7 @@ from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 import pytest
 from artifact_inputs import ArtifactConfig, ArtifactFile
 from plugin_config import PlatformConfig, PluginConfig
+from report_logging import trace_timings, traced
 from test_report_plugin import (
     GenerationResult,
     ObjectStoreContext,
@@ -351,8 +352,12 @@ def test_upload_extra_artifacts_returns_summary_metadata(monkeypatch, tmp_path):
     ]
 
 
-@pytest.mark.parametrize("log_level", ["error", "info"])
-def test_main_job_logs_uploaded_html_url(monkeypatch, tmp_path, capsys, log_level):
+@pytest.mark.parametrize("log_level", ["error", "info", "fatal"])
+@pytest.mark.parametrize("upload_fails", [False, True])
+def test_main_job_logs_uploaded_html_url(monkeypatch, tmp_path, capsys, log_level, upload_fails):
+    trace_timings.update({"generating": 99.0, "stale.category": 99.0})
+    clock = [0.0]
+    monkeypatch.setattr("report_logging.time.perf_counter", lambda: clock[0])
     xml_dir = tmp_path / "xml"
     xml_dir.mkdir()
     (xml_dir / "test.xml").write_text("<testsuites />", encoding="utf-8")
@@ -372,7 +377,9 @@ def test_main_job_logs_uploaded_html_url(monkeypatch, tmp_path, capsys, log_leve
         },
     )
 
+    @traced("report.generate", category="generating")
     def fake_run_report_generation(config, output_dir, **kwargs):
+        clock[0] += 2.0
         output_dir.mkdir(parents=True, exist_ok=True)
         html_path = output_dir / "index.html"
         summary_path = output_dir / "summary.json"
@@ -383,9 +390,13 @@ def test_main_job_logs_uploaded_html_url(monkeypatch, tmp_path, capsys, log_leve
         )
         return GenerationResult(html_path=html_path, summary_path=summary_path)
 
+    @traced("report.upload", category="uploading")
     def fake_upload_report_artifacts(config, generation, xml_uploads, store_context=None):
         from object_store import PublishedObject
 
+        clock[0] += 3.0
+        if upload_fails:
+            raise OSError("upload failed")
         return {
             "html": PublishedObject(
                 "bucket",
@@ -399,12 +410,28 @@ def test_main_job_logs_uploaded_html_url(monkeypatch, tmp_path, capsys, log_leve
     monkeypatch.setattr("test_report_plugin.run_report_generation", fake_run_report_generation)
     monkeypatch.setattr("test_report_plugin.upload_report_artifacts", fake_upload_report_artifacts)
 
-    assert main() == 0
+    assert main() == (1 if upload_fails else 0)
+    assert "stale.category" not in trace_timings
+    assert trace_timings["generating"] == 2.0
+    assert trace_timings["uploading"] == 3.0
     stderr = capsys.readouterr().err
-    if log_level == "info":
+    if log_level == "info" and not upload_fails:
         assert "HTML report: https://reports.example.com/job/index.html" in stderr
     else:
-        assert stderr == ""
+        assert "HTML report:" not in stderr
+    if log_level == "fatal":
+        assert "Timing summary:" not in stderr
+    else:
+        assert stderr.count("Timing summary:") == 1
+        assert stderr.splitlines()[-1] == (
+            "ERROR Timing summary: total=5.0s downloading=0.0s generating=2.0s "
+            "uploading=3.0s annotating=0.0s other=0.0s"
+        )
+    if log_level == "error":
+        assert "trace start" not in stderr
+        assert "trace end" not in stderr
+    if upload_fails:
+        assert "Test report plugin failed: upload failed" in stderr
 
 
 def test_main_job_annotation_context(monkeypatch, tmp_path):
@@ -826,7 +853,7 @@ def test_main_full_defaults_to_ignore_failed_tests_for_exit_status(monkeypatch, 
     assert main() == 0
 
 
-def test_main_full_annotation_context(monkeypatch, tmp_path):
+def test_main_full_annotation_context(monkeypatch, tmp_path, capsys):
     xml_dir = tmp_path / "xml"
     xml_dir.mkdir()
     (xml_dir / "test.xml").write_text("<testsuites />", encoding="utf-8")
@@ -911,6 +938,9 @@ def test_main_full_annotation_context(monkeypatch, tmp_path):
 
     assert main() == 0
     assert annotations == [(annotations[0][0], "test-report:full", "success", 10, "build")]
+    stderr = capsys.readouterr().err
+    assert stderr.count("Timing summary:") == 1
+    assert stderr.splitlines()[-1].startswith("ERROR Timing summary: total=")
 
 
 def test_main_full_zero_xml_creates_error_annotation(monkeypatch, tmp_path, capsys):
@@ -981,7 +1011,10 @@ def test_main_full_zero_xml_creates_error_annotation(monkeypatch, tmp_path, caps
     assert main() == 0
     assert annotations[0][1:] == ("test-report:full", "error", 10, "build")
     assert "No JUnit XML was found" in annotations[0][0]
-    assert "No JUnit XML was found" in capsys.readouterr().err
+    stderr = capsys.readouterr().err
+    assert "No JUnit XML was found" in stderr
+    assert stderr.count("Timing summary:") == 1
+    assert "generating=0.0s uploading=0.0s" in stderr.splitlines()[-1]
 
 
 def test_main_full_variant_annotation_context(monkeypatch, tmp_path):

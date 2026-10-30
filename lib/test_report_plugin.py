@@ -48,7 +48,7 @@ from report_downloads import (
     collect_full_scope_job_summaries_for_xml,
     collect_full_scope_xml,
 )
-from report_logging import configure_logging, logger, trace, traced
+from report_logging import configure_logging, logger, trace, trace_timings, traced
 from report_paths import build_report_location
 from xml_inputs import XmlUpload, collect_job_xml_uploads
 
@@ -199,7 +199,7 @@ def build_zero_xml_annotation_body(title: str) -> str:
     )
 
 
-@traced("report.generate")
+@traced("report.generate", category="generating")
 def run_report_generation(
     config: PluginConfig,
     output_dir: Path,
@@ -273,7 +273,7 @@ def create_zip(files: list[tuple[Path, str]], output: Path) -> None:
         log(f"Created ZIP archive={output.name} files={len(files)} bytes={output.stat().st_size}")
 
 
-@traced("artifacts.upload")
+@traced("artifacts.upload", category="uploading")
 def upload_extra_artifacts(
     config: PluginConfig,
     artifact_files: list[ArtifactFile],
@@ -363,7 +363,7 @@ def upload_extra_artifacts(
     return list(grouped.values())
 
 
-@traced("report.upload")
+@traced("report.upload", category="uploading")
 def upload_report_artifacts(
     config: PluginConfig,
     generation: GenerationResult,
@@ -429,13 +429,18 @@ def upload_report_artifacts(
 
 
 def main() -> int:
+    trace_timings.clear()
+    trace_timings.update(
+        dict.fromkeys(("total", "downloading", "generating", "uploading", "annotating"), 0.0)
+    )
+
     try:
         config = load_plugin_config()
         configure_logging(config.log_level)
 
-        with trace("plugin.total", scope=config.scope), tempfile.TemporaryDirectory(
-            prefix="test-report-"
-        ) as tmp_dir_str:
+        with trace(
+            "plugin.total", category="total", scope=config.scope
+        ), tempfile.TemporaryDirectory(prefix="test-report-") as tmp_dir_str:
             staging_root = Path(tmp_dir_str)
             full_scope_xml_stage_root = staging_root / "downloaded-xml"
 
@@ -708,6 +713,17 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001 - plugin CLI boundary
         logger.fatal("Test report plugin failed: %s", exc)
         return 1
+    finally:
+        total = trace_timings["total"]
+        timings = {
+            category: elapsed for category, elapsed in trace_timings.items() if category != "total"
+        }
+        logger.error(
+            "Timing summary: total=%.1fs %s other=%.1fs",
+            total,
+            " ".join(f"{stage}={elapsed:.1f}s" for stage, elapsed in timings.items()),
+            max(0.0, total - sum(timings.values())),
+        )
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from functools import wraps
 from itertools import count
 
 _trace_ids = count(1)
+trace_timings: dict[str, float] = {}
 
 LOG_LEVELS = ("debug", "info", "warning", "error", "fatal")
 
@@ -40,9 +41,10 @@ def configure_logging(level: str = "error") -> None:
 
 
 @contextmanager
-def trace(stage: str, *, level: int = logging.INFO, **fields):
-    """Log paired, inclusive wall/thread-CPU timings without argument or secret dumps."""
-    if not logger.isEnabledFor(level):
+def trace(stage: str, *, level: int = logging.INFO, category: str | None = None, **fields):
+    """Log inclusive timings and retain categorized wall time."""
+    # Categorize outer operations only, since their elapsed time includes nested work.
+    if not logger.isEnabledFor(level) and category is None:
         yield
         return
     trace_id = next(_trace_ids)
@@ -57,25 +59,28 @@ def trace(stage: str, *, level: int = logging.INFO, **fields):
         status = "error"
         raise
     finally:
+        elapsed = time.perf_counter() - started
+        if category is not None:
+            trace_timings[category] = trace_timings.get(category, 0.0) + elapsed
         logger.log(
             level,
             "trace end id=%s stage=%s wall_s=%.3f thread_cpu_s=%.3f status=%s %s",
             trace_id,
             stage,
-            time.perf_counter() - started,
+            elapsed,
             time.thread_time() - cpu_started,
             status,
             details,
         )
 
 
-def traced(stage: str, *, level: int = logging.INFO):
+def traced(stage: str, *, level: int = logging.INFO, category: str | None = None):
     """Time a function without changing its return value or exception handling."""
 
     def decorate(fn):
         @wraps(fn)
         def wrapped(*args, **kwargs):
-            with trace(stage, level=level):
+            with trace(stage, level=level, category=category):
                 return fn(*args, **kwargs)
 
         return wrapped
