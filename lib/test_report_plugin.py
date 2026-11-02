@@ -413,8 +413,31 @@ def upload_report_artifacts(
                 content_disposition="attachment",
             )
         )
+    cost_data_path = config.ctest_cost_data_path if config.scope == "job" else None
+    if cost_data_path is not None:
+        if cost_data_path.is_file():
+            requests.append(
+                UploadRequest(
+                    key=key_join(location.base_prefix, "CTestCostData.txt"),
+                    local_path=cost_data_path,
+                    content_type="text/plain; charset=utf-8",
+                    content_disposition="attachment",
+                )
+            )
+        else:
+            warn(f"CTest cost data file not found: {cost_data_path}")
+            cost_data_path = None
     published = upload_files(store_cfg, auth, bucket, requests, parallel=config.upload_parallel)
-    # Publish the discovery manifest only after all HTML/XML uploads succeed.
+    if cost_data_path is not None:
+        cost_data = published[-1]
+        summary_data = json.loads(generation.summary_path.read_text())
+        summary_data["ctest_cost_data"] = {
+            "key": cost_data.key,
+            "url": cost_data.url,
+            "size_bytes": cost_data.size_bytes,
+        }
+        generation.summary_path.write_text(json.dumps(summary_data, indent=2))
+    # Publish the discovery manifest only after all report data uploads succeed.
     log(f"Uploading summary JSON to s3://{bucket}/{location.summary_key}")
     summary = upload_file(
         store_cfg,
@@ -428,6 +451,8 @@ def upload_report_artifacts(
     results = {"html": published[0], "summary": summary}
     if job_xml:
         results["xml_archive"] = published[1]
+    if cost_data_path is not None:
+        results["ctest_cost_data"] = published[-1]
 
     return results
 

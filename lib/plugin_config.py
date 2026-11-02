@@ -42,6 +42,7 @@ class PluginConfig:
     fail_on_test_failures: bool
     junit_input_path: Path | None = None
     manifest_input_path: Path | None = None
+    ctest_cost_data_path: Path | None = None
     commit: str | None = None
     repo: str | None = None
     artifacts: list[ArtifactConfig] = field(default_factory=list)
@@ -175,6 +176,8 @@ def load_plugin_config() -> PluginConfig:
 
     manifest_input = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_MANIFEST_INPUT_PATH")
 
+    ctest_cost_data = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_CTEST_COST_DATA_PATH")
+
     variant: str | None
     junit_input_path: Path | None
     fail_on_test_failures: bool
@@ -222,6 +225,7 @@ def load_plugin_config() -> PluginConfig:
         fail_on_test_failures=fail_on_test_failures,
         junit_input_path=junit_input_path,
         manifest_input_path=Path(manifest_input) if manifest_input else None,
+        ctest_cost_data_path=Path(ctest_cost_data) if ctest_cost_data else None,
         commit=commit,
         repo=repo,
         artifacts=artifacts,

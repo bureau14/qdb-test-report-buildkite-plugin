@@ -67,6 +67,30 @@ If the path does not exist or no XML files are found, the job report fails with 
 
 `job.artifacts` can optionally upload additional non-JUnit files, such as server logs or debug bundles. Each entry requires a `name` and `input_path`. The input path supports the same path styles as `junit_input_path` except directories upload all regular files recursively instead of filtering to XML. Missing or empty additional artifact inputs log a warning, are recorded in `summary.json`, and do not fail the report.
 
+### CTest scheduling costs
+
+Set `job.ctest_cost_data_path` to a single cost-data file, for example:
+
+```yaml
+job:
+  variant: linux-haswell-release
+  junit_input_path: reports/junit
+  ctest_cost_data_path: build/Testing/Temporary/CTestCostData.txt
+```
+
+The path is relative to the command working directory, or absolute; globs and
+directories are not supported. The plugin uploads the file unchanged as
+`CTestCostData.txt` beside the job's `summary.json`, independently of `logs.zip`.
+The object therefore inherits the report's project, branch/tag, build, variant,
+and job isolation. `summary.json` records its object `key`, `url` (when available),
+and `size_bytes` under `ctest_cost_data` only after the upload succeeds.
+
+Snapshots are archived even when tests fail, preserving CTest's failure section.
+A missing file logs a warning and does not fail the report. Upload errors follow
+the existing report-upload failure policy. Aggregate reports do not upload cost
+data. This setting only archives snapshots; it does not retrieve previous runs
+or decide which snapshots are suitable for future scheduling.
+
 ### Launcher execution manifests
 
 Set `job.manifest_input_path: "test-metadata/*.json"` to collect results from the

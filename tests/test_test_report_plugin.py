@@ -267,6 +267,101 @@ def test_upload_report_artifacts(monkeypatch, tmp_path):
     assert uploaded == []  # A failed batch must not publish summary.json.
 
 
+@pytest.mark.parametrize(
+    ("scope", "cost_state"),
+    [
+        ("job", "present"),
+        ("job", "missing"),
+        ("job", "directory"),
+        ("job", "disabled"),
+        ("aggregate", "present"),
+    ],
+)
+def test_upload_ctest_cost_data(monkeypatch, tmp_path, scope, cost_state):
+    from object_store import ObjectAuth, PublishedObject, StoreConfig
+
+    cost_path = tmp_path / "CTestCostData.txt"
+    raw_costs = b"slow_test 3 12.5\r\n---\r\nfailed_test\r\n"
+    if cost_state == "present":
+        cost_path.write_bytes(raw_costs)
+    elif cost_state == "directory":
+        cost_path.mkdir()
+    html_path = tmp_path / "index.html"
+    html_path.write_text("report")
+    summary_path = tmp_path / "summary.json"
+    summary_path.write_text(json.dumps({"totals": {"failed": 1}}))
+    config = PluginConfig(
+        scope=scope,
+        title="Test Report",
+        variant="linux-arm64-debug" if scope == "job" else None,
+        execution_name=None,
+        project_id="project",
+        git_ref="refs/heads/feature/costs",
+        build_id="build-id",
+        job_id="job-id",
+        build_url=None,
+        platforms=[],
+        only_failures=False,
+        annotate=False,
+        fail_on_test_failures=True,
+        ctest_cost_data_path=cost_path if cost_state != "disabled" else None,
+    )
+    context = ObjectStoreContext(
+        StoreConfig("s3", "s3://bucket/prefix"), ObjectAuth(), "bucket", "prefix"
+    )
+    requests = []
+    warnings = []
+    monkeypatch.setattr("test_report_plugin.warn", warnings.append)
+
+    def fake_upload_files(cfg, auth, bucket, batch, **kwargs):
+        requests.extend(batch)
+        return [
+            PublishedObject(bucket, item.key, None, item.local_path.stat().st_size)
+            for item in batch
+        ]
+
+    upload_summary = MagicMock(return_value=PublishedObject("bucket", "summary", None, 1))
+    monkeypatch.setattr("test_report_plugin.upload_files", fake_upload_files)
+    monkeypatch.setattr("test_report_plugin.upload_file", upload_summary)
+    results = upload_report_artifacts(
+        config, GenerationResult(html_path, summary_path), [], context
+    )
+    summary = json.loads(summary_path.read_text())
+    assert summary["totals"] == {"failed": 1}
+    assert upload_summary.call_count == 1
+    should_upload = scope == "job" and cost_state == "present"
+    assert len(requests) == (2 if should_upload else 1)
+    if should_upload:
+        expected_key = (
+            "prefix/project/refs/heads/feature/costs/reports/builds/build-id/"
+            "variants/linux-arm64-debug/jobs/job-id/CTestCostData.txt"
+        )
+        cost_request = requests[-1]
+        assert cost_request.key == expected_key
+        assert cost_request.local_path.read_bytes() == raw_costs
+        assert cost_request.content_type == "text/plain; charset=utf-8"
+        assert cost_request.content_disposition == "attachment"
+        assert summary["ctest_cost_data"] == {
+            "key": expected_key,
+            "url": None,
+            "size_bytes": len(raw_costs),
+        }
+        assert results["ctest_cost_data"].key == expected_key
+
+        def fail_batch(*args, **kwargs):
+            raise RuntimeError("cost upload failed")
+
+        monkeypatch.setattr("test_report_plugin.upload_files", fail_batch)
+        upload_summary.reset_mock()
+        with pytest.raises(RuntimeError, match="cost upload failed"):
+            upload_report_artifacts(config, GenerationResult(html_path, summary_path), [], context)
+        upload_summary.assert_not_called()
+    else:
+        assert "ctest_cost_data" not in summary
+        assert "ctest_cost_data" not in results
+    assert bool(warnings) == (scope == "job" and cost_state in ("missing", "directory"))
+
+
 def test_upload_extra_artifacts_returns_summary_metadata(monkeypatch, tmp_path):
     log_file = tmp_path / "test-logs-1.tar.gz"
     log_file.write_text("logs", encoding="utf-8")

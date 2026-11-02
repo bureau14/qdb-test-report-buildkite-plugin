@@ -12,7 +12,10 @@ def bk_env(monkeypatch):
     monkeypatch.setenv("BUILDKITE_BRANCH", "main")
 
 
-def test_load_plugin_config_job_block_minimal(monkeypatch):
+@pytest.mark.parametrize("cost_path", [None, "", "build/Testing/Temporary/CTestCostData.txt"])
+def test_load_plugin_config_job_block_minimal(monkeypatch, cost_path):
+    if cost_path is not None:
+        monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_CTEST_COST_DATA_PATH", cost_path)
     monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "My Report")
     monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT", "linux-x64")
     monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_JUNIT_INPUT_PATH", "reports/junit")
@@ -27,6 +30,7 @@ def test_load_plugin_config_job_block_minimal(monkeypatch):
     assert cfg.title == "My Report"
     assert cfg.variant == "linux-x64"
     assert cfg.junit_input_path == Path("reports/junit")
+    assert cfg.ctest_cost_data_path == (Path(cost_path) if cost_path else None)
     assert cfg.platforms == [PlatformConfig(name="linux-x64", path=Path("reports/junit"))]
     assert cfg.project_id == "my-pipeline"
     assert cfg.git_ref == "refs/heads/main"

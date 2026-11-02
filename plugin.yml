@@ -47,6 +47,9 @@ configuration:
         junit_input_path:
           type: string
           description: Local JUnit XML file, directory, or glob.
+        ctest_cost_data_path:
+          type: string
+          description: Optional single CTestCostData.txt file to archive unchanged beside the job summary. Missing files warn without failing the report.
         manifest_input_path:
           type: string
           description: Optional version 1 launcher manifests (file, directory, or glob), with explicit report and artifact associations.
