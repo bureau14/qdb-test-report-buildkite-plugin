@@ -1414,9 +1414,16 @@ def test_main_aggregate_renders_job_manifest_artifacts_in_html(monkeypatch, tmp_
 
     monkeypatch.setattr("report_downloads.list_objects", fake_list_objects)
     monkeypatch.setattr("report_downloads.download_file", fake_download_file)
+    monkeypatch.setattr("report_downloads.create_s3_client", lambda cfg, auth: MagicMock())
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_AGGREGATE_DOWNLOAD_PARALLEL", "2")
+
+    def collect_summaries(**kwargs):
+        assert kwargs["download_parallel"] == 2
+        return collect_full_scope_job_summaries(**kwargs)
+
     monkeypatch.setattr(
         "test_report_plugin.collect_full_scope_job_summaries",
-        collect_full_scope_job_summaries,
+        collect_summaries,
     )
     monkeypatch.setattr(
         "test_report_plugin.resolve_object_store_context",
@@ -1631,3 +1638,30 @@ def test_malformed_junit_exit_policy_with_real_report_generation(
     else:
         assert len(captured["malformed_junit_xml"]) == 1
         assert "no element found" in captured["malformed_junit_xml"][0]["error"]
+
+
+@pytest.mark.parametrize(("scope", "workers"), [("job", 1), ("aggregate", 8)])
+def test_run_report_generation_selects_scope_parse_workers(tmp_path, monkeypatch, scope, workers):
+    captured = {}
+    monkeypatch.setattr(
+        "test_report_plugin.junit_html_report.generate_html_report",
+        lambda **kwargs: captured.update(kwargs),
+    )
+    config = PluginConfig(
+        scope=scope,
+        title="Report",
+        variant=None,
+        execution_name=None,
+        project_id="project",
+        git_ref="refs/heads/main",
+        build_id="1",
+        job_id=None,
+        build_url=None,
+        platforms=[],
+        only_failures=False,
+        annotate=False,
+        fail_on_test_failures=False,
+        aggregate_parse_workers=8,
+    )
+    run_report_generation(config, tmp_path / "output")
+    assert captured["parse_workers"] == workers

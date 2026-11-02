@@ -36,6 +36,12 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Platform input in name=path form. May be repeated.",
     )
+    parser.add_argument(
+        "--parse-workers",
+        type=int,
+        default=1,
+        help="Maximum XML parsing processes; 1 uses serial parsing (default)",
+    )
     parser.add_argument("--output", required=True, type=Path, help="Output HTML file")
     parser.add_argument("--summary-json", type=Path, help="Output summary JSON file")
     parser.add_argument(
@@ -85,6 +91,7 @@ def generate_html_report(
     only_failures: bool = False,
     fail_on_test_failures: bool = False,
     log_level: str = "error",
+    parse_workers: int = 1,
 ) -> int:
     configure_logging(log_level)
     started = time.monotonic()
@@ -97,6 +104,7 @@ def generate_html_report(
         source_artifacts_by_job_id=source_artifacts_by_job_id,
         artifacts=artifacts,
         xml_source_links=xml_source_links,
+        parse_workers=parse_workers,
     )
     parsed = time.monotonic()
     report.junit_archive_errors = list(junit_archive_errors or [])
@@ -194,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
             only_failures=args.only_failures,
             fail_on_test_failures=args.fail_on_test_failures,
             log_level=args.log_level,
+            parse_workers=args.parse_workers,
         )
     except Exception as exc:  # noqa: BLE001 - CLI guard
         logger.fatal("Report generation failed: %s", exc)

@@ -228,18 +228,22 @@ class UiDataBuilder:
 
     def finalize_child_statuses(self) -> None:
         node_by_id = {node["id"]: node for node in self.test_nodes}
+        pending = set(self.children)
 
-        def statuses_for(node_id: str) -> set[str]:
+        def statuses_for(node_id: str) -> list[str]:
             if node_id in self.children:
-                statuses: set[str] = set()
-                for child_id in self.children[node_id]["ids"]:
-                    statuses.update(statuses_for(child_id))
-                self.children[node_id]["childStatuses"] = sorted(
-                    statuses, key=lambda s: STATUS_SORT.get(s, 99)
-                )
-                return statuses
+                children = self.children[node_id]
+                if node_id in pending:
+                    statuses: set[str] = set()
+                    for child_id in children["ids"]:
+                        statuses.update(statuses_for(child_id))
+                    children["childStatuses"] = sorted(
+                        statuses, key=lambda s: STATUS_SORT.get(s, 99)
+                    )
+                    pending.remove(node_id)
+                return children["childStatuses"]
             status = node_by_id[node_id].get("status")
-            return {status} if status else set()
+            return [status] if status else []
 
         for parent_id in list(self.children):
             statuses_for(parent_id)

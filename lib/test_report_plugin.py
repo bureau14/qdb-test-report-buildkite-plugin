@@ -238,6 +238,7 @@ def run_report_generation(
         only_failures=config.only_failures,
         fail_on_test_failures=False,
         log_level=config.log_level,
+        parse_workers=config.aggregate_parse_workers if config.scope == "aggregate" else 1,
     )
 
     return GenerationResult(
@@ -534,6 +535,7 @@ def main() -> int:
                     bucket=store_context.bucket,
                     downloaded_xml=downloaded_xml,
                     output_dir=staging_root / "downloaded-summaries",
+                    download_parallel=config.aggregate_download_parallel,
                 )
                 if not job_summaries:
                     job_summaries = collect_full_scope_job_summaries(
@@ -545,6 +547,7 @@ def main() -> int:
                         git_ref=config.git_ref,
                         build_id=config.build_id,
                         output_dir=staging_root / "downloaded-summaries",
+                        download_parallel=config.aggregate_download_parallel,
                     )
                 for summary in job_summaries.values():
                     artifacts = summary.get("artifacts", [])
