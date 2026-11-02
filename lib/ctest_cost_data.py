@@ -10,6 +10,11 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Match the report entry point: shared modules import helpers from tools/.
+tools_path = str(Path(__file__).resolve().parent.parent / "tools")
+if tools_path not in sys.path:
+    sys.path.append(tools_path)
+
 from botocore.exceptions import BotoCoreError, ClientError
 from object_store import create_s3_client
 from plugin_config import PluginConfig, load_plugin_config

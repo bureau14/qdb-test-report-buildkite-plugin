@@ -2,4 +2,5 @@ target-version = "py37"
 line-length = 100
 
 [lint.per-file-ignores]
+"lib/ctest_cost_data.py" = ["E402"]
 "lib/test_report_plugin.py" = ["E402"]
