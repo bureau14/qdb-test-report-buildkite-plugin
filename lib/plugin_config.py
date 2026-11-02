@@ -26,6 +26,13 @@ def _get_default_parse_workers() -> int:
 
 
 @dataclass(frozen=True)
+class CTestCostDataRestoreConfig:
+    staging_path: Path
+    fallback_branch: str | None = "master"
+    timeout_seconds: int = 30
+
+
+@dataclass(frozen=True)
 class PluginConfig:
     scope: str
     title: str
@@ -44,6 +51,7 @@ class PluginConfig:
     manifest_input_path: Path | None = None
     ctest_cost_data_path: Path | None = None
     ctest_cost_data_selection: list[str] = field(default_factory=list)
+    ctest_cost_data_restore: CTestCostDataRestoreConfig | None = None
     commit: str | None = None
     repo: str | None = None
     artifacts: list[ArtifactConfig] = field(default_factory=list)
@@ -179,6 +187,18 @@ def load_plugin_config() -> PluginConfig:
 
     ctest_cost_data = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_CTEST_COST_DATA_PATH")
 
+    restore_prefix = "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_CTEST_COST_DATA_RESTORE"
+    restore = None
+    if _has_env_with_prefix(restore_prefix):
+        staging_path = _get_env(restore_prefix + "_STAGING_PATH")
+        if not staging_path:
+            raise ValueError("ctest_cost_data_restore requires staging_path")
+        restore = CTestCostDataRestoreConfig(
+            staging_path=Path(staging_path),
+            fallback_branch=_get_env(restore_prefix + "_FALLBACK_BRANCH", "master") or None,
+            timeout_seconds=_get_int_env(restore_prefix + "_TIMEOUT_SECONDS", 30),
+        )
+
     variant: str | None
     junit_input_path: Path | None
     fail_on_test_failures: bool
@@ -230,6 +250,7 @@ def load_plugin_config() -> PluginConfig:
         ctest_cost_data_selection=sorted(
             set(_get_list_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_CTEST_COST_DATA_SELECTION"))
         ),
+        ctest_cost_data_restore=restore,
         commit=commit,
         repo=repo,
         artifacts=artifacts,

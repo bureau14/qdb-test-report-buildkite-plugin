@@ -48,6 +48,22 @@ def build_report_location(
     )
 
 
+def build_ctest_cost_data_discovery_prefix(
+    *, destination_prefix: str, project_id: str, git_ref: str, variant: str, step_key: str
+) -> str:
+    return (
+        key_join(
+            destination_prefix,
+            project_id,
+            git_ref,
+            "reports/ctest-cost/v1",
+            quote(variant, safe=""),
+            quote(step_key, safe=""),
+        )
+        + "/"
+    )
+
+
 def build_ctest_cost_data_descriptor_key(
     *,
     destination_prefix: str,
@@ -59,12 +75,13 @@ def build_ctest_cost_data_descriptor_key(
     job_id: str,
 ) -> str:
     return key_join(
-        destination_prefix,
-        project_id,
-        git_ref,
-        "reports/ctest-cost/v1",
-        quote(variant, safe=""),
-        quote(step_key, safe=""),
+        build_ctest_cost_data_discovery_prefix(
+            destination_prefix=destination_prefix,
+            project_id=project_id,
+            git_ref=git_ref,
+            variant=variant,
+            step_key=step_key,
+        ),
         str(build_number),
         quote(job_id, safe="") + ".json",
     )

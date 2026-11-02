@@ -118,8 +118,63 @@ failure policy.
 Snapshots are archived even when tests fail, preserving CTest's failure section.
 A missing file logs a warning and does not fail the report. Upload errors follow
 the existing report-upload failure policy. Aggregate reports do not upload cost
-data. This setting only archives snapshots; it does not retrieve previous runs
-or decide which snapshots are suitable for future scheduling.
+data. Archival alone does not restore previous runs; enable restoration separately
+as described below.
+
+### Restoring CTest scheduling costs
+
+Enable the optional pre-command restore hook with an explicit selection and a
+staging file outside directories removed by the command:
+
+```yaml
+job:
+  variant: linux-haswell-release
+  junit_input_path: reports/junit
+  ctest_cost_data_path: build/Testing/Temporary/CTestCostData.txt
+  ctest_cost_data_selection: ["bk-suite:unit", "bk-suite:regression"]
+  ctest_cost_data_restore:
+    staging_path: .ctest-cost/CTestCostData.txt
+    fallback_branch: master
+    timeout_seconds: 30
+```
+
+After the command has cleaned and configured its build directory, copy the
+staged file to `build/Testing/Temporary/CTestCostData.txt` immediately before
+invoking CTest, if it exists. The plugin does not modify the build directory.
+The staging path must differ from `ctest_cost_data_path`; it is cleared before
+each attempt so a cold miss cannot accidentally reuse a previous job's file.
+Paths are relative to the hook working directory unless absolute. Ensure the
+command sees that same location, including any container volume mapping.
+
+Discovery uses the existing S3/R2 credentials and first searches the current git
+ref, then `refs/heads/master` by default. Set `fallback_branch: ""` to disable
+fallback, or specify another branch name. Matching requires the same project,
+variant, stable step key, and exact normalized selection. Unknown selection is
+not reusable. Only builds numbered lower than `BUILDKITE_BUILD_NUMBER` are
+considered, and the current build ID is excluded. Within each ref, successful
+snapshots are tried by descending numeric build number, retry count, and job ID.
+Unknown retry counts sort below known retries. The current ref always takes
+priority over the fallback, even if its latest matching snapshot is older.
+
+A usable descriptor must have version 1, command exit status zero, at least one
+successful reported test, no failed or errored tests, and valid nonnegative
+status counts. Its object references must match its report identity. Skipped
+tests are allowed. Failed, unknown, incompatible, and malformed descriptors are
+ignored. Missing or invalid snapshots cause older eligible candidates to be
+tried before fallback. Restoration validates the raw file size and CTest entries,
+then removes the previous-failure section from the staged copy. Archived files
+are never modified.
+
+Restoration is optional: misses, storage errors, and timeouts log warnings and
+allow the job command to continue. A separate worker process enforces the overall
+`timeout_seconds` deadline (default 30), including credential resolution and
+storage requests. Staging is installed atomically only after worker completion.
+Discovery allows at most 1,000 listed objects per ref and examines the newest
+50 older-build descriptors. A ref exceeding the listing limit is skipped rather
+than selecting from an incomplete listing. Descriptors are limited to 64 KiB and
+cost files to 4 MiB. These bounds can result in cold scheduling even when older
+matching history exists. Use `log_level: info` to see the selected source build
+and job. Retrieval does not require a Buildkite API token.
 
 ### Launcher execution manifests
 

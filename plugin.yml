@@ -56,6 +56,24 @@ configuration:
             type: string
             minLength: 1
           description: Optional identifiers for the exact test selection, such as CTest suite labels. Stored sorted and deduplicated; omission means unknown coverage.
+        ctest_cost_data_restore:
+          type: object
+          properties:
+            staging_path:
+              type: string
+              minLength: 1
+              description: File restored before the command; install into the build directory immediately before CTest, after cleanup.
+            fallback_branch:
+              type: string
+              default: master
+              description: Branch to search after the current ref; use an empty string to disable fallback.
+            timeout_seconds:
+              type: integer
+              minimum: 1
+              default: 30
+              description: Overall restoration deadline, including credential resolution.
+          required: [staging_path]
+          additionalProperties: false
         manifest_input_path:
           type: string
           description: Optional version 1 launcher manifests (file, directory, or glob), with explicit report and artifact associations.

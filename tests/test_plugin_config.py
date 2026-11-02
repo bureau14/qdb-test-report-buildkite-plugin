@@ -298,3 +298,38 @@ def test_ctest_cost_data_selection_is_explicit_and_normalized(monkeypatch):
         "bk-suite:regression",
         "bk-suite:unit",
     ]
+
+
+@pytest.mark.parametrize("fallback", [None, "", "develop"])
+def test_load_ctest_cost_restore_config(monkeypatch, fallback):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT", "linux")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_JUNIT_INPUT_PATH", "junit.xml")
+    monkeypatch.setenv("BUILDKITE_JOB_ID", "job")
+    prefix = "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_CTEST_COST_DATA_RESTORE"
+    monkeypatch.setenv(prefix + "_STAGING_PATH", ".ctest-cost/costs.txt")
+    if fallback is not None:
+        monkeypatch.setenv(prefix + "_FALLBACK_BRANCH", fallback)
+    restore = load_plugin_config().ctest_cost_data_restore
+    assert restore.staging_path == Path(".ctest-cost/costs.txt")
+    assert restore.timeout_seconds == 30
+    assert restore.fallback_branch == ("master" if fallback is None else fallback or None)
+
+
+@pytest.mark.parametrize("timeout", ["0", "-1", "invalid"])
+def test_ctest_cost_restore_rejects_invalid_timeout(monkeypatch, timeout):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    prefix = "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_CTEST_COST_DATA_RESTORE"
+    monkeypatch.setenv(prefix + "_STAGING_PATH", "staging.txt")
+    monkeypatch.setenv(prefix + "_TIMEOUT_SECONDS", timeout)
+    with pytest.raises(ValueError, match="TIMEOUT_SECONDS"):
+        load_plugin_config()
+
+
+def test_ctest_cost_restore_requires_staging_path(monkeypatch):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setenv(
+        "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_CTEST_COST_DATA_RESTORE_FALLBACK_BRANCH", "master"
+    )
+    with pytest.raises(ValueError, match="requires staging_path"):
+        load_plugin_config()
