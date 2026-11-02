@@ -104,3 +104,36 @@ def test_build_report_location_normalization():
 
     expected_base = "qdb-artifacts/my-project/main/reports/builds/build-456/full"
     assert loc.base_prefix == expected_base
+
+
+@pytest.mark.parametrize(
+    ("variant", "step_key", "build_number", "job_id", "suffix"),
+    [
+        (
+            "linux/arm64",
+            "test/parallel",
+            42,
+            "job-1",
+            "linux%2Farm64/test%2Fparallel/42/job-1.json",
+        ),
+        ("linux/arm64", "test", 42, "job-1", "linux%2Farm64/test/42/job-1.json"),
+        ("linux/x64", "test", 42, "job-1", "linux%2Fx64/test/42/job-1.json"),
+        ("linux/x64", "test", 43, "job-1", "linux%2Fx64/test/43/job-1.json"),
+        ("linux/x64", "test", 43, "job-2", "linux%2Fx64/test/43/job-2.json"),
+    ],
+)
+def test_ctest_cost_data_descriptors_isolate_variants_steps_builds_and_retries(
+    variant, step_key, build_number, job_id, suffix
+):
+    from report_paths import build_ctest_cost_data_descriptor_key
+
+    key = build_ctest_cost_data_descriptor_key(
+        destination_prefix="prefix",
+        project_id="project",
+        git_ref="refs/heads/feature/costs",
+        variant=variant,
+        step_key=step_key,
+        build_number=build_number,
+        job_id=job_id,
+    )
+    assert key == "prefix/project/refs/heads/feature/costs/reports/ctest-cost/v1/" + suffix

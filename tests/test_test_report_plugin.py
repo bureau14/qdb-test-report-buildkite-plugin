@@ -277,7 +277,12 @@ def test_upload_report_artifacts(monkeypatch, tmp_path):
         ("aggregate", "present"),
     ],
 )
-def test_upload_ctest_cost_data(monkeypatch, tmp_path, scope, cost_state):
+@pytest.mark.parametrize("command_status", ["0", "1"])
+def test_upload_ctest_cost_data(monkeypatch, tmp_path, scope, cost_state, command_status):
+    monkeypatch.setenv("BUILDKITE_BUILD_NUMBER", "42")
+    monkeypatch.setenv("BUILDKITE_STEP_KEY", "tests/parallel")
+    monkeypatch.setenv("BUILDKITE_RETRY_COUNT", "2")
+    monkeypatch.setenv("BUILDKITE_COMMAND_EXIT_STATUS", command_status)
     from object_store import ObjectAuth, PublishedObject, StoreConfig
 
     cost_path = tmp_path / "CTestCostData.txt"
@@ -289,7 +294,7 @@ def test_upload_ctest_cost_data(monkeypatch, tmp_path, scope, cost_state):
     html_path = tmp_path / "index.html"
     html_path.write_text("report")
     summary_path = tmp_path / "summary.json"
-    summary_path.write_text(json.dumps({"totals": {"failed": 1}}))
+    summary_path.write_text(json.dumps({"totals": {"failed": 1}, "status_counts": {"FAILED": 1}}))
     config = PluginConfig(
         scope=scope,
         title="Test Report",
@@ -305,6 +310,7 @@ def test_upload_ctest_cost_data(monkeypatch, tmp_path, scope, cost_state):
         annotate=False,
         fail_on_test_failures=True,
         ctest_cost_data_path=cost_path if cost_state != "disabled" else None,
+        ctest_cost_data_selection=["bk-suite:unit", "bk-suite:regression", "bk-suite:unit"],
     )
     context = ObjectStoreContext(
         StoreConfig("s3", "s3://bucket/prefix"), ObjectAuth(), "bucket", "prefix"
@@ -323,6 +329,20 @@ def test_upload_ctest_cost_data(monkeypatch, tmp_path, scope, cost_state):
     upload_summary = MagicMock(return_value=PublishedObject("bucket", "summary", None, 1))
     monkeypatch.setattr("test_report_plugin.upload_files", fake_upload_files)
     monkeypatch.setattr("test_report_plugin.upload_file", upload_summary)
+
+    def fake_put_json(cfg, auth, bucket, key, payload):
+        assert upload_summary.called
+        assert payload == dict(
+            json.loads(summary_path.read_text())["ctest_cost_data"],
+            summary_key=(
+                "prefix/project/refs/heads/feature/costs/reports/builds/build-id/"
+                "variants/linux-arm64-debug/jobs/job-id/summary.json"
+            ),
+        )
+        return PublishedObject(bucket, key, None, 1)
+
+    upload_descriptor = MagicMock(side_effect=fake_put_json)
+    monkeypatch.setattr("test_report_plugin.put_json", upload_descriptor)
     results = upload_report_artifacts(
         config, GenerationResult(html_path, summary_path), [], context
     )
@@ -345,8 +365,27 @@ def test_upload_ctest_cost_data(monkeypatch, tmp_path, scope, cost_state):
             "key": expected_key,
             "url": None,
             "size_bytes": len(raw_costs),
+            "version": 1,
+            "project_id": "project",
+            "git_ref": "refs/heads/feature/costs",
+            "variant": "linux-arm64-debug",
+            "step_key": "tests/parallel",
+            "build_id": "build-id",
+            "job_id": "job-id",
+            "commit": None,
+            "selection": ["bk-suite:regression", "bk-suite:unit"],
+            "build_number": 42,
+            "retry_count": 2,
+            "command_exit_status": int(command_status),
+            "status_counts": {"FAILED": 1},
         }
         assert results["ctest_cost_data"].key == expected_key
+        assert results["ctest_cost_data_descriptor"].key == (
+            "prefix/project/refs/heads/feature/costs/reports/ctest-cost/v1/"
+            "linux-arm64-debug/tests%2Fparallel/42/job-id.json"
+        )
+        assert upload_descriptor.call_count == 1
+        upload_descriptor.reset_mock()
 
         def fail_batch(*args, **kwargs):
             raise RuntimeError("cost upload failed")
@@ -356,7 +395,15 @@ def test_upload_ctest_cost_data(monkeypatch, tmp_path, scope, cost_state):
         with pytest.raises(RuntimeError, match="cost upload failed"):
             upload_report_artifacts(config, GenerationResult(html_path, summary_path), [], context)
         upload_summary.assert_not_called()
+        upload_descriptor.assert_not_called()
+
+        monkeypatch.setattr("test_report_plugin.upload_files", fake_upload_files)
+        upload_summary.side_effect = RuntimeError("summary upload failed")
+        with pytest.raises(RuntimeError, match="summary upload failed"):
+            upload_report_artifacts(config, GenerationResult(html_path, summary_path), [], context)
+        upload_descriptor.assert_not_called()
     else:
+        upload_descriptor.assert_not_called()
         assert "ctest_cost_data" not in summary
         assert "ctest_cost_data" not in results
     assert bool(warnings) == (scope == "job" and cost_state in ("missing", "directory"))
@@ -1760,3 +1807,65 @@ def test_run_report_generation_selects_scope_parse_workers(tmp_path, monkeypatch
     )
     run_report_generation(config, tmp_path / "output")
     assert captured["parse_workers"] == workers
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"), [(None, None), ("", None), ("n/a", None), ("-1", None), ("3", 3)]
+)
+def test_ctest_cost_data_metadata_preserves_unknown_environment(monkeypatch, raw_value, expected):
+    from object_store import PublishedObject
+    from test_report_plugin import build_ctest_cost_data_metadata
+
+    for variable in (
+        "BUILDKITE_BUILD_NUMBER",
+        "BUILDKITE_RETRY_COUNT",
+        "BUILDKITE_COMMAND_EXIT_STATUS",
+    ):
+        if raw_value is None:
+            monkeypatch.delenv(variable, raising=False)
+        else:
+            monkeypatch.setenv(variable, raw_value)
+    monkeypatch.delenv("BUILDKITE_STEP_KEY", raising=False)
+    config = PluginConfig(
+        scope="job",
+        title="Report",
+        variant="linux",
+        execution_name=None,
+        project_id="project",
+        git_ref="refs/heads/main",
+        build_id="build",
+        job_id="job",
+        build_url=None,
+        platforms=[],
+        only_failures=False,
+        annotate=False,
+        fail_on_test_failures=False,
+    )
+    metadata = build_ctest_cost_data_metadata(
+        config, PublishedObject("bucket", "cost-key", None, 12), {}
+    )
+    assert metadata["build_number"] == expected
+    assert metadata["retry_count"] == expected
+    assert metadata["command_exit_status"] == expected
+    assert metadata["step_key"] is None
+    assert metadata["selection"] is None
+    assert metadata["status_counts"] is None
+
+
+@pytest.mark.parametrize(("build_number", "step_key"), [(None, "test"), (42, None)])
+def test_ctest_cost_data_descriptor_requires_order_and_job_identity(
+    monkeypatch, build_number, step_key
+):
+    from object_store import ObjectAuth, StoreConfig
+    from test_report_plugin import publish_ctest_cost_data_descriptor
+
+    upload = MagicMock()
+    monkeypatch.setattr("test_report_plugin.put_json", upload)
+    context = ObjectStoreContext(
+        StoreConfig("s3", "s3://bucket/prefix"), ObjectAuth(), "bucket", "prefix"
+    )
+    result = publish_ctest_cost_data_descriptor(
+        {"build_number": build_number, "step_key": step_key}, "summary-key", context
+    )
+    assert result is None
+    upload.assert_not_called()

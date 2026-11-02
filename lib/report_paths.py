@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import quote
 
 from object_store import key_join
 
@@ -44,4 +45,26 @@ def build_report_location(
         summary_key=key_join(base_prefix, "summary.json"),
         xml_prefix=key_join(base_prefix, "xml"),
         artifact_prefix=key_join(base_prefix, "artifacts"),
+    )
+
+
+def build_ctest_cost_data_descriptor_key(
+    *,
+    destination_prefix: str,
+    project_id: str,
+    git_ref: str,
+    variant: str,
+    step_key: str,
+    build_number: int,
+    job_id: str,
+) -> str:
+    return key_join(
+        destination_prefix,
+        project_id,
+        git_ref,
+        "reports/ctest-cost/v1",
+        quote(variant, safe=""),
+        quote(step_key, safe=""),
+        str(build_number),
+        quote(job_id, safe="") + ".json",
     )

@@ -37,6 +37,7 @@ from object_store import (
     key_join,
     load_store_config,
     parse_s3,
+    put_json,
     resolve_object_auth,
     upload_file,
     upload_files,
@@ -49,7 +50,7 @@ from report_downloads import (
     collect_full_scope_xml,
 )
 from report_logging import configure_logging, logger, trace, trace_timings, traced
-from report_paths import build_report_location
+from report_paths import build_ctest_cost_data_descriptor_key, build_report_location
 from xml_inputs import XmlUpload, collect_job_xml_uploads
 
 
@@ -367,6 +368,66 @@ def upload_extra_artifacts(
     return list(grouped.values())
 
 
+def build_ctest_cost_data_metadata(
+    config: PluginConfig, cost_data: PublishedObject, summary: dict[str, Any]
+) -> dict[str, Any]:
+    metadata = {
+        "version": 1,
+        "key": cost_data.key,
+        "url": cost_data.url,
+        "size_bytes": cost_data.size_bytes,
+        "project_id": config.project_id,
+        "git_ref": config.git_ref,
+        "variant": config.variant,
+        "step_key": os.environ.get("BUILDKITE_STEP_KEY") or None,
+        "build_id": config.build_id,
+        "job_id": config.job_id,
+        "commit": config.commit,
+        "selection": sorted(set(config.ctest_cost_data_selection)) or None,
+        "status_counts": summary.get("status_counts"),
+    }
+    for field, variable in (
+        ("build_number", "BUILDKITE_BUILD_NUMBER"),
+        ("retry_count", "BUILDKITE_RETRY_COUNT"),
+        ("command_exit_status", "BUILDKITE_COMMAND_EXIT_STATUS"),
+    ):
+        value = os.environ.get(variable)
+        metadata[field] = None
+        if value not in (None, ""):
+            try:
+                number = int(value)
+                if number < 0 or (field == "build_number" and number == 0):
+                    raise ValueError("out of range")
+                metadata[field] = number
+            except ValueError:
+                warn(f"Invalid {variable}; CTest cost data metadata will mark it unknown")
+    return metadata
+
+
+def publish_ctest_cost_data_descriptor(
+    metadata: dict[str, Any], summary_key: str, context: ObjectStoreContext
+) -> PublishedObject | None:
+    if metadata["build_number"] is None or not metadata["step_key"]:
+        warn("Skipping CTest cost data discovery descriptor: build number or step key unavailable")
+        return None
+    key = build_ctest_cost_data_descriptor_key(
+        destination_prefix=context.prefix,
+        project_id=metadata["project_id"],
+        git_ref=metadata["git_ref"],
+        variant=metadata["variant"],
+        step_key=metadata["step_key"],
+        build_number=metadata["build_number"],
+        job_id=metadata["job_id"],
+    )
+    return put_json(
+        context.store_cfg,
+        context.auth,
+        context.bucket,
+        key,
+        dict(metadata, summary_key=summary_key),
+    )
+
+
 @traced("report.upload", category="uploads")
 def upload_report_artifacts(
     config: PluginConfig,
@@ -431,11 +492,9 @@ def upload_report_artifacts(
     if cost_data_path is not None:
         cost_data = published[-1]
         summary_data = json.loads(generation.summary_path.read_text())
-        summary_data["ctest_cost_data"] = {
-            "key": cost_data.key,
-            "url": cost_data.url,
-            "size_bytes": cost_data.size_bytes,
-        }
+        summary_data["ctest_cost_data"] = build_ctest_cost_data_metadata(
+            config, cost_data, summary_data
+        )
         generation.summary_path.write_text(json.dumps(summary_data, indent=2))
     # Publish the discovery manifest only after all report data uploads succeed.
     log(f"Uploading summary JSON to s3://{bucket}/{location.summary_key}")
@@ -453,6 +512,11 @@ def upload_report_artifacts(
         results["xml_archive"] = published[1]
     if cost_data_path is not None:
         results["ctest_cost_data"] = published[-1]
+        descriptor = publish_ctest_cost_data_descriptor(
+            summary_data["ctest_cost_data"], location.summary_key, context
+        )
+        if descriptor is not None:
+            results["ctest_cost_data_descriptor"] = descriptor
 
     return results
 

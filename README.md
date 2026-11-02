@@ -85,6 +85,36 @@ The object therefore inherits the report's project, branch/tag, build, variant,
 and job isolation. `summary.json` records its object `key`, `url` (when available),
 and `size_bytes` under `ctest_cost_data` only after the upload succeeds.
 
+The version 1 metadata also records the project, git ref, variant, build/job IDs,
+commit, stable `BUILDKITE_STEP_KEY`, numeric `BUILDKITE_BUILD_NUMBER`,
+`BUILDKITE_RETRY_COUNT`, `BUILDKITE_COMMAND_EXIT_STATUS`, and report `status_counts`.
+Missing or invalid numeric environment values are stored as `null`, never assumed
+successful. Invalid values log a warning.
+
+Supply `job.ctest_cost_data_selection` as an array describing the exact selected
+test set, for example `["bk-suite:unit", "bk-suite:regression"]`. Values are sorted
+and deduplicated. Include any additional filters in these identifiers; the plugin
+does not infer selection from test results or QuasarDB-specific environment
+variables. Omission records `selection: null`, meaning unknown coverage.
+
+After the cost file and summary are uploaded successfully, the plugin publishes
+an immutable discovery descriptor at:
+
+```text
+<destination-prefix>/<project>/<git-ref>/reports/ctest-cost/v1/<variant>/<step-key>/<build-number>/<job-id>.json
+```
+
+Variant, step key, and job ID are URL-encoded as individual path segments. The
+descriptor contains the same metadata plus `summary_key`, referencing the existing
+report and standalone cost file without duplicating their payloads. Different
+builds, steps, and retry jobs have separate descriptors; there is no mutable
+`latest` pointer. If the build number or step key is unavailable, archival still
+succeeds but descriptor publication is skipped with a warning. Failed test runs
+also get descriptors when these identifiers are present; future retrieval must
+check the recorded status and selection rather than treating discovery as proof
+that a snapshot is reusable. Descriptor upload errors follow the report-upload
+failure policy.
+
 Snapshots are archived even when tests fail, preserving CTest's failure section.
 A missing file logs a warning and does not fail the report. Upload errors follow
 the existing report-upload failure policy. Aggregate reports do not upload cost

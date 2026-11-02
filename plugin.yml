@@ -50,6 +50,12 @@ configuration:
         ctest_cost_data_path:
           type: string
           description: Optional single CTestCostData.txt file to archive unchanged beside the job summary. Missing files warn without failing the report.
+        ctest_cost_data_selection:
+          type: array
+          items:
+            type: string
+            minLength: 1
+          description: Optional identifiers for the exact test selection, such as CTest suite labels. Stored sorted and deduplicated; omission means unknown coverage.
         manifest_input_path:
           type: string
           description: Optional version 1 launcher manifests (file, directory, or glob), with explicit report and artifact associations.

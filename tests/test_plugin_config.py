@@ -282,3 +282,19 @@ def test_explicit_parse_workers_respect_platform_limit(monkeypatch, platform, re
         "plugin_config.os", SimpleNamespace(name=platform, cpu_count=lambda: 8, environ=os.environ)
     )
     assert load_plugin_config().aggregate_parse_workers == expected
+
+
+def test_ctest_cost_data_selection_is_explicit_and_normalized(monkeypatch):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT", "linux")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_JUNIT_INPUT_PATH", "junit.xml")
+    monkeypatch.setenv("BUILDKITE_JOB_ID", "job-id")
+    assert load_plugin_config().ctest_cost_data_selection == []
+    for index, label in enumerate(["bk-suite:unit", "bk-suite:regression", "bk-suite:unit"]):
+        monkeypatch.setenv(
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_CTEST_COST_DATA_SELECTION_" + str(index), label
+        )
+    assert load_plugin_config().ctest_cost_data_selection == [
+        "bk-suite:regression",
+        "bk-suite:unit",
+    ]
