@@ -1238,7 +1238,7 @@ def test_cli_writes_summary_json(tmp_path):
 
 
 def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
-    from annotations import build_annotation_body
+    from annotations import build_annotation_body, build_report_timing_annotation_body
     from junit_html_report import generate_html_report
 
     linux = write(
@@ -1277,7 +1277,8 @@ def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
     assert summary["report_durations_seconds"] == {"tests": 65}
     body = build_annotation_body("Tests", summary, None)
     assert "**Cumulative test time: 01m 05s**" in body
-    assert body.endswith("| tests | 01m 05s |\n")
+    timing_body = build_report_timing_annotation_body("Tests", summary, None)
+    assert timing_body.endswith("| tests | 01m 05s |\n")
     assert "| suite::tests | S::bad | Expected 42 |" in body
     assert body.count("| suite::tests | S::bad |") == 1
     assert "ERRORED: Timeout" not in body
@@ -1287,7 +1288,7 @@ def test_summary_failure_cases_feed_annotation_across_targets(tmp_path):
 
 
 def test_summary_report_durations_group_suites_and_targets(tmp_path):
-    from annotations import build_annotation_body
+    from annotations import build_report_timing_annotation_body
     from junit_html_report import generate_html_report
 
     linux = tmp_path / "linux"
@@ -1313,7 +1314,7 @@ def test_summary_report_durations_group_suites_and_targets(tmp_path):
     summary = json.loads(summary_path.read_text())
     assert summary["report_durations_seconds"] == {"a": 40, "b": 20, "c": 5}
     assert sum(summary["report_durations_seconds"].values()) == summary["duration_seconds"]
-    body = build_annotation_body("Tests", summary, None)
+    body = build_report_timing_annotation_body("Tests", summary, None)
     assert body.endswith("| a | 40s |\n| b | 20s |\n| c | 05s |\n")
 
 

@@ -2,7 +2,12 @@ from html import unescape
 
 import annotations
 import pytest
-from annotations import build_annotation_body, get_annotation_style, get_job_annotation_style
+from annotations import (
+    build_annotation_body,
+    build_report_timing_annotation_body,
+    get_annotation_style,
+    get_job_annotation_style,
+)
 
 
 def failed_case(name="Class::test", status="FAILED", platform="linux"):
@@ -34,58 +39,58 @@ def test_annotation_omits_unavailable_cumulative_test_time(summary):
     assert "Cumulative test time" not in build_annotation_body("Tests", summary, None)
 
 
-@pytest.mark.parametrize("scope", ["build", "job"])
-def test_report_timing_table_follows_failures(scope):
+def test_report_timing_table_has_distinct_annotation():
     summary = {
         "duration_seconds": 3665,
         "report_durations_seconds": {"unit": 65, "integration": 3600},
         "failed_test_cases": [failed_case()],
     }
-    body = build_annotation_body("Tests", summary, "https://example.com/report", scope=scope)
+    body = build_report_timing_annotation_body("Tests", summary, "https://example.com/report")
     table = "### Cumulative test time per report"
-    assert body.index("Class::test") < body.index(table)
+    assert table in body
+    assert "Class::test" not in body
+    assert "Open full report" in body
+    assert table not in build_annotation_body("Tests", summary, None)
     assert body.endswith("| integration | 1h 00m 00s |\n| unit | 01m 05s |\n")
 
 
 def test_report_timing_table_escapes_names_without_failures():
     summary = {"report_durations_seconds": {"<script>|`*_[x]~\\\nnext": 1}}
-    body = build_annotation_body("Tests", summary, None)
+    body = build_report_timing_annotation_body("Tests", summary, None)
     assert "| &lt;script&gt;&#124;&#96;&#42;&#95;&#91;x&#93;&#126;&#92; next | 01s |" in body
     assert "<script>" not in body
 
 
 @pytest.mark.parametrize("summary", [{}, {"suite_durations_seconds": {"qdb_old": 10}}])
 def test_report_timing_table_omits_old_summaries(summary):
-    assert "| Report | Cumulative test time |" not in build_annotation_body("Tests", summary, None)
+    assert build_report_timing_annotation_body("Tests", summary, None) == ""
 
 
-@pytest.mark.parametrize("scope", ["build", "job"])
-def test_report_timing_table_threshold_and_name_tiebreaker(scope):
+def test_report_timing_table_threshold_and_name_tiebreaker():
     summary = {
         "duration_seconds": 66,
         "report_durations_seconds": {"tiny": 0.9999, "zero": 0, "z": 1, "a": 1, "slow": 60},
     }
-    body = build_annotation_body("Tests", summary, None, scope=scope)
-    assert "**Cumulative test time: 01m 06s**" in body
+    body = build_report_timing_annotation_body("Tests", summary, None)
+    assert "**Cumulative test time:" not in body
     assert body.endswith("| slow | 01m 00s |\n| a | 01s |\n| z | 01s |\n")
     assert "tiny" not in body
     assert "zero" not in body
     assert "omitted" not in body
     summary["report_durations_seconds"] = {"tiny": 0.9999, "zero": 0}
-    assert "### Cumulative test time per report" not in build_annotation_body(
+    assert "### Cumulative test time per report" not in build_report_timing_annotation_body(
         "Tests", summary, None
     )
 
 
-def test_report_timing_table_preserves_failures_and_byte_limit(monkeypatch):
+def test_report_timing_table_has_independent_byte_limit(monkeypatch):
     summary = {
         "failed_test_cases": [failed_case()],
         "report_durations_seconds": {"a" * 1000: 4, "測試🙂": 3, "z": 2, "tiny": 0.9},
     }
-    base = build_annotation_body("Tests", {"failed_test_cases": [failed_case()]}, None)
-    monkeypatch.setattr(annotations, "MAX_ANNOTATION_BYTES", len(base.encode("utf-8")) + 210)
-    body = build_annotation_body("Tests", summary, None)
-    assert base in body
+    monkeypatch.setattr(annotations, "MAX_ANNOTATION_BYTES", 220)
+    body = build_report_timing_annotation_body("Tests", summary, None)
+    assert "Class::test" not in body
     assert "| 測試🙂 | 03s |" in body
     assert "1 additional reports omitted" in body
     assert len(body.encode("utf-8")) <= annotations.MAX_ANNOTATION_BYTES
@@ -95,7 +100,9 @@ def test_report_timing_table_preserves_failures_and_byte_limit(monkeypatch):
 def test_report_timing_table_applies_limit_after_sorting(limit, shown, omitted):
     summary = {"report_durations_seconds": {f"report{i:02d}": i + 1 for i in range(25)}}
     options = {"annotation_report_limit": limit} if limit is not None else {}
-    body = build_annotation_body("Tests", summary, "https://example.com/report", **options)
+    body = build_report_timing_annotation_body(
+        "Tests", summary, "https://example.com/report", **options
+    )
     assert body.count("| report") == shown
     assert body.index("| report24 |") < body.index("| report23 |")
     assert f"| report{25 - shown:02d} |" in body
