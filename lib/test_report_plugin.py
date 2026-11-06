@@ -19,6 +19,7 @@ if tools_path not in sys.path:
 import junit_html_report
 from annotations import (
     build_annotation_body,
+    build_report_timing_annotation_body,
     create_buildkite_annotation,
     get_annotation_style,
     get_job_annotation_style,
@@ -709,7 +710,6 @@ def main() -> int:
                         summary,
                         html_url,
                         scope=config.scope,
-                        annotation_report_limit=config.annotation_report_limit,
                     )
                     if config.scope == "job":
                         context = f"test-report:{config.variant}:{config.job_id}"
@@ -718,6 +718,20 @@ def main() -> int:
                         context = "test-report:full"
                         create_buildkite_annotation(
                             body, context, style, priority=10, scope="build"
+                        )
+                    timing_body = build_report_timing_annotation_body(
+                        config.title,
+                        summary,
+                        html_url,
+                        annotation_report_limit=config.annotation_report_limit,
+                    )
+                    if timing_body:
+                        create_buildkite_annotation(
+                            timing_body,
+                            f"{context}:report-timings",
+                            "info",
+                            priority=5,
+                            scope="job" if config.scope == "job" else "build",
                         )
 
             # Exit with failure code if any test failed or errored and fail_on_test_failures is true

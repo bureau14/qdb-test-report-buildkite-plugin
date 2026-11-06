@@ -463,7 +463,8 @@ def test_main_job_logs_uploaded_html_url(
         assert "FATAL Test report plugin failed: upload failed" in stderr
 
 
-def test_main_job_annotation_context(monkeypatch, tmp_path):
+@pytest.mark.parametrize("timings", [{}, {"unit": 65}])
+def test_main_job_annotation_context(monkeypatch, tmp_path, timings):
     xml_dir = tmp_path / "xml"
     xml_dir.mkdir()
     (xml_dir / "test.xml").write_text("<testsuites />", encoding="utf-8")
@@ -487,7 +488,15 @@ def test_main_job_annotation_context(monkeypatch, tmp_path):
         summary_path = output_dir / "summary.json"
         html_path.write_text("html", encoding="utf-8")
         summary_path.write_text(
-            '{"root_status":"SUCCESSFUL","logical_tests":0,"targets":1,"status_counts":{}}',
+            json.dumps(
+                {
+                    "root_status": "SUCCESSFUL",
+                    "logical_tests": 0,
+                    "targets": 1,
+                    "status_counts": {},
+                    "report_durations_seconds": timings,
+                }
+            ),
             encoding="utf-8",
         )
         return GenerationResult(html_path=html_path, summary_path=summary_path)
@@ -515,7 +524,13 @@ def test_main_job_annotation_context(monkeypatch, tmp_path):
     )
 
     assert main() == 0
-    assert annotations == [(annotations[0][0], "test-report:linux:job-1", "warning", 10, "job")]
+    assert annotations[0][1:] == ("test-report:linux:job-1", "warning", 10, "job")
+    assert "Cumulative test time per report" not in annotations[0][0]
+    assert len(annotations) == (2 if timings else 1)
+    if timings:
+        assert annotations[1][1:] == ("test-report:linux:job-1:report-timings", "info", 5, "job")
+        assert "| unit | 01m 05s |" in annotations[1][0]
+        assert "Open full report" in annotations[1][0]
     assert "Open full report" in annotations[0][0]
 
 
@@ -882,7 +897,8 @@ def test_main_full_defaults_to_ignore_failed_tests_for_exit_status(monkeypatch, 
     assert main() == 0
 
 
-def test_main_full_annotation_context(monkeypatch, tmp_path, capsys):
+@pytest.mark.parametrize("timings", [{}, {"unit": 65}])
+def test_main_full_annotation_context(monkeypatch, tmp_path, capsys, timings):
     xml_dir = tmp_path / "xml"
     xml_dir.mkdir()
     (xml_dir / "test.xml").write_text("<testsuites />", encoding="utf-8")
@@ -938,7 +954,15 @@ def test_main_full_annotation_context(monkeypatch, tmp_path, capsys):
         summary_path = output_dir / "summary.json"
         html_path.write_text("html", encoding="utf-8")
         summary_path.write_text(
-            '{"root_status":"SUCCESSFUL","logical_tests":0,"targets":1,"status_counts":{}}',
+            json.dumps(
+                {
+                    "root_status": "SUCCESSFUL",
+                    "logical_tests": 0,
+                    "targets": 1,
+                    "status_counts": {},
+                    "report_durations_seconds": timings,
+                }
+            ),
             encoding="utf-8",
         )
         return GenerationResult(html_path=html_path, summary_path=summary_path)
@@ -966,7 +990,13 @@ def test_main_full_annotation_context(monkeypatch, tmp_path, capsys):
     )
 
     assert main() == 0
-    assert annotations == [(annotations[0][0], "test-report:full", "success", 10, "build")]
+    assert annotations[0][1:] == ("test-report:full", "success", 10, "build")
+    assert "Cumulative test time per report" not in annotations[0][0]
+    assert len(annotations) == (2 if timings else 1)
+    if timings:
+        assert annotations[1][1:] == ("test-report:full:report-timings", "info", 5, "build")
+        assert "| unit | 01m 05s |" in annotations[1][0]
+        assert "Open full report" in annotations[1][0]
     stderr = capsys.readouterr().err
     assert stderr.count("Timing summary:") == 1
     assert stderr.splitlines()[-1].startswith("Timing summary: total=")
