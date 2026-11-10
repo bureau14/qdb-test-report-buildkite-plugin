@@ -176,6 +176,32 @@ cost files to 4 MiB. These bounds can result in cold scheduling even when older
 matching history exists. Use `log_level: info` to see the selected source build
 and job. Retrieval does not require a Buildkite API token.
 
+### Combined build-and-test jobs
+
+The same archive and restore settings work when compilation, packaging, and tests
+run in one Buildkite job. The pre-command hook restores before compilation; use
+a checkout-relative staging path such as `test-results/ctest-cost/CTestCostData.txt`
+that survives build-directory cleanup. Install it in the main CTest directory
+only after compilation and configuration, immediately before the test invocation.
+The post-command hook archives the updated file directly from the build tree;
+no binary package upload or download is needed for cost history.
+
+For the current QuasarDB layout, use
+`build/<configure-preset>/Testing/Temporary/CTestCostData.txt` as the archive path.
+Python integration has a separate CTest directory and protocol compatibility runs
+separately. An experiment covering only the main CTest invocation should list
+only its suite labels in `ctest_cost_data_selection`, with a scope identifier
+such as `ctest-root:main`; omit these other selections. This avoids publishing
+Python-only or protocol-only runs as main-suite history. Use distinct variants
+for architecture, build type, linkage, and sanitizer configuration.
+
+A combined job's exit status covers the whole build/package/test command. Its
+cost snapshot is reusable only if that command and its reported tests succeeded.
+Changing the Buildkite step key (for example, from `test-...` to `build-...`)
+starts a new history namespace. The first successful run seeds it; repeat the
+same branch and selection to exercise restoration. Use `log_level: info` to
+retain the source build/job message and compare archived run counts on the repeat.
+
 ### Launcher execution manifests
 
 Set `job.manifest_input_path: "test-metadata/*.json"` to collect results from the
