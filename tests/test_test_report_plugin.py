@@ -1695,3 +1695,74 @@ def test_run_report_generation_selects_scope_parse_workers(tmp_path, monkeypatch
     )
     run_report_generation(config, tmp_path / "output")
     assert captured["parse_workers"] == workers
+
+
+@pytest.mark.parametrize("full", [False, True])
+@pytest.mark.parametrize("failed", [False, True])
+def test_job_full_reuses_report_and_preserves_failures(monkeypatch, tmp_path, full, failed):
+    from object_store import PublishedObject
+
+    xml = tmp_path / "results.xml"
+    xml.write_text(
+        '<testsuite name="suite"><testcase name="case">'
+        + ('<failure message="broken" />' if failed else "")
+        + "</testcase></testsuite>",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "os.environ",
+        {
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE": "Tests",
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT": "linux",
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_JUNIT_INPUT_PATH": str(xml),
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_FULL": str(full),
+            "BUILDKITE_PIPELINE_SLUG": "project",
+            "BUILDKITE_BUILD_ID": "build-1",
+            "BUILDKITE_JOB_ID": "job-1",
+            "BUILDKITE_BRANCH": "main",
+            "BUILDKITE_COMMAND_EXIT_STATUS": "1" if failed else "0",
+        },
+    )
+    generate = MagicMock(wraps=run_report_generation)
+    monkeypatch.setattr("test_report_plugin.run_report_generation", generate)
+    downloads = MagicMock(side_effect=AssertionError("job must not download XML"))
+    monkeypatch.setattr("test_report_plugin.collect_full_scope_xml", downloads)
+    uploads = []
+
+    def capture_upload(config, generation, xml_uploads, store_context=None):
+        uploads.append(
+            (
+                config.scope,
+                generation.html_path.read_bytes(),
+                json.loads(generation.summary_path.read_text()),
+                len(xml_uploads),
+            )
+        )
+        return {
+            "html": PublishedObject(
+                "bucket",
+                config.scope + "/index.html",
+                "https://reports.example.com/" + config.scope,
+                1,
+            )
+        }
+
+    monkeypatch.setattr("test_report_plugin.upload_report_artifacts", capture_upload)
+    annotate = MagicMock()
+    monkeypatch.setattr("test_report_plugin.create_buildkite_annotation", annotate)
+    assert main() == (64 if failed else 0)
+    assert generate.call_count == 1
+    downloads.assert_not_called()
+    assert [item[0] for item in uploads] == (["job", "aggregate"] if full else ["job"])
+    assert uploads[0][3] == 1
+    assert annotate.call_count == (2 if full else 1)
+    if full:
+        assert uploads[0][1] == uploads[1][1]
+        assert uploads[1][3] == 0
+        assert uploads[1][2]["discovered_xml"] == {"variants": 1, "jobs": 1, "files": 1}
+        assert uploads[1][2]["job_artifacts"] == [
+            {"variant": "linux", "job_id": "job-1", "artifacts": []}
+        ]
+        call = annotate.call_args
+        assert call[0][1:3] == ("test-report:full", "error" if failed else "success")
+        assert call[1]["scope"] == "build"

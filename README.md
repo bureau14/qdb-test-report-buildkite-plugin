@@ -115,6 +115,12 @@ plugins:
 
 ### Aggregate report
 
+For a build with exactly one reporting job, set `full: true` alongside its `job`
+block. The plugin uploads the normal job report and reuses its generated HTML and
+summary for the full-build report, including the build-level annotation. It does
+not download XML or regenerate the report. Job failure handling and artifact links
+are preserved. Do not enable this on multiple jobs in the same build.
+
 Configure an empty `aggregate` block in a later step. The aggregate step discovers all raw XML uploaded by earlier job-report steps for the same Buildkite build.
 
 ```yaml
@@ -195,6 +201,7 @@ plugins:
 | --- | --- | :---: | --- |
 | `title` | string | ✓ | Report title shown in the HTML UI and annotation. |
 | `job` | object | job or aggregate | Per-job report/XML upload configuration. Configure exactly one of `job` or `aggregate`. |
+| `full` | boolean | optional | Also publish a job report as the full-build report; defaults to false and requires `job`. |
 | `aggregate` | object | job or aggregate | Enables aggregate report mode. Configure exactly one of `job` or `aggregate`. |
 | `execution_name` | string |  | Optional top-level execution name in the report. Defaults to the report title in the standalone generator. |
 | `project_id` | string |  | Object-store project namespace. Defaults to `BUILDKITE_PIPELINE_SLUG`. |

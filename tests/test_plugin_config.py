@@ -278,3 +278,20 @@ def test_explicit_parse_workers_respect_platform_limit(monkeypatch, platform, re
         "plugin_config.os", SimpleNamespace(name=platform, cpu_count=lambda: 8, environ=os.environ)
     )
     assert load_plugin_config().aggregate_parse_workers == expected
+
+
+@pytest.mark.parametrize("full", [False, True])
+def test_job_full_option(monkeypatch, full):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT", "linux")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_JUNIT_INPUT_PATH", "reports")
+    monkeypatch.setenv("BUILDKITE_JOB_ID", "job-1")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_FULL", str(full))
+    assert load_plugin_config().full is full
+
+
+def test_full_requires_job(monkeypatch):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_FULL", "true")
+    with pytest.raises(ValueError, match="full requires job"):
+        load_plugin_config()

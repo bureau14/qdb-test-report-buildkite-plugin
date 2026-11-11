@@ -681,6 +681,25 @@ def main() -> int:
             uploads = upload_report_artifacts(
                 config, generation, xml_uploads, store_context=store_context
             )
+            full_uploads = None
+            if config.full:
+                add_summary_metadata(
+                    generation.summary_path,
+                    discovered_xml={"variants": 1, "jobs": 1, "files": len(xml_uploads)},
+                    job_artifacts=[
+                        {
+                            "variant": config.variant,
+                            "job_id": config.job_id,
+                            "artifacts": artifact_metadata,
+                        }
+                    ],
+                )
+                full_uploads = upload_report_artifacts(
+                    replace(config, scope="aggregate", full=False),
+                    generation,
+                    [],
+                    store_context=store_context,
+                )
             html_upload = uploads.get("html")
             if html_upload is not None:
                 if html_upload.url:
@@ -733,6 +752,29 @@ def main() -> int:
                             priority=5,
                             scope="job" if config.scope == "job" else "build",
                         )
+
+            if config.annotate and full_uploads is not None:
+                full_html = full_uploads.get("html")
+                full_url = full_html.url if full_html is not None else None
+                style = get_job_annotation_style(summary)
+                if (
+                    full_url
+                    or style == "warning"
+                    or summary.get("malformed_junit_xml")
+                    or summary.get("junit_archive_errors")
+                ):
+                    create_buildkite_annotation(
+                        build_annotation_body(
+                            config.title,
+                            summary,
+                            full_url,
+                            scope="aggregate",
+                        ),
+                        "test-report:full",
+                        style,
+                        priority=10,
+                        scope="build",
+                    )
 
             # Exit with failure code if any test failed or errored and fail_on_test_failures is true
             status_counts = summary.get("status_counts", {})

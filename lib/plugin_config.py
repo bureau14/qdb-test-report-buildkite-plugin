@@ -51,6 +51,7 @@ class PluginConfig:
     log_level: str = "error"
     upload_parallel: int = field(default_factory=lambda: os.cpu_count() or 1)
     annotation_report_limit: int = 20
+    full: bool = False
 
 
 def _get_env(key: str, default: str | None = None) -> str | None:
@@ -132,6 +133,9 @@ def load_plugin_config() -> PluginConfig:
     has_job = _has_env_with_prefix(job_prefix)
 
     scope = "job" if has_job else "aggregate"
+    full = _get_bool_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_FULL", False)
+    if full and not has_job:
+        raise ValueError("full requires job configuration")
 
     execution_name = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_EXECUTION_NAME")
 
@@ -207,6 +211,7 @@ def load_plugin_config() -> PluginConfig:
 
     return PluginConfig(
         scope=scope,
+        full=full,
         title=title,
         variant=variant,
         execution_name=execution_name,
