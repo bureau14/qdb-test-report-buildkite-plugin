@@ -730,7 +730,7 @@ def main() -> int:
             # Preserve malformed-input diagnostics even when no public HTML URL is available.
             if config.annotate:
                 html_url = html_upload.url if html_upload is not None else None
-                if config.scope != "aggregate":
+                if config.scope == "job":
                     style = get_job_annotation_style(summary)
                 else:
                     style = get_annotation_style(summary)
@@ -748,7 +748,7 @@ def main() -> int:
                         config.title,
                         summary,
                         html_url,
-                        scope="job" if config.scope != "aggregate" else "aggregate",
+                        scope="job" if config.scope == "job" else "build",
                     )
                     if config.scope == "job":
                         context = f"test-report:{config.variant}:{config.job_id}"

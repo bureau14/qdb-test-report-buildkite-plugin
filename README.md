@@ -5,7 +5,7 @@ A [Buildkite plugin](https://buildkite.com/docs/plugins) for generating self-con
 ## What it does
 
 - **Job report** — after a test step finishes, reads that job's local JUnit XML from `job.junit_input_path`, generates a per-job HTML report, uploads the HTML/summary/raw XML, and optionally fails the step when tests failed.
-- **Full report** � reads local inputs like job mode, but publishes a single full-build HTML report and build-scoped annotations. Use when the build has exactly one reporting job.
+- **Full report** - reads local inputs like job mode, but publishes a single full-build HTML report and build-scoped annotations. Use when the build has exactly one reporting job.
 - **Aggregate report** — in a later reporting step, discovers XML uploaded by earlier job-report steps for the current build, downloads it, generates one aggregate HTML report, and uploads the aggregate HTML/summary.
 
 Each platform-execution leaf is labeled `{test name} - {platform}`, preserving test identity in the sidebar and detail header. When `ARTIFACTS_DOMAIN` is configured, its Source panel links `JUnit XML` directly to the exact raw XML that produced the selected execution. Without a browser-facing artifacts domain, the XML name remains visible but is not made clickable.

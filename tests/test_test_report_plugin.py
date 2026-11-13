@@ -1719,19 +1719,27 @@ def test_run_report_generation_selects_scope_parse_workers(tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize("mode", ["job", "full"])
-@pytest.mark.parametrize("failed", [False, True])
+@pytest.mark.parametrize("status", ["passed", "failed", "skipped"])
 @pytest.mark.parametrize("timings", [False, True])
 def test_local_report_generates_once_with_correct_annotation_scope(
-    monkeypatch, tmp_path, mode, failed, timings
+    monkeypatch, tmp_path, mode, status, timings
 ):
     from object_store import PublishedObject
+
+    failed = status == "failed"
 
     xml = tmp_path / "results.xml"
     xml.write_text(
         '<testsuite name="suite"><testcase name="case" time="'
         + ("2" if timings else "0")
         + '">'
-        + ('<failure message="broken" />' if failed else "")
+        + (
+            '<failure message="broken" />'
+            if failed
+            else "<skipped />"
+            if status == "skipped"
+            else ""
+        )
         + "</testcase></testsuite>",
         encoding="utf-8",
     )
@@ -1781,7 +1789,13 @@ def test_local_report_generates_once_with_correct_annotation_scope(
     context = "test-report:full" if mode == "full" else "test-report:linux:job-1"
     scope = "build" if mode == "full" else "job"
     call = annotate.call_args_list[0]
-    assert call[0][1:3] == (context, "error" if failed else "success")
+    expected_style = (
+        "error" if failed else "warning" if mode == "job" and status == "skipped" else "success"
+    )
+    assert call[0][1:3] == (context, expected_style)
+    assert ("This job report has 0 passing tests." in call[0][0]) == (
+        mode == "job" and status in ("failed", "skipped")
+    )
     assert call[1]["scope"] == scope
     if timings:
         call = annotate.call_args_list[1]
