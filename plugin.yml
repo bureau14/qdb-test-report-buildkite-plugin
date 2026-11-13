@@ -37,13 +37,9 @@ configuration:
       type: integer
       minimum: 1
       description: Maximum concurrent file uploads with one reused client per worker. Defaults to the agent's logical CPU count; use 1 for serial uploads.
-    full:
-      type: boolean
-      default: false
-      description: Also publish this job report as the full-build report. Use only when this is the build's only reporting job.
-    job:
+    job: &local_report
       type: object
-      description: Per-job report and raw JUnit XML upload configuration.
+      description: Local JUnit XML, launcher manifests, and artifact upload configuration.
       properties:
         variant:
           type: string
@@ -76,6 +72,7 @@ configuration:
         - required: [junit_input_path]
         - required: [manifest_input_path]
       additionalProperties: false
+    full: *local_report
     aggregate:
       type: object
       description: Aggregate report configuration that discovers raw XML uploaded by job reports for the current build.
@@ -95,11 +92,5 @@ configuration:
   additionalProperties: false
   oneOf:
     - required: [job]
-      not:
-        required: [aggregate]
+    - required: [full]
     - required: [aggregate]
-      properties:
-        full:
-          enum: [false]
-      not:
-        required: [job]

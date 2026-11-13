@@ -5,6 +5,7 @@ A [Buildkite plugin](https://buildkite.com/docs/plugins) for generating self-con
 ## What it does
 
 - **Job report** — after a test step finishes, reads that job's local JUnit XML from `job.junit_input_path`, generates a per-job HTML report, uploads the HTML/summary/raw XML, and optionally fails the step when tests failed.
+- **Full report** � reads local inputs like job mode, but publishes a single full-build HTML report and build-scoped annotations. Use when the build has exactly one reporting job.
 - **Aggregate report** — in a later reporting step, discovers XML uploaded by earlier job-report steps for the current build, downloads it, generates one aggregate HTML report, and uploads the aggregate HTML/summary.
 
 Each platform-execution leaf is labeled `{test name} - {platform}`, preserving test identity in the sidebar and detail header. When `ARTIFACTS_DOMAIN` is configured, its Source panel links `JUnit XML` directly to the exact raw XML that produced the selected execution. Without a browser-facing artifacts domain, the XML name remains visible but is not made clickable.
@@ -14,7 +15,8 @@ The self-contained report supports case-insensitive sidebar search without a ser
 Configure exactly one mode per plugin invocation:
 
 - `job` requires `variant` and at least one of `junit_input_path` or `manifest_input_path`.
-- `aggregate` enables full-build report mode; optional download settings tune aggregate XML fetch concurrency.
+- `full` uses the same local-input options as `job`, publishing directly as the full-build report.
+- `aggregate` combines previously uploaded job reports; optional download settings tune aggregate XML fetch concurrency.
 
 Common report options such as `title`, `only_failures`, `annotate`, and `project_id` stay at the plugin top level.
 
@@ -113,13 +115,29 @@ plugins:
         fail_on_test_failures: false
 ```
 
-### Aggregate report
+### Full report
 
-For a build with exactly one reporting job, set `full: true` alongside its `job`
-block. The plugin uploads the normal job report and reuses its generated HTML and
-summary for the full-build report, including the build-level annotation. It does
-not download XML or regenerate the report. Job failure handling and artifact links
-are preserved. Do not enable this on multiple jobs in the same build.
+For a build with exactly one reporting job, configure `full` instead of `job`.
+It accepts the same local XML, manifest, artifact, and failure-policy options:
+
+```yaml
+plugins:
+  - bureau14/qdb-test-report#master:
+      title: "Full test report"
+      full:
+        variant: freebsd-haswell-shared-debug
+        junit_input_path: "**/test-reports/**/*.xml"
+        manifest_input_path: "test-metadata/*.json"
+```
+
+Configure exactly one of `job`, `full`, or `aggregate`. Full mode generates one
+HTML report at `full/index.html` and publishes the result and optional timing
+annotations at build scope, without duplicate job annotations or downloading XML.
+It retains per-job XML, logs, and a summary publication marker for Test Health;
+`full/summary.json` also records the contributing variant and job. It does not
+publish a second job HTML report. Test failures still fail the job by default.
+
+### Aggregate report
 
 Configure an empty `aggregate` block in a later step. The aggregate step discovers all raw XML uploaded by earlier job-report steps for the same Buildkite build.
 
@@ -169,7 +187,7 @@ If no XML is discovered, aggregate mode:
 
 ### Generate a smaller failures-only report
 
-Set `only_failures: true` in either mode to generate an HTML tree containing only failed/errored tests while keeping full summary counts:
+Set `only_failures: true` in any mode to generate an HTML tree containing only failed/errored tests while keeping full summary counts:
 
 ```yaml
 plugins:
@@ -200,9 +218,9 @@ plugins:
 | Key | Type | Required | Description |
 | --- | --- | :---: | --- |
 | `title` | string | ✓ | Report title shown in the HTML UI and annotation. |
-| `job` | object | job or aggregate | Per-job report/XML upload configuration. Configure exactly one of `job` or `aggregate`. |
-| `full` | boolean | optional | Also publish a job report as the full-build report; defaults to false and requires `job`. |
-| `aggregate` | object | job or aggregate | Enables aggregate report mode. Configure exactly one of `job` or `aggregate`. |
+| `job` | object | one mode required | Local inputs with a per-job report and annotations. |
+| `full` | object | one mode required | Same local-input options as `job`, with a full-build report and build-scoped annotations. |
+| `aggregate` | object | one mode required | Combine uploaded job reports. Configure exactly one of `job`, `full`, or `aggregate`. |
 | `execution_name` | string |  | Optional top-level execution name in the report. Defaults to the report title in the standalone generator. |
 | `project_id` | string |  | Object-store project namespace. Defaults to `BUILDKITE_PIPELINE_SLUG`. |
 | `only_failures` | boolean |  | Generate an HTML tree containing only failures/errors while keeping full summary counts. Default: `false`. |
@@ -211,7 +229,7 @@ plugins:
 | `log_level` | string |  | Minimum message severity: `debug`, `info`, `warning`, `error`, or `fatal`. Default: `error` (quiet; errors and fatal messages only). |
 | `upload_parallel` | integer |  | Maximum simultaneous file uploads. Defaults to the agent's logical CPU count (or `1` if unavailable); use `1` for serial uploads. Applies to additional artifacts and HTML/XML uploads. |
 
-### `job` object keys
+### `job` and `full` object keys
 
 | Key | Type | Required | Description |
 | --- | --- | :---: | --- |
