@@ -57,6 +57,18 @@ def report_timing_table(summary: dict, available_bytes: int, report_limit: int =
     return table if len(table.encode("utf-8")) <= available_bytes else ""
 
 
+def build_report_timing_annotation_body(
+    title: str, summary: dict, html_url: str | None, annotation_report_limit: int = 20
+) -> str:
+    body = f"## {title}"
+    if html_url:
+        body += f'\n\n<a href="{html_url}" target="_blank" rel="noopener noreferrer">Open full report</a>'
+    table = report_timing_table(
+        summary, MAX_ANNOTATION_BYTES - len(body.encode("utf-8")), annotation_report_limit
+    )
+    return body + table if table else ""
+
+
 def failed_test_table(summary: dict, available_bytes: int) -> str:
     cases = []
     seen = set()
@@ -185,7 +197,6 @@ def build_annotation_body(
     summary: dict,
     html_url: str | None,
     scope: str = "build",
-    annotation_report_limit: int = 20,
 ) -> str:
     """
     Builds the markdown body for the Buildkite annotation.
@@ -248,9 +259,6 @@ def build_annotation_body(
     if html_url:
         body += f'\n\n<a href="{html_url}" target="_blank" rel="noopener noreferrer">Open full report</a>'
     body += failed_test_table(summary, MAX_ANNOTATION_BYTES - len(body.encode("utf-8")))
-    body += report_timing_table(
-        summary, MAX_ANNOTATION_BYTES - len(body.encode("utf-8")), annotation_report_limit
-    )
     return body
 
 
