@@ -128,10 +128,17 @@ def load_plugin_config() -> PluginConfig:
     if not title:
         raise ValueError("missing required config: title")
 
-    job_prefix = "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB"
-    has_job = _has_env_with_prefix(job_prefix)
-
-    scope = "job" if has_job else "aggregate"
+    modes = [
+        mode
+        for mode in ("job", "full", "aggregate")
+        if _has_env_with_prefix("BUILDKITE_PLUGIN_QDB_TEST_REPORT_" + mode.upper())
+    ]
+    if len(modes) > 1:
+        raise ValueError("configure exactly one of job, full, or aggregate")
+    if _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_FULL") is not None:
+        raise ValueError("full must be an object with local report options")
+    scope = modes[0] if modes else "aggregate"
+    input_prefix = "BUILDKITE_PLUGIN_QDB_TEST_REPORT_" + scope.upper()
 
     execution_name = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_EXECUTION_NAME")
 
@@ -173,28 +180,26 @@ def load_plugin_config() -> PluginConfig:
         "BUILDKITE_PLUGIN_QDB_TEST_REPORT_UPLOAD_PARALLEL", os.cpu_count() or 1
     )
 
-    manifest_input = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_MANIFEST_INPUT_PATH")
+    manifest_input = _get_env(input_prefix + "_MANIFEST_INPUT_PATH")
 
     variant: str | None
     junit_input_path: Path | None
     fail_on_test_failures: bool
     artifacts: list[ArtifactConfig]
 
-    if scope == "job":
-        variant = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT")
-        junit_input_path_raw = _get_env("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_JUNIT_INPUT_PATH")
+    if scope != "aggregate":
+        variant = _get_env(input_prefix + "_VARIANT")
+        junit_input_path_raw = _get_env(input_prefix + "_JUNIT_INPUT_PATH")
         junit_input_path = Path(junit_input_path_raw) if junit_input_path_raw else None
         if not variant:
-            raise ValueError("job requires variant")
+            raise ValueError(scope + " requires variant")
         if junit_input_path is None and not manifest_input:
-            raise ValueError("job requires junit_input_path or manifest_input_path")
+            raise ValueError(scope + " requires junit_input_path or manifest_input_path")
         if not job_id:
-            raise ValueError("job requires BUILDKITE_JOB_ID")
+            raise ValueError(scope + " requires BUILDKITE_JOB_ID")
 
-        fail_on_test_failures = _get_bool_env(
-            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_FAIL_ON_TEST_FAILURES", True
-        )
-        artifacts = _get_artifact_configs("BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_ARTIFACTS")
+        fail_on_test_failures = _get_bool_env(input_prefix + "_FAIL_ON_TEST_FAILURES", True)
+        artifacts = _get_artifact_configs(input_prefix + "_ARTIFACTS")
         platforms = (
             [PlatformConfig(name=variant, path=junit_input_path)] if junit_input_path else []
         )

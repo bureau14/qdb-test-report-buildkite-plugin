@@ -95,14 +95,15 @@ def test_run_report_generation(tmp_path):
     assert not hasattr(result, "log_path")
 
 
-def test_job_xml_source_links_use_uploaded_keys_and_artifacts_domain(tmp_path):
+@pytest.mark.parametrize("scope", ["job", "full"])
+def test_job_xml_source_links_use_uploaded_keys_and_artifacts_domain(tmp_path, scope):
     from object_store import ObjectAuth, StoreConfig
 
     xml = tmp_path / "nested" / "results.xml"
     xml.parent.mkdir()
     xml.write_text("<testsuites />", encoding="utf-8")
     config = PluginConfig(
-        scope="job",
+        scope=scope,
         title="Test Report",
         variant="linux",
         execution_name=None,
@@ -164,7 +165,8 @@ def test_aggregate_xml_source_links_preserve_discovered_keys_and_no_domain(tmp_p
     assert links[second.resolve()].url is None
 
 
-def test_upload_report_artifacts(monkeypatch, tmp_path):
+@pytest.mark.parametrize("scope", ["job", "full"])
+def test_upload_report_artifacts(monkeypatch, tmp_path, scope):
     # Setup paths
     html_path = tmp_path / "index.html"
     html_path.write_text("html")
@@ -186,7 +188,7 @@ def test_upload_report_artifacts(monkeypatch, tmp_path):
     ]
 
     config = PluginConfig(
-        scope="job",
+        scope=scope,
         title="Test Report",
         variant="linux",
         execution_name=None,
@@ -243,7 +245,7 @@ def test_upload_report_artifacts(monkeypatch, tmp_path):
 
     upload_report_artifacts(config, generation, xml_uploads, None)
 
-    assert len(uploaded) == 3
+    assert len(uploaded) == (4 if scope == "full" else 3)
     xml_upload = next(item for item in uploaded if item[1].endswith("/xml/junit.zip"))
     assert (
         xml_upload[1]
@@ -251,7 +253,16 @@ def test_upload_report_artifacts(monkeypatch, tmp_path):
     )
     assert xml_upload[3]["content_type"] == "application/zip"
     assert xml_upload[3]["content_disposition"] == "attachment"
-    assert uploaded[-1][1].endswith("/summary.json")
+    base = "prefix/project/refs/heads/main/reports/builds/1/"
+    report_prefix = base + ("full" if scope == "full" else "variants/linux/jobs/123")
+    assert uploaded[-1][1] == report_prefix + "/summary.json"
+    assert sum(item[1].endswith("/index.html") for item in uploaded) == 1
+    assert (
+        next(item[1] for item in uploaded if item[1].endswith("/index.html"))
+        == report_prefix + "/index.html"
+    )
+    if scope == "full":
+        assert uploaded[-2][1] == base + "variants/linux/jobs/123/summary.json"
     assert archive_contents == {"test.xml": b"xml", "nested/other.xml": b"other xml"}
 
     error = RuntimeError("XML upload failed")
@@ -267,7 +278,8 @@ def test_upload_report_artifacts(monkeypatch, tmp_path):
     assert uploaded == []  # A failed batch must not publish summary.json.
 
 
-def test_upload_extra_artifacts_returns_summary_metadata(monkeypatch, tmp_path):
+@pytest.mark.parametrize("scope", ["job", "full"])
+def test_upload_extra_artifacts_returns_summary_metadata(monkeypatch, tmp_path, scope):
     log_file = tmp_path / "test-logs-1.tar.gz"
     log_file.write_text("logs", encoding="utf-8")
     artifact = ArtifactConfig(name="Test logs", input_path=Path("test-logs-*.tar.gz"))
@@ -277,7 +289,7 @@ def test_upload_extra_artifacts_returns_summary_metadata(monkeypatch, tmp_path):
         relative_path="test-logs-1.tar.gz",
     )
     config = PluginConfig(
-        scope="job",
+        scope=scope,
         title="Test Report",
         variant="linux",
         execution_name=None,
@@ -1595,7 +1607,9 @@ def test_main_manifest_only_job_without_declared_reports(
         assert captured["status_counts"]["SUCCESSFUL"] == 1
 
 
-@pytest.mark.parametrize("mode", ["legacy-job", "manifest-job", "legacy-aggregate"])
+@pytest.mark.parametrize(
+    "mode", ["legacy-job", "manifest-job", "legacy-full", "manifest-full", "legacy-aggregate"]
+)
 @pytest.mark.parametrize("fail_on_test_failures", [False, True])
 def test_malformed_junit_exit_policy_with_real_report_generation(
     monkeypatch, tmp_path, mode, fail_on_test_failures
@@ -1611,7 +1625,7 @@ def test_malformed_junit_exit_policy_with_real_report_generation(
         "BUILDKITE_JOB_ID": "job",
         "BUILDKITE_BRANCH": "main",
     }
-    if mode.endswith("job"):
+    if not mode.endswith("aggregate"):
         environment.update(
             {
                 "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_VARIANT": "linux",
@@ -1620,10 +1634,17 @@ def test_malformed_junit_exit_policy_with_real_report_generation(
                 ),
             }
         )
-        key = "MANIFEST_INPUT_PATH" if mode == "manifest-job" else "JUNIT_INPUT_PATH"
+        key = "MANIFEST_INPUT_PATH" if mode.startswith("manifest-") else "JUNIT_INPUT_PATH"
         environment["BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_" + key] = (
-            "manifest.json" if mode == "manifest-job" else "broken.xml"
+            "manifest.json" if mode.startswith("manifest-") else "broken.xml"
         )
+    if mode.endswith("full"):
+        environment = {
+            key.replace(
+                "BUILDKITE_PLUGIN_QDB_TEST_REPORT_JOB_", "BUILDKITE_PLUGIN_QDB_TEST_REPORT_FULL_"
+            ): value
+            for key, value in environment.items()
+        }
     monkeypatch.setattr("os.environ", environment)
     (tmp_path / "broken.xml").write_text("<testsuite>", encoding="utf-8")
     (tmp_path / "manifest.json").write_text(
@@ -1661,8 +1682,8 @@ def test_malformed_junit_exit_policy_with_real_report_generation(
 
     monkeypatch.setattr("test_report_plugin.upload_report_artifacts", capture_report)
 
-    assert main() == (64 if mode.endswith("job") and fail_on_test_failures else 0)
-    if mode == "manifest-job":
+    assert main() == (64 if not mode.endswith("aggregate") and fail_on_test_failures else 0)
+    if mode.startswith("manifest-"):
         assert captured["status_counts"]["ERRORED"] == 1
         assert "Invalid JUnit report" in captured["failed_test_cases"][0]["reason"]
     else:
@@ -1695,3 +1716,93 @@ def test_run_report_generation_selects_scope_parse_workers(tmp_path, monkeypatch
     )
     run_report_generation(config, tmp_path / "output")
     assert captured["parse_workers"] == workers
+
+
+@pytest.mark.parametrize("mode", ["job", "full"])
+@pytest.mark.parametrize("status", ["passed", "failed", "skipped"])
+@pytest.mark.parametrize("timings", [False, True])
+def test_local_report_generates_once_with_correct_annotation_scope(
+    monkeypatch, tmp_path, mode, status, timings
+):
+    from object_store import PublishedObject
+
+    failed = status == "failed"
+
+    xml = tmp_path / "results.xml"
+    xml.write_text(
+        '<testsuite name="suite"><testcase name="case" time="'
+        + ("2" if timings else "0")
+        + '">'
+        + (
+            '<failure message="broken" />'
+            if failed
+            else "<skipped />"
+            if status == "skipped"
+            else ""
+        )
+        + "</testcase></testsuite>",
+        encoding="utf-8",
+    )
+    prefix = "BUILDKITE_PLUGIN_QDB_TEST_REPORT_" + mode.upper()
+    monkeypatch.setattr(
+        "os.environ",
+        {
+            "BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE": "Tests",
+            prefix + "_VARIANT": "linux",
+            prefix + "_JUNIT_INPUT_PATH": str(xml),
+            "BUILDKITE_PIPELINE_SLUG": "project",
+            "BUILDKITE_BUILD_ID": "build-1",
+            "BUILDKITE_JOB_ID": "job-1",
+            "BUILDKITE_BRANCH": "main",
+            "BUILDKITE_COMMAND_EXIT_STATUS": "1" if failed else "0",
+        },
+    )
+    generate = MagicMock(wraps=run_report_generation)
+    monkeypatch.setattr("test_report_plugin.run_report_generation", generate)
+    downloads = MagicMock(side_effect=AssertionError("local mode must not download XML"))
+    monkeypatch.setattr("test_report_plugin.collect_full_scope_xml", downloads)
+    uploads = []
+
+    def capture_upload(config, generation, xml_uploads, store_context=None):
+        uploads.append(
+            (config.scope, json.loads(generation.summary_path.read_text()), len(xml_uploads))
+        )
+        return {
+            "html": PublishedObject(
+                "bucket",
+                config.scope + "/index.html",
+                "https://reports.example.com/" + config.scope,
+                1,
+            )
+        }
+
+    monkeypatch.setattr("test_report_plugin.upload_report_artifacts", capture_upload)
+    annotate = MagicMock()
+    monkeypatch.setattr("test_report_plugin.create_buildkite_annotation", annotate)
+    assert main() == (64 if failed else 0)
+    assert generate.call_count == 1
+    downloads.assert_not_called()
+    assert len(uploads) == 1
+    assert uploads[0][0] == mode
+    assert uploads[0][2] == 1
+    assert annotate.call_count == (2 if timings else 1)
+    context = "test-report:full" if mode == "full" else "test-report:linux:job-1"
+    scope = "build" if mode == "full" else "job"
+    call = annotate.call_args_list[0]
+    expected_style = (
+        "error" if failed else "warning" if mode == "job" and status == "skipped" else "success"
+    )
+    assert call[0][1:3] == (context, expected_style)
+    assert ("This job report has 0 passing tests." in call[0][0]) == (
+        mode == "job" and status in ("failed", "skipped")
+    )
+    assert call[1]["scope"] == scope
+    if timings:
+        call = annotate.call_args_list[1]
+        assert call[0][1:3] == (context + ":report-timings", "info")
+        assert call[1]["scope"] == scope
+    if mode == "full":
+        assert uploads[0][1]["discovered_xml"] == {"variants": 1, "jobs": 1, "files": 1}
+        assert uploads[0][1]["job_artifacts"] == [
+            {"variant": "linux", "job_id": "job-1", "artifacts": []}
+        ]

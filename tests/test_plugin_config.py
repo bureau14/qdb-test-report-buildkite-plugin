@@ -278,3 +278,37 @@ def test_explicit_parse_workers_respect_platform_limit(monkeypatch, platform, re
         "plugin_config.os", SimpleNamespace(name=platform, cpu_count=lambda: 8, environ=os.environ)
     )
     assert load_plugin_config().aggregate_parse_workers == expected
+
+
+@pytest.mark.parametrize("mode", ["job", "full"])
+def test_local_report_mode_options(monkeypatch, mode):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    prefix = "BUILDKITE_PLUGIN_QDB_TEST_REPORT_" + mode.upper()
+    monkeypatch.setenv(prefix + "_VARIANT", "linux")
+    monkeypatch.setenv(prefix + "_MANIFEST_INPUT_PATH", "metadata/*.json")
+    monkeypatch.setenv(prefix + "_FAIL_ON_TEST_FAILURES", "false")
+    monkeypatch.setenv(prefix + "_ARTIFACTS_0_NAME", "Logs")
+    monkeypatch.setenv(prefix + "_ARTIFACTS_0_INPUT_PATH", "logs/*")
+    monkeypatch.setenv("BUILDKITE_JOB_ID", "job-1")
+    config = load_plugin_config()
+    assert config.scope == mode
+    assert config.variant == "linux"
+    assert config.manifest_input_path == Path("metadata/*.json")
+    assert config.fail_on_test_failures is False
+    assert config.artifacts == [ArtifactConfig("Logs", Path("logs/*"))]
+
+
+@pytest.mark.parametrize("other", ["JOB_VARIANT", "AGGREGATE_PARSE_WORKERS"])
+def test_full_mode_rejects_other_modes(monkeypatch, other):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_FULL_VARIANT", "linux")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_" + other, "1")
+    with pytest.raises(ValueError, match="exactly one"):
+        load_plugin_config()
+
+
+def test_full_rejects_boolean_option(monkeypatch):
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_TITLE", "Report")
+    monkeypatch.setenv("BUILDKITE_PLUGIN_QDB_TEST_REPORT_FULL", "true")
+    with pytest.raises(ValueError, match="full must be an object"):
+        load_plugin_config()

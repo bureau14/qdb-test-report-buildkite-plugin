@@ -163,7 +163,7 @@ def build_job_xml_source_links(
         project_id=config.project_id,
         git_ref=config.git_ref,
         build_id=config.build_id,
-        scope=config.scope,
+        scope="job",
         job_id=config.job_id,
         variant=config.variant,
     )
@@ -289,7 +289,7 @@ def upload_extra_artifacts(
         project_id=config.project_id,
         git_ref=config.git_ref,
         build_id=config.build_id,
-        scope=config.scope,
+        scope="job",
         job_id=config.job_id,
         variant=config.variant,
     )
@@ -376,7 +376,7 @@ def upload_report_artifacts(
     store_context: ObjectStoreContext | None = None,
 ) -> dict[str, PublishedObject]:
     """
-    Uploads report artifacts (HTML, summary, and job-scope XML) to the object store.
+    Uploads report artifacts (HTML, summary, and local-input XML) to the object store.
     """
     context = store_context or resolve_object_store_context()
     store_cfg = context.store_cfg
@@ -402,13 +402,26 @@ def upload_report_artifacts(
             content_disposition="inline",
         )
     ]
-    job_xml = xml_uploads if config.scope == "job" else []
+    job_xml = xml_uploads if config.scope != "aggregate" else []
+    xml_location = (
+        build_report_location(
+            destination_prefix=prefix,
+            project_id=config.project_id,
+            git_ref=config.git_ref,
+            build_id=config.build_id,
+            scope="job",
+            job_id=config.job_id,
+            variant=config.variant,
+        )
+        if config.scope == "full"
+        else location
+    )
     if job_xml:
         archive_path = generation.html_path.parent / "junit.zip"
         create_zip([(xml.local_path, xml.object_relative_path) for xml in job_xml], archive_path)
         requests.append(
             UploadRequest(
-                key=key_join(location.xml_prefix, "junit.zip"),
+                key=key_join(xml_location.xml_prefix, "junit.zip"),
                 local_path=archive_path,
                 content_type="application/zip",
                 content_disposition="attachment",
@@ -417,6 +430,17 @@ def upload_report_artifacts(
     published = upload_files(store_cfg, auth, bucket, requests, parallel=config.upload_parallel)
     # Publish the discovery manifest only after all HTML/XML uploads succeed.
     log(f"Uploading summary JSON to s3://{bucket}/{location.summary_key}")
+    if config.scope == "full":
+        # Keep the job publication marker for Test Health and XML discovery.
+        upload_file(
+            store_cfg,
+            auth,
+            bucket,
+            xml_location.summary_key,
+            generation.summary_path,
+            content_type="application/json",
+            content_disposition="inline",
+        )
     summary = upload_file(
         store_cfg,
         auth,
@@ -575,9 +599,11 @@ def main() -> int:
                 ]
             else:
                 if config.variant is None:
-                    raise ValueError("scope=job requires variant")
+                    raise ValueError("local report requires variant")
                 if config.junit_input_path is None and config.manifest_input_path is None:
-                    raise ValueError("scope=job requires junit_input_path or manifest_input_path")
+                    raise ValueError(
+                        "local report requires junit_input_path or manifest_input_path"
+                    )
                 with trace("job.inputs", category="input_collection"):
                     xml_uploads = []
                     if config.junit_input_path is not None:
@@ -658,8 +684,8 @@ def main() -> int:
                 config,
                 tmp_base,
                 source_artifacts_by_job_id=source_artifacts_by_job_id,
-                artifacts=report_artifacts if config.scope == "job" else [],
-                artifact_metadata=artifact_metadata if config.scope == "job" else None,
+                artifacts=report_artifacts if config.scope != "aggregate" else [],
+                artifact_metadata=artifact_metadata if config.scope != "aggregate" else None,
                 xml_source_links=xml_source_links,
                 junit_archive_errors=junit_archive_errors,
             )
@@ -671,8 +697,21 @@ def main() -> int:
                         job_artifacts=job_artifacts_metadata,
                     )
 
+                if config.scope == "full":
+                    add_summary_metadata(
+                        generation.summary_path,
+                        discovered_xml={"variants": 1, "jobs": 1, "files": len(xml_uploads)},
+                        job_artifacts=[
+                            {
+                                "variant": config.variant,
+                                "job_id": config.job_id,
+                                "artifacts": artifact_metadata,
+                            }
+                        ],
+                    )
+
                 summary = json.loads(generation.summary_path.read_text())
-                if config.scope == "job" and add_command_failure_warning(
+                if config.scope != "aggregate" and add_command_failure_warning(
                     summary, os.environ.get("BUILDKITE_COMMAND_EXIT_STATUS")
                 ):
                     generation.summary_path.write_text(json.dumps(summary, indent=2))
@@ -709,7 +748,7 @@ def main() -> int:
                         config.title,
                         summary,
                         html_url,
-                        scope=config.scope,
+                        scope="job" if config.scope == "job" else "build",
                     )
                     if config.scope == "job":
                         context = f"test-report:{config.variant}:{config.job_id}"
