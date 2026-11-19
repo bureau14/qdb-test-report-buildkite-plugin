@@ -6,34 +6,28 @@ PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_DIR="${PLUGIN_DIR}/.venv"
 TEST_REPORT_PY="${PLUGIN_DIR}/lib/test_report_plugin.py"
 
-_find_python3() {
-  if [[ -n "${QDB_CICD_AGENT_PYTHON3:-}" ]] && [[ -x "${QDB_CICD_AGENT_PYTHON3}" ]]; then
-    echo "${QDB_CICD_AGENT_PYTHON3}"
-    return
-  fi
+# Git Bash, the shell of the hooks on the Windows agents.
+on_windows() {
+  [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* || -n "${SYSTEMROOT:-}" ]]
+}
 
-  for cmd in python3 python; do
-    if command -v "$cmd" &>/dev/null \
-       && "$cmd" -c "import sys; sys.exit(0 if sys.version_info >= (3,) else 1)" 2>/dev/null; then
-      echo "$cmd"
-      return
-    fi
-  done
-
-  if [[ -n "${SYSTEMROOT:-}" ]]; then
-    for dir in /c/Python3.*-64 /c/Python3.*-32 /c/Python3*; do
-      if [[ -x "${dir}/python.exe" ]] \
-         && "${dir}/python.exe" -c "import sys; sys.exit(0 if sys.version_info >= (3,) else 1)" 2>/dev/null; then
-        echo "${dir}/python.exe"
-        return
-      fi
-    done
+# The Python the agent image names for Buildkite plugins, and no other:
+# QDB_CICD_AGENT_PLUGIN_PYTHON, one version on every agent. Nothing is
+# searched, so every job builds its venv with the same interpreter. The Windows
+# image names a Windows path (C:\Python3.13-64\python.exe), which cygpath turns
+# into the form Git Bash runs.
+plugin_python() {
+  local named="${QDB_CICD_AGENT_PLUGIN_PYTHON:-}"
+  if [[ -n "${named}" ]] && on_windows; then
+    cygpath -u "${named}"
+  else
+    printf '%s\n' "${named}"
   fi
 }
 
-PYTHON3_CMD="$(_find_python3 || true)"
+PYTHON3_CMD="$(plugin_python)"
 
-if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* || -n "${SYSTEMROOT:-}" ]]; then
+if on_windows; then
   VENV_BIN="${VENV_DIR}/Scripts"
 else
   VENV_BIN="${VENV_DIR}/bin"
